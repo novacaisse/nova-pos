@@ -45,27 +45,34 @@ const ICONS = {
   Settings,
 } as const;
 
-const NAV = {
+type NavItem = {
+  title: string;
+  url: string;
+  icon: keyof typeof ICONS;
+  badge?: string;
+};
+
+const NAV: Record<string, NavItem[]> = {
   operation: [
-    { title: "Point de vente", url: "/app/caisse", icon: "ScanBarcode" as const, badge: "F1" },
-    { title: "Ventes", url: "/app/ventes", icon: "Receipt" as const },
-    { title: "Clients", url: "/app/clients", icon: "Users" as const },
+    { title: "Point de vente", url: "/app/caisse", icon: "ScanBarcode", badge: "F1" },
+    { title: "Ventes", url: "/app/ventes", icon: "Receipt" },
+    { title: "Clients", url: "/app/clients", icon: "Users" },
   ],
   catalogue: [
-    { title: "Produits", url: "/app/produits", icon: "Package" as const },
-    { title: "Stock", url: "/app/stock", icon: "Warehouse" as const },
-    { title: "Fournisseurs", url: "/app/fournisseurs", icon: "Truck" as const },
-    { title: "Promotions", url: "/app/promotions", icon: "Tag" as const },
+    { title: "Produits", url: "/app/produits", icon: "Package" },
+    { title: "Stock", url: "/app/stock", icon: "Warehouse" },
+    { title: "Fournisseurs", url: "/app/fournisseurs", icon: "Truck" },
+    { title: "Promotions", url: "/app/promotions", icon: "Tag" },
   ],
   pilotage: [
-    { title: "Tableau de bord", url: "/app", icon: "LayoutDashboard" as const },
-    { title: "Rapports", url: "/app/rapports", icon: "BarChart3" as const },
-    { title: "Dépenses", url: "/app/depenses" as const, icon: "Wallet" as const },
+    { title: "Tableau de bord", url: "/app", icon: "LayoutDashboard" },
+    { title: "Rapports", url: "/app/rapports", icon: "BarChart3" },
+    { title: "Dépenses", url: "/app/depenses", icon: "Wallet" },
   ],
   admin: [
-    { title: "Équipe", url: "/app/equipe", icon: "UsersRound" as const },
-    { title: "Notifications", url: "/app/notifications", icon: "Bell" as const },
-    { title: "Paramètres", url: "/app/parametres", icon: "Settings" as const },
+    { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
+    { title: "Notifications", url: "/app/notifications", icon: "Bell" },
+    { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
   ],
 };
 
@@ -77,7 +84,7 @@ export function AppSidebar() {
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
 
-  const renderGroup = (label: string, items: typeof NAV.operation) => (
+  const renderGroup = (label: string, items: NavItem[]) => (
     <SidebarGroup>
       {!collapsed && <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50">{label}</SidebarGroupLabel>}
       <SidebarGroupContent>
@@ -91,7 +98,7 @@ export function AppSidebar() {
                   <Link to={item.url as never} className="flex items-center gap-3">
                     <Icon className="h-[18px] w-[18px] shrink-0" />
                     {!collapsed && <span className="truncate">{item.title}</span>}
-                    {!collapsed && "badge" in item && item.badge && (
+                    {!collapsed && item.badge && (
                       <span className="ml-auto rounded-md bg-sidebar-primary/20 px-1.5 py-0.5 text-[10px] font-mono text-sidebar-primary">
                         {item.badge}
                       </span>
