@@ -40,7 +40,8 @@ function InscriptionPage() {
       localStorage.setItem("nc_shop_phone", form.phone);
       localStorage.setItem("nc_shop_address", form.address || `${form.city}, ${form.country}`);
       if (logo) localStorage.setItem("nc_shop_logo", logo);
-      localStorage.setItem("nc_show_pwa_banner", "1");
+      localStorage.setItem("novacaisse.showPwaBanner", "1");
+      localStorage.removeItem("novacaisse.pwaBannerDismissed");
     }
     startTrial();
     navigate({ to: "/app" });
