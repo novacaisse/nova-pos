@@ -32,6 +32,7 @@ import { Route as AppDepensesRouteImport } from './routes/app.depenses'
 import { Route as AppClientsRouteImport } from './routes/app.clients'
 import { Route as AppCaisseRouteImport } from './routes/app.caisse'
 import { Route as AppAbonnementRouteImport } from './routes/app.abonnement'
+import { Route as AdminSupportRouteImport } from './routes/admin.support'
 import { Route as AdminParametresRouteImport } from './routes/admin.parametres'
 import { Route as AdminFacturationRouteImport } from './routes/admin.facturation'
 import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
@@ -152,6 +153,11 @@ const AppAbonnementRoute = AppAbonnementRouteImport.update({
   path: '/abonnement',
   getParentRoute: () => AppRoute,
 } as any)
+const AdminSupportRoute = AdminSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminParametresRoute = AdminParametresRouteImport.update({
   id: '/parametres',
   path: '/parametres',
@@ -185,6 +191,7 @@ export interface FileRoutesByFullPath {
   '/admin/boutiques': typeof AdminBoutiquesRoute
   '/admin/facturation': typeof AdminFacturationRoute
   '/admin/parametres': typeof AdminParametresRoute
+  '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
@@ -212,6 +219,7 @@ export interface FileRoutesByTo {
   '/admin/boutiques': typeof AdminBoutiquesRoute
   '/admin/facturation': typeof AdminFacturationRoute
   '/admin/parametres': typeof AdminParametresRoute
+  '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
@@ -242,6 +250,7 @@ export interface FileRoutesById {
   '/admin/boutiques': typeof AdminBoutiquesRoute
   '/admin/facturation': typeof AdminFacturationRoute
   '/admin/parametres': typeof AdminParametresRoute
+  '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
@@ -273,6 +282,7 @@ export interface FileRouteTypes {
     | '/admin/boutiques'
     | '/admin/facturation'
     | '/admin/parametres'
+    | '/admin/support'
     | '/app/abonnement'
     | '/app/caisse'
     | '/app/clients'
@@ -300,6 +310,7 @@ export interface FileRouteTypes {
     | '/admin/boutiques'
     | '/admin/facturation'
     | '/admin/parametres'
+    | '/admin/support'
     | '/app/abonnement'
     | '/app/caisse'
     | '/app/clients'
@@ -329,6 +340,7 @@ export interface FileRouteTypes {
     | '/admin/boutiques'
     | '/admin/facturation'
     | '/admin/parametres'
+    | '/admin/support'
     | '/app/abonnement'
     | '/app/caisse'
     | '/app/clients'
@@ -520,6 +532,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAbonnementRouteImport
       parentRoute: typeof AppRoute
     }
+    '/admin/support': {
+      id: '/admin/support'
+      path: '/support'
+      fullPath: '/admin/support'
+      preLoaderRoute: typeof AdminSupportRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/parametres': {
       id: '/admin/parametres'
       path: '/parametres'
@@ -556,6 +575,7 @@ interface AdminRouteChildren {
   AdminBoutiquesRoute: typeof AdminBoutiquesRoute
   AdminFacturationRoute: typeof AdminFacturationRoute
   AdminParametresRoute: typeof AdminParametresRoute
+  AdminSupportRoute: typeof AdminSupportRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
@@ -564,6 +584,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminBoutiquesRoute: AdminBoutiquesRoute,
   AdminFacturationRoute: AdminFacturationRoute,
   AdminParametresRoute: AdminParametresRoute,
+  AdminSupportRoute: AdminSupportRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
 
