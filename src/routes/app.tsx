@@ -1,11 +1,14 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { Bell, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ShopSelector } from "@/components/app/ShopSelector";
 import { AiBubble } from "@/components/app/AiBubble";
 import { ThemeToggle } from "@/components/app/ThemeToggle";
-import { CURRENT_USER } from "@/lib/mock/session";
+import { NotificationsBell } from "@/components/app/NotificationsBell";
+import { UserMenu } from "@/components/app/UserMenu";
+import { BottomNav } from "@/components/app/BottomNav";
+import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 
 export const Route = createFileRoute("/app")({
   component: AppLayout,
@@ -19,7 +22,8 @@ function AppLayout() {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-background/80 px-3 backdrop-blur-md sm:px-5">
-            <SidebarTrigger className="h-10 w-10 rounded-xl" />
+            {/* Trigger visible desktop uniquement ; sur mobile la nav se fait via BottomNav */}
+            <SidebarTrigger className="hidden h-10 w-10 rounded-xl md:inline-flex" />
 
             <div className="hidden sm:block">
               <ShopSelector />
@@ -35,33 +39,19 @@ function AppLayout() {
 
             <div className="ml-auto flex items-center gap-2">
               <ThemeToggle />
-              <button
-                aria-label="Notifications"
-                className="relative grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-foreground hover:bg-muted"
-              >
-                <Bell className="h-4 w-4" />
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-accent" />
-              </button>
-              <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card py-1 pl-1 pr-3">
-                <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-primary to-primary-glow text-xs font-bold text-primary-foreground">
-                  {CURRENT_USER.avatar_initials}
-                </div>
-                <div className="hidden leading-tight sm:block">
-                  <div className="text-xs font-semibold">{CURRENT_USER.full_name}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {CURRENT_USER.role}
-                  </div>
-                </div>
-              </div>
+              <NotificationsBell />
+              <UserMenu />
             </div>
           </header>
 
-          <main className="flex-1 min-w-0">
+          <main className="flex-1 min-w-0 pb-16 md:pb-0">
             <Outlet />
           </main>
         </div>
 
         <AiBubble />
+        <BottomNav />
+        <PwaInstallBanner />
       </div>
     </SidebarProvider>
   );
