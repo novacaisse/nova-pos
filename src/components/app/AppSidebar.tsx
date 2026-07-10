@@ -74,7 +74,9 @@ const NAV: Record<string, NavItem[]> = {
   ],
   admin: [
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
+    { title: "Abonnement", url: "/app/abonnement", icon: "CreditCard" },
     { title: "Notifications", url: "/app/notifications", icon: "Bell" },
+    { title: "Profil", url: "/app/profil", icon: "UserCircle" },
     { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
   ],
 };
