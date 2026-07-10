@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package } from "lucide-react";
+import { Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package, Truck, FileSpreadsheet, FileText as FileIcon } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { SALES } from "@/lib/mock/sales";
 import { formatXOF } from "@/lib/mock/catalog";
@@ -11,63 +11,120 @@ export const Route = createFileRoute("/app/rapports")({
   component: RapportsPage,
 });
 
+const PERIODS = [
+  { id: "today", label: "Aujourd'hui" },
+  { id: "yesterday", label: "Hier" },
+  { id: "week", label: "Cette semaine" },
+  { id: "month", label: "Ce mois" },
+  { id: "last_month", label: "Mois dernier" },
+  { id: "year", label: "Cette année" },
+  { id: "last_year", label: "Année dernière" },
+  { id: "custom", label: "Personnalisé" },
+] as const;
+
 const REPORTS = [
-  { id: "period", label: "Par période", icon: BarChart3 },
-  { id: "product", label: "Par produit", icon: Package },
-  { id: "category", label: "Par catégorie", icon: Package },
-  { id: "seller", label: "Par vendeur", icon: Users },
+  { id: "sales", label: "Ventes", icon: BarChart3 },
+  { id: "products", label: "Meilleurs produits", icon: Package },
+  { id: "customers", label: "Meilleurs clients", icon: Users },
+  { id: "suppliers", label: "Fournisseurs", icon: Truck },
   { id: "margin", label: "Marge réelle", icon: TrendingUp },
   { id: "peak", label: "Heures & jours de pointe", icon: Clock },
-];
+] as const;
 
 const MOCK_AI = [
-  "Ta meilleure journée cette semaine est jeudi (+34% vs moyenne). Les boissons représentent 42% du CA.",
-  "Le produit 'Coca-Cola 33cl' est ton best-seller. Considère une commande fournisseur de 200 unités avant vendredi.",
-  "Ta marge globale est de 31,5% ce mois-ci, en baisse de 2 points vs mois dernier. La catégorie 'Épicerie' tire la marge vers le bas.",
+  "Ta meilleure journée cette semaine est jeudi (+34% vs moyenne).",
+  "Le produit 'Coca-Cola 33cl' est ton best-seller. Commande 200 unités avant vendredi.",
+  "Marge globale : 31,5% ce mois-ci, en baisse de 2 points. La catégorie Épicerie tire vers le bas.",
 ];
 
+function downloadFile(name: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
 function RapportsPage() {
-  const [active, setActive] = useState("period");
+  const [period, setPeriod] = useState<(typeof PERIODS)[number]["id"]>("month");
+  const [from, setFrom] = useState(""); const [to, setTo] = useState("");
+  const [report, setReport] = useState<(typeof REPORTS)[number]["id"]>("sales");
   const [aiInput, setAiInput] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "ai"; text: string }[]>([
-    { role: "ai", text: "Bonjour ! Je suis Nova, votre analyste. Posez-moi une question sur vos ventes, votre stock ou vos clients." },
+    { role: "ai", text: "Bonjour ! Je suis Nova. Posez-moi une question sur vos ventes, votre stock ou vos clients." },
   ]);
 
   const ca = SALES.reduce((s, x) => s + x.total, 0);
-  const peakHours = [
-    { h: "8h", v: 12 }, { h: "9h", v: 20 }, { h: "10h", v: 35 }, { h: "11h", v: 48 },
-    { h: "12h", v: 62 }, { h: "13h", v: 78 }, { h: "14h", v: 55 }, { h: "15h", v: 40 },
-    { h: "16h", v: 45 }, { h: "17h", v: 68 }, { h: "18h", v: 82 }, { h: "19h", v: 74 }, { h: "20h", v: 45 },
-  ];
+  const peakHours = [12, 20, 35, 48, 62, 78, 55, 40, 45, 68, 82, 74, 45].map((v, i) => ({ h: `${8 + i}h`, v }));
   const maxPeak = Math.max(...peakHours.map((p) => p.v));
+  const periodLabel = PERIODS.find((p) => p.id === period)?.label ?? "";
+
+  const exportCsv = () => {
+    const rows = [
+      ["Rapport", REPORTS.find((r) => r.id === report)?.label, periodLabel].join(","),
+      "",
+      ["Libellé", "Quantité", "CA", "Marge %"].join(","),
+      ...Array.from({ length: 8 }).map((_, i) => [`Ligne ${i + 1}`, 15 + i * 7, 20000 + i * 8500, 28 + (i % 5)].join(",")),
+    ].join("\n");
+    downloadFile(`rapport-${report}-${period}.csv`, rows, "text/csv");
+  };
+
+  const exportPdf = () => {
+    const html = `<html><head><title>Rapport ${report}</title>
+      <style>body{font-family:sans-serif;padding:24px}h1{color:#0891b2}table{width:100%;border-collapse:collapse;margin-top:16px}
+      th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}th{background:#f5f5f5}</style></head>
+      <body><h1>NovaCaisse — ${REPORTS.find((r) => r.id === report)?.label}</h1>
+      <p>Période : <b>${periodLabel}</b></p>
+      <table><thead><tr><th>Libellé</th><th>Qté</th><th>CA</th><th>Marge</th></tr></thead>
+      <tbody>${Array.from({ length: 8 }).map((_, i) => `<tr><td>Ligne ${i + 1}</td><td>${15 + i * 7}</td><td>${formatXOF(20000 + i * 8500)}</td><td>${28 + (i % 5)}%</td></tr>`).join("")}</tbody></table>
+      <p style="margin-top:24px;color:#666;font-size:12px">Généré le ${new Date().toLocaleString("fr-FR")}</p></body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) return;
+    w.document.write(html); w.document.close();
+    setTimeout(() => w.print(), 300);
+  };
 
   const send = () => {
     if (!aiInput.trim()) return;
-    const q = aiInput;
+    const q = aiInput; setAiInput("");
     setMessages((m) => [...m, { role: "user", text: q }]);
-    setAiInput("");
-    setTimeout(() => {
-      const reply = MOCK_AI[Math.floor(Math.random() * MOCK_AI.length)];
-      setMessages((m) => [...m, { role: "ai", text: reply }]);
-    }, 700);
+    setTimeout(() => setMessages((m) => [...m, { role: "ai", text: MOCK_AI[Math.floor(Math.random() * MOCK_AI.length)] }]), 700);
   };
 
   return (
     <div>
-      <PageHeader
-        title="Rapports avancés"
-        subtitle="Analyses détaillées et assistant IA"
+      <PageHeader title="Rapports avancés" subtitle="Analyses détaillées et assistant IA"
         actions={
-          <button className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">
-            <Download className="h-4 w-4" /> Exporter PDF
-          </button>
+          <>
+            <button onClick={exportPdf} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><FileIcon className="h-4 w-4" /> PDF</button>
+            <button onClick={exportCsv} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="h-4 w-4" /> Excel</button>
+            <button onClick={exportCsv} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Download className="h-4 w-4" /> Exporter</button>
+          </>
         }
       />
 
       <div className="grid gap-6 p-5 sm:p-8 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
+          <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
+            {PERIODS.map((p) => (
+              <button key={p.id} onClick={() => setPeriod(p.id)}
+                className={cn("rounded-lg px-3 py-1.5 text-xs font-semibold", period === p.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {period === "custom" && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3 text-sm">
+              <span className="text-muted-foreground">Du</span>
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 rounded-lg border border-border bg-background px-2 text-sm" />
+              <span className="text-muted-foreground">au</span>
+              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 rounded-lg border border-border bg-background px-2 text-sm" />
+            </div>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-3">
-            <StatCard label="CA du mois" value={formatXOF(ca)} accent="primary" trend={{ value: "+12%", positive: true }} />
+            <StatCard label={`CA · ${periodLabel}`} value={formatXOF(ca)} accent="primary" trend={{ value: "+12%", positive: true }} />
             <StatCard label="Marge réelle" value="31,5%" accent="success" trend={{ value: "-2 pts", positive: false }} />
             <StatCard label="Ticket moyen" value={formatXOF(Math.round(ca / SALES.length))} accent="accent" trend={{ value: "+3%", positive: true }} />
           </div>
@@ -76,9 +133,8 @@ function RapportsPage() {
             {REPORTS.map((r) => {
               const Icon = r.icon;
               return (
-                <button key={r.id} onClick={() => setActive(r.id)}
-                  className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium",
-                    active === r.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+                <button key={r.id} onClick={() => setReport(r.id)}
+                  className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium", report === r.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
                   <Icon className="h-3.5 w-3.5" /> {r.label}
                 </button>
               );
@@ -86,10 +142,12 @@ function RapportsPage() {
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {REPORTS.find((r) => r.id === active)?.label}
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {REPORTS.find((r) => r.id === report)?.label} · {periodLabel}
+              </div>
             </div>
-            {active === "peak" ? (
+            {report === "peak" ? (
               <div className="flex h-64 items-end gap-2">
                 {peakHours.map((p) => (
                   <div key={p.h} className="flex flex-1 flex-col items-center gap-1">
@@ -104,16 +162,14 @@ function RapportsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40">
                     <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <th className="px-3 py-2">Libellé</th>
-                      <th className="px-3 py-2 text-right">Qté</th>
-                      <th className="px-3 py-2 text-right">CA</th>
-                      <th className="px-3 py-2 text-right">Marge</th>
+                      <th className="px-3 py-2">Libellé</th><th className="px-3 py-2 text-right">Qté</th>
+                      <th className="px-3 py-2 text-right">CA</th><th className="px-3 py-2 text-right">Marge</th>
                     </tr>
                   </thead>
                   <tbody>
                     {Array.from({ length: 8 }).map((_, i) => (
                       <tr key={i} className="border-t border-border/60">
-                        <td className="px-3 py-2 font-medium">Ligne {i + 1}</td>
+                        <td className="px-3 py-2 font-medium">{report === "customers" ? `Client ${i + 1}` : report === "suppliers" ? `Fournisseur ${i + 1}` : `Ligne ${i + 1}`}</td>
                         <td className="tabular px-3 py-2 text-right">{15 + i * 7}</td>
                         <td className="tabular px-3 py-2 text-right font-semibold">{formatXOF(20000 + i * 8500)}</td>
                         <td className="tabular px-3 py-2 text-right text-success">{28 + (i % 5)}%</td>
@@ -148,17 +204,13 @@ function RapportsPage() {
             <div className="border-t border-border p-2">
               <div className="mb-2 flex flex-wrap gap-1">
                 {["CA de la semaine", "Top vendeur", "Prévoir stock"].map((s) => (
-                  <button key={s} onClick={() => setAiInput(s)} className="rounded-full border border-border px-2 py-1 text-[10px] hover:border-primary hover:text-primary">
-                    {s}
-                  </button>
+                  <button key={s} onClick={() => setAiInput(s)} className="rounded-full border border-border px-2 py-1 text-[10px] hover:border-primary hover:text-primary">{s}</button>
                 ))}
               </div>
               <form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex gap-2">
                 <input value={aiInput} onChange={(e) => setAiInput(e.target.value)} placeholder="Posez votre question…"
                   className="min-w-0 flex-1 rounded-xl bg-muted px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30" />
-                <button type="submit" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground hover:opacity-90">
-                  <Send className="h-4 w-4" />
-                </button>
+                <button type="submit" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground hover:opacity-90"><Send className="h-4 w-4" /></button>
               </form>
             </div>
           </div>
