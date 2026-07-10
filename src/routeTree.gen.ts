@@ -12,7 +12,20 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppVentesRouteImport } from './routes/app.ventes'
+import { Route as AppStockRouteImport } from './routes/app.stock'
+import { Route as AppRapportsRouteImport } from './routes/app.rapports'
+import { Route as AppPromotionsRouteImport } from './routes/app.promotions'
+import { Route as AppProfilRouteImport } from './routes/app.profil'
+import { Route as AppProduitsRouteImport } from './routes/app.produits'
+import { Route as AppParametresRouteImport } from './routes/app.parametres'
+import { Route as AppNotificationsRouteImport } from './routes/app.notifications'
+import { Route as AppFournisseursRouteImport } from './routes/app.fournisseurs'
+import { Route as AppEquipeRouteImport } from './routes/app.equipe'
+import { Route as AppDepensesRouteImport } from './routes/app.depenses'
+import { Route as AppClientsRouteImport } from './routes/app.clients'
 import { Route as AppCaisseRouteImport } from './routes/app.caisse'
+import { Route as AppAbonnementRouteImport } from './routes/app.abonnement'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -29,36 +42,191 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppVentesRoute = AppVentesRouteImport.update({
+  id: '/ventes',
+  path: '/ventes',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppStockRoute = AppStockRouteImport.update({
+  id: '/stock',
+  path: '/stock',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRapportsRoute = AppRapportsRouteImport.update({
+  id: '/rapports',
+  path: '/rapports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPromotionsRoute = AppPromotionsRouteImport.update({
+  id: '/promotions',
+  path: '/promotions',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfilRoute = AppProfilRouteImport.update({
+  id: '/profil',
+  path: '/profil',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProduitsRoute = AppProduitsRouteImport.update({
+  id: '/produits',
+  path: '/produits',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppParametresRoute = AppParametresRouteImport.update({
+  id: '/parametres',
+  path: '/parametres',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppNotificationsRoute = AppNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFournisseursRoute = AppFournisseursRouteImport.update({
+  id: '/fournisseurs',
+  path: '/fournisseurs',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppEquipeRoute = AppEquipeRouteImport.update({
+  id: '/equipe',
+  path: '/equipe',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDepensesRoute = AppDepensesRouteImport.update({
+  id: '/depenses',
+  path: '/depenses',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppClientsRoute = AppClientsRouteImport.update({
+  id: '/clients',
+  path: '/clients',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppCaisseRoute = AppCaisseRouteImport.update({
   id: '/caisse',
   path: '/caisse',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAbonnementRoute = AppAbonnementRouteImport.update({
+  id: '/abonnement',
+  path: '/abonnement',
   getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
+  '/app/clients': typeof AppClientsRoute
+  '/app/depenses': typeof AppDepensesRoute
+  '/app/equipe': typeof AppEquipeRoute
+  '/app/fournisseurs': typeof AppFournisseursRoute
+  '/app/notifications': typeof AppNotificationsRoute
+  '/app/parametres': typeof AppParametresRoute
+  '/app/produits': typeof AppProduitsRoute
+  '/app/profil': typeof AppProfilRoute
+  '/app/promotions': typeof AppPromotionsRoute
+  '/app/rapports': typeof AppRapportsRoute
+  '/app/stock': typeof AppStockRoute
+  '/app/ventes': typeof AppVentesRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
+  '/app/clients': typeof AppClientsRoute
+  '/app/depenses': typeof AppDepensesRoute
+  '/app/equipe': typeof AppEquipeRoute
+  '/app/fournisseurs': typeof AppFournisseursRoute
+  '/app/notifications': typeof AppNotificationsRoute
+  '/app/parametres': typeof AppParametresRoute
+  '/app/produits': typeof AppProduitsRoute
+  '/app/profil': typeof AppProfilRoute
+  '/app/promotions': typeof AppPromotionsRoute
+  '/app/rapports': typeof AppRapportsRoute
+  '/app/stock': typeof AppStockRoute
+  '/app/ventes': typeof AppVentesRoute
   '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
+  '/app/clients': typeof AppClientsRoute
+  '/app/depenses': typeof AppDepensesRoute
+  '/app/equipe': typeof AppEquipeRoute
+  '/app/fournisseurs': typeof AppFournisseursRoute
+  '/app/notifications': typeof AppNotificationsRoute
+  '/app/parametres': typeof AppParametresRoute
+  '/app/produits': typeof AppProduitsRoute
+  '/app/profil': typeof AppProfilRoute
+  '/app/promotions': typeof AppPromotionsRoute
+  '/app/rapports': typeof AppRapportsRoute
+  '/app/stock': typeof AppStockRoute
+  '/app/ventes': typeof AppVentesRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/app' | '/app/caisse' | '/app/'
+  fullPaths:
+    | '/'
+    | '/app'
+    | '/app/abonnement'
+    | '/app/caisse'
+    | '/app/clients'
+    | '/app/depenses'
+    | '/app/equipe'
+    | '/app/fournisseurs'
+    | '/app/notifications'
+    | '/app/parametres'
+    | '/app/produits'
+    | '/app/profil'
+    | '/app/promotions'
+    | '/app/rapports'
+    | '/app/stock'
+    | '/app/ventes'
+    | '/app/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/app/caisse' | '/app'
-  id: '__root__' | '/' | '/app' | '/app/caisse' | '/app/'
+  to:
+    | '/'
+    | '/app/abonnement'
+    | '/app/caisse'
+    | '/app/clients'
+    | '/app/depenses'
+    | '/app/equipe'
+    | '/app/fournisseurs'
+    | '/app/notifications'
+    | '/app/parametres'
+    | '/app/produits'
+    | '/app/profil'
+    | '/app/promotions'
+    | '/app/rapports'
+    | '/app/stock'
+    | '/app/ventes'
+    | '/app'
+  id:
+    | '__root__'
+    | '/'
+    | '/app'
+    | '/app/abonnement'
+    | '/app/caisse'
+    | '/app/clients'
+    | '/app/depenses'
+    | '/app/equipe'
+    | '/app/fournisseurs'
+    | '/app/notifications'
+    | '/app/parametres'
+    | '/app/produits'
+    | '/app/profil'
+    | '/app/promotions'
+    | '/app/rapports'
+    | '/app/stock'
+    | '/app/ventes'
+    | '/app/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -89,6 +257,90 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/ventes': {
+      id: '/app/ventes'
+      path: '/ventes'
+      fullPath: '/app/ventes'
+      preLoaderRoute: typeof AppVentesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/stock': {
+      id: '/app/stock'
+      path: '/stock'
+      fullPath: '/app/stock'
+      preLoaderRoute: typeof AppStockRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/rapports': {
+      id: '/app/rapports'
+      path: '/rapports'
+      fullPath: '/app/rapports'
+      preLoaderRoute: typeof AppRapportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/promotions': {
+      id: '/app/promotions'
+      path: '/promotions'
+      fullPath: '/app/promotions'
+      preLoaderRoute: typeof AppPromotionsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/profil': {
+      id: '/app/profil'
+      path: '/profil'
+      fullPath: '/app/profil'
+      preLoaderRoute: typeof AppProfilRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/produits': {
+      id: '/app/produits'
+      path: '/produits'
+      fullPath: '/app/produits'
+      preLoaderRoute: typeof AppProduitsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/parametres': {
+      id: '/app/parametres'
+      path: '/parametres'
+      fullPath: '/app/parametres'
+      preLoaderRoute: typeof AppParametresRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/notifications': {
+      id: '/app/notifications'
+      path: '/notifications'
+      fullPath: '/app/notifications'
+      preLoaderRoute: typeof AppNotificationsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/fournisseurs': {
+      id: '/app/fournisseurs'
+      path: '/fournisseurs'
+      fullPath: '/app/fournisseurs'
+      preLoaderRoute: typeof AppFournisseursRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/equipe': {
+      id: '/app/equipe'
+      path: '/equipe'
+      fullPath: '/app/equipe'
+      preLoaderRoute: typeof AppEquipeRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/depenses': {
+      id: '/app/depenses'
+      path: '/depenses'
+      fullPath: '/app/depenses'
+      preLoaderRoute: typeof AppDepensesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/clients': {
+      id: '/app/clients'
+      path: '/clients'
+      fullPath: '/app/clients'
+      preLoaderRoute: typeof AppClientsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/caisse': {
       id: '/app/caisse'
       path: '/caisse'
@@ -96,16 +348,49 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCaisseRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/abonnement': {
+      id: '/app/abonnement'
+      path: '/abonnement'
+      fullPath: '/app/abonnement'
+      preLoaderRoute: typeof AppAbonnementRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
+  AppAbonnementRoute: typeof AppAbonnementRoute
   AppCaisseRoute: typeof AppCaisseRoute
+  AppClientsRoute: typeof AppClientsRoute
+  AppDepensesRoute: typeof AppDepensesRoute
+  AppEquipeRoute: typeof AppEquipeRoute
+  AppFournisseursRoute: typeof AppFournisseursRoute
+  AppNotificationsRoute: typeof AppNotificationsRoute
+  AppParametresRoute: typeof AppParametresRoute
+  AppProduitsRoute: typeof AppProduitsRoute
+  AppProfilRoute: typeof AppProfilRoute
+  AppPromotionsRoute: typeof AppPromotionsRoute
+  AppRapportsRoute: typeof AppRapportsRoute
+  AppStockRoute: typeof AppStockRoute
+  AppVentesRoute: typeof AppVentesRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAbonnementRoute: AppAbonnementRoute,
   AppCaisseRoute: AppCaisseRoute,
+  AppClientsRoute: AppClientsRoute,
+  AppDepensesRoute: AppDepensesRoute,
+  AppEquipeRoute: AppEquipeRoute,
+  AppFournisseursRoute: AppFournisseursRoute,
+  AppNotificationsRoute: AppNotificationsRoute,
+  AppParametresRoute: AppParametresRoute,
+  AppProduitsRoute: AppProduitsRoute,
+  AppProfilRoute: AppProfilRoute,
+  AppPromotionsRoute: AppPromotionsRoute,
+  AppRapportsRoute: AppRapportsRoute,
+  AppStockRoute: AppStockRoute,
+  AppVentesRoute: AppVentesRoute,
   AppIndexRoute: AppIndexRoute,
 }
 

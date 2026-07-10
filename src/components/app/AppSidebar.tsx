@@ -15,6 +15,7 @@ import {
   Settings,
   Zap,
 } from "lucide-react";
+import { CreditCard, UserCircle } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -43,6 +44,8 @@ const ICONS = {
   Tag,
   Bell,
   Settings,
+  CreditCard,
+  UserCircle,
 } as const;
 
 type NavItem = {
@@ -71,7 +74,9 @@ const NAV: Record<string, NavItem[]> = {
   ],
   admin: [
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
+    { title: "Abonnement", url: "/app/abonnement", icon: "CreditCard" },
     { title: "Notifications", url: "/app/notifications", icon: "Bell" },
+    { title: "Profil", url: "/app/profil", icon: "UserCircle" },
     { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
   ],
 };
