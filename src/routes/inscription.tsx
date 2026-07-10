@@ -1,14 +1,17 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Zap, ArrowRight, Image as ImageIcon, Sparkles } from "lucide-react";
+import { Zap, ArrowRight, Image as ImageIcon, Sparkles, AlertCircle, Loader2 } from "lucide-react";
 import { startTrial } from "@/lib/trial";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth/AuthProvider";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/inscription")({
   head: () => ({ meta: [{ title: "Créer un compte — NovaCaisse" }] }),
   component: InscriptionPage,
 });
+
 
 const SECTORS = ["Épicerie", "Superette", "Restaurant", "Boulangerie", "Mode", "Pharmacie", "Quincaillerie", "Beauté", "Autre"];
 const COUNTRIES = ["Bénin", "Burkina Faso", "Côte d'Ivoire", "Mali", "Sénégal", "Togo", "Niger", "Guinée"];
