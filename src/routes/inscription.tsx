@@ -149,13 +149,20 @@ function InscriptionPage() {
             <Field label="Mot de passe *" type="password" value={form.password} onChange={set("password")} />
           </div>
 
-          <button onClick={submit} disabled={!valid}
+          {error && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+          <button onClick={submit} disabled={!valid || loading}
             className={cn(
               "mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl font-display text-sm font-bold shadow-elegant transition-opacity",
-              valid ? "bg-gradient-to-r from-primary to-primary-glow text-primary-foreground hover:opacity-90" : "cursor-not-allowed bg-muted text-muted-foreground",
+              valid && !loading ? "bg-gradient-to-r from-primary to-primary-glow text-primary-foreground hover:opacity-90" : "cursor-not-allowed bg-muted text-muted-foreground",
             )}>
-            Démarrer mon essai gratuit <ArrowRight className="h-4 w-4" />
+            {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Création…</> : <>Démarrer mon essai gratuit <ArrowRight className="h-4 w-4" /></>}
           </button>
+
 
           <div className="mt-4 text-center text-xs text-muted-foreground">
             Déjà un compte ? <Link to="/connexion" className="font-semibold text-primary hover:underline">Se connecter</Link>
