@@ -28,6 +28,7 @@ import { Route as AppParametresRouteImport } from './routes/app.parametres'
 import { Route as AppNotificationsRouteImport } from './routes/app.notifications'
 import { Route as AppFournisseursRouteImport } from './routes/app.fournisseurs'
 import { Route as AppEquipeRouteImport } from './routes/app.equipe'
+import { Route as AppDevisRouteImport } from './routes/app.devis'
 import { Route as AppDepensesRouteImport } from './routes/app.depenses'
 import { Route as AppClientsRouteImport } from './routes/app.clients'
 import { Route as AppCaisseRouteImport } from './routes/app.caisse'
@@ -133,6 +134,11 @@ const AppEquipeRoute = AppEquipeRouteImport.update({
   path: '/equipe',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDevisRoute = AppDevisRouteImport.update({
+  id: '/devis',
+  path: '/devis',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDepensesRoute = AppDepensesRouteImport.update({
   id: '/depenses',
   path: '/depenses',
@@ -196,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
   '/app/depenses': typeof AppDepensesRoute
+  '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
@@ -224,6 +231,7 @@ export interface FileRoutesByTo {
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
   '/app/depenses': typeof AppDepensesRoute
+  '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
@@ -255,6 +263,7 @@ export interface FileRoutesById {
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
   '/app/depenses': typeof AppDepensesRoute
+  '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
@@ -287,6 +296,7 @@ export interface FileRouteTypes {
     | '/app/caisse'
     | '/app/clients'
     | '/app/depenses'
+    | '/app/devis'
     | '/app/equipe'
     | '/app/fournisseurs'
     | '/app/notifications'
@@ -315,6 +325,7 @@ export interface FileRouteTypes {
     | '/app/caisse'
     | '/app/clients'
     | '/app/depenses'
+    | '/app/devis'
     | '/app/equipe'
     | '/app/fournisseurs'
     | '/app/notifications'
@@ -345,6 +356,7 @@ export interface FileRouteTypes {
     | '/app/caisse'
     | '/app/clients'
     | '/app/depenses'
+    | '/app/devis'
     | '/app/equipe'
     | '/app/fournisseurs'
     | '/app/notifications'
@@ -504,6 +516,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppEquipeRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/devis': {
+      id: '/app/devis'
+      path: '/devis'
+      fullPath: '/app/devis'
+      preLoaderRoute: typeof AppDevisRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/depenses': {
       id: '/app/depenses'
       path: '/depenses'
@@ -595,6 +614,7 @@ interface AppRouteChildren {
   AppCaisseRoute: typeof AppCaisseRoute
   AppClientsRoute: typeof AppClientsRoute
   AppDepensesRoute: typeof AppDepensesRoute
+  AppDevisRoute: typeof AppDevisRoute
   AppEquipeRoute: typeof AppEquipeRoute
   AppFournisseursRoute: typeof AppFournisseursRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
@@ -613,6 +633,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCaisseRoute: AppCaisseRoute,
   AppClientsRoute: AppClientsRoute,
   AppDepensesRoute: AppDepensesRoute,
+  AppDevisRoute: AppDevisRoute,
   AppEquipeRoute: AppEquipeRoute,
   AppFournisseursRoute: AppFournisseursRoute,
   AppNotificationsRoute: AppNotificationsRoute,
