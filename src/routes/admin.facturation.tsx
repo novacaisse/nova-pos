@@ -29,7 +29,7 @@ function AdminFacturation() {
       <div className="space-y-4 p-5 sm:p-8">
         <div className="grid gap-3 sm:grid-cols-4">
           <StatCard label="Revenu total 12 mois" value={formatXOF(totalRevenue)} icon={<Wallet className="h-5 w-5" />} accent="primary" />
-          <StatCard label="Revenu du mois" value={formatXOF(lastMonth)} accent="success" delta={`${growth}%`} />
+          <StatCard label="Revenu du mois" value={formatXOF(lastMonth)} accent="success" trend={{ value: `${growth}%`, positive: Number(growth) >= 0 }} />
           <StatCard label="Projection mois +1" value={formatXOF(projection)} icon={<TrendingUp className="h-5 w-5" />} accent="accent" />
           <StatCard label="MRR total" value={formatXOF(totalMRR)} icon={<Sparkles className="h-5 w-5" />} accent="primary" />
         </div>
