@@ -15,6 +15,7 @@ import {
   Settings,
   Zap,
 } from "lucide-react";
+import { CreditCard, UserCircle } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
