@@ -18,7 +18,10 @@ const COUNTRIES = ["Bénin", "Burkina Faso", "Côte d'Ivoire", "Mali", "Sénéga
 
 function InscriptionPage() {
   const navigate = useNavigate();
+  const { signUp } = useAuth();
   const [logo, setLogo] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     shop: "", sector: SECTORS[0], country: COUNTRIES[0], city: "",
     phone: "", address: "", name: "", ownerPhone: "", email: "", password: "",
@@ -34,10 +37,50 @@ function InscriptionPage() {
     r.readAsDataURL(file);
   };
 
-  const valid = form.shop && form.city && form.phone && form.name && form.email && form.password;
+  const valid = form.shop && form.city && form.phone && form.name && form.email && form.password.length >= 6;
 
-  const submit = () => {
-    if (!valid) return;
+  const slugify = (s: string) =>
+    s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "boutique";
+
+  const submit = async () => {
+    if (!valid || loading) return;
+    setError(null);
+    setLoading(true);
+
+    // 1. Créer le compte auth
+    const { error: signErr } = await signUp(form.email.trim(), form.password, form.name);
+    if (signErr) { setError(signErr); setLoading(false); return; }
+
+    // 2. Attendre une session (sinon les policies RLS refusent l'insert)
+    const { data: sessData } = await supabase.auth.getSession();
+    if (!sessData.session) {
+      setError("Compte créé. Vérifiez votre email pour confirmer, puis connectez-vous.");
+      setLoading(false);
+      setTimeout(() => navigate({ to: "/connexion" }), 2000);
+      return;
+    }
+    const userId = sessData.session.user.id;
+
+    // 3. Créer la boutique
+    const slug = `${slugify(form.shop)}-${Math.random().toString(36).slice(2, 6)}`;
+    const trialEnds = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: shop, error: shopErr } = await supabase.from("shops").insert({
+      name: form.shop, slug, owner_id: userId,
+      country: form.country, currency: "XOF",
+      logo_url: logo, plan: "trial", trial_ends_at: trialEnds,
+    }).select().single();
+    if (shopErr || !shop) {
+      setError(shopErr?.message ?? "Impossible de créer la boutique.");
+      setLoading(false); return;
+    }
+
+    // 4. Créer l'appartenance owner
+    await supabase.from("shop_members").insert({
+      shop_id: shop.id, user_id: userId, role: "owner",
+    });
+
+    // 5. Paramètres locaux + trial
     if (typeof window !== "undefined") {
       localStorage.setItem("nc_shop_name", form.shop);
       localStorage.setItem("nc_shop_phone", form.phone);
@@ -45,10 +88,12 @@ function InscriptionPage() {
       if (logo) localStorage.setItem("nc_shop_logo", logo);
       localStorage.setItem("novacaisse.showPwaBanner", "1");
       localStorage.removeItem("novacaisse.pwaBannerDismissed");
+      localStorage.setItem("novacaisse.currentShopId", shop.id);
     }
     startTrial();
     navigate({ to: "/app" });
   };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
