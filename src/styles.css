@@ -199,3 +199,7 @@
   background-color: var(--color-card);
   box-shadow: var(--shadow-elegant);
 }
+
+/* Mode plein écran POS : masque header/sidebar/bottom-nav. */
+body.pos-fullscreen .pos-hide-in-fullscreen { display: none !important; }
+body.pos-fullscreen main { padding-bottom: 0 !important; }
