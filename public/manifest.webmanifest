@@ -1,0 +1,14 @@
+{
+  "name": "NovaCaisse",
+  "short_name": "NovaCaisse",
+  "description": "Point de vente, stock, ventes et rapports pour boutiques et commerces.",
+  "start_url": "/app/caisse",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B1E3D",
+  "theme_color": "#F5A623",
+  "icons": [
+    { "src": "/favicon.ico", "sizes": "any", "type": "image/x-icon" }
+  ]
+}
