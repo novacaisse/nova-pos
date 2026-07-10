@@ -44,6 +44,8 @@ const ICONS = {
   Tag,
   Bell,
   Settings,
+  CreditCard,
+  UserCircle,
 } as const;
 
 type NavItem = {
