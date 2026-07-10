@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { Search } from "lucide-react";
+import { Search, Loader2 } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ShopSelector } from "@/components/app/ShopSelector";
@@ -12,6 +12,7 @@ import { BottomNav } from "@/components/app/BottomNav";
 import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
 import { getTrialInfo } from "@/lib/trial";
+import { useAuth } from "@/lib/auth/AuthProvider";
 
 export const Route = createFileRoute("/app")({
   component: AppLayout,
@@ -20,12 +21,27 @@ export const Route = createFileRoute("/app")({
 function AppLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const { user, loading } = useAuth();
+
+  // Auth guard côté client (SPA)
+  useEffect(() => {
+    if (!loading && !user) navigate({ to: "/connexion" });
+  }, [loading, user, navigate]);
 
   // Blocage automatique après expiration de l'essai gratuit
   useEffect(() => {
     const info = getTrialInfo();
     if (info.startedAt && !info.active) navigate({ to: "/souscription" });
   }, [pathname, navigate]);
+
+  if (loading || !user) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
 
   return (
     <SidebarProvider defaultOpen>
