@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Zap, Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
+import { Zap, Mail, Lock, ArrowRight, Loader2, AlertCircle } from "lucide-react";
+import { useAuth } from "@/lib/auth/AuthProvider";
 
 export const Route = createFileRoute("/connexion")({
   head: () => ({ meta: [{ title: "Connexion — NovaCaisse" }] }),
@@ -10,12 +11,23 @@ export const Route = createFileRoute("/connexion")({
 
 function ConnexionPage() {
   const navigate = useNavigate();
+  const { signIn } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     setLoading(true);
-    setTimeout(() => navigate({ to: "/app/caisse" }), 900);
+    const { error } = await signIn(email.trim(), password);
+    setLoading(false);
+    if (error) {
+      setError(error);
+      return;
+    }
+    navigate({ to: "/app/caisse" });
   };
 
   return (
@@ -37,11 +49,19 @@ function ConnexionPage() {
           <h1 className="font-display text-2xl font-black tracking-tight">Bon retour 👋</h1>
           <p className="mt-1 text-sm text-muted-foreground">Connectez-vous à votre espace boutique.</p>
 
+          {error && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           <label className="mt-6 block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email</span>
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input required type="email" defaultValue="aicha@cotonoucentre.bj"
+              <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
                 className="w-full rounded-xl border border-border bg-background py-2.5 pl-9 pr-3 text-sm outline-none focus:border-primary" />
             </div>
           </label>
@@ -50,7 +70,8 @@ function ConnexionPage() {
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Mot de passe</span>
             <div className="relative">
               <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input required type="password" defaultValue="••••••••"
+              <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password" minLength={6}
                 className="w-full rounded-xl border border-border bg-background py-2.5 pl-9 pr-3 text-sm outline-none focus:border-primary" />
             </div>
           </label>
@@ -73,3 +94,4 @@ function ConnexionPage() {
     </div>
   );
 }
+
