@@ -1,25 +1,43 @@
 # Audit de sécurité — NovaCaisse
 
-Date : 2026-07-11
+Date : 2026-07-11 (mise à jour : correction des permissions par rôle)
 Portée : schéma Supabase (`db/schema.sql`), couche de données (`src/lib/data/hooks.ts`),
 auth/contexte boutique (`src/lib/auth/*`), et résidus front-end pré-Supabase.
 
-## ⚠️ Limite importante de cet audit
+## ⚠️ Limite importante de cet audit — toujours d'actualité
 
-Cette session n'a **aucun accès aux identifiants de l'instance Supabase externe**
-d'Emmanuel (pas de service role key, pas de chaîne de connexion Postgres, aucun
-connecteur MCP Supabase disponible). Seule la clé publique (`sb_publishable_...`)
-est présente dans le repo, ce qui est normal côté client mais insuffisant pour
-interroger `pg_policies` ou l'état réellement appliqué en base.
+Vous avez demandé de vérifier l'état live des policies via un accès Supabase
+configuré, mais **à ce jour cet accès n'est toujours pas présent dans cette
+session** : aucune variable d'environnement (`SUPABASE_*`, `DATABASE_URL`,
+`service_role`, etc.) n'est définie, et `ListConnectors` ne renseigne aucun
+connecteur Supabase/Postgres disponible. Le message précédent contenait un
+paragraphe entre crochets non complété (« décris ici comment tu lui donnes
+l'accès ») — je n'ai donc reçu aucun moyen concret de me connecter.
 
-**Tout ce qui suit est donc une revue statique du SQL versionné dans le repo**
-(`db/schema.sql`), pas une vérification de l'état live. Si ce script a bien été
-exécuté tel quel dans le SQL Editor de votre projet Supabase (comme indiqué),
-les policies ci-dessous s'appliquent réellement — mais je ne peux pas le
-confirmer moi-même sans accès. Pour une vérification live, deux options :
-donner accès à un connecteur Supabase/Postgres à cette session, ou exécuter
-vous-même `select * from pg_policies where schemaname='public';` et me
-partager le résultat.
+Je n'ai **pas exécuté** `select * from pg_policies where schemaname='public';`
+contre l'instance live, et je ne veux pas fabriquer un résultat. Ce qui suit
+reste une revue statique du SQL versionné dans le repo (`db/schema.sql`),
+comme lors du premier audit. Pour que je fasse la vérification live demandée,
+il faut l'un de ces deux moyens :
+1. **Connecteur** : si votre organisation claude.ai dispose d'un connecteur
+   Supabase/Postgres, l'activer pour cette session (menu connecteurs).
+2. **Accès direct en lecture seule** : créer un rôle Postgres en lecture
+   seule sur `pg_policies`/`information_schema` dans votre projet Supabase
+   (Database → Roles) et me fournir sa chaîne de connexion comme variable
+   d'environnement de session — évitez de partager la `service_role key`
+   elle-même, elle n'est pas nécessaire pour cette vérification.
+
+En attendant, l'option la plus rapide reste d'exécuter vous-même dans le SQL
+Editor : `select * from pg_policies where schemaname='public' order by
+tablename, cmd;` et de me coller le résultat — je compare immédiatement avec
+`db/schema.sql`.
+
+**Important** : la faille de permissions par rôle (section 4) a été corrigée
+dans le repo sans attendre cet accès, car elle ne nécessitait pas de lire
+l'état live — seulement d'écrire une migration à appliquer. Mais tant que
+vous n'avez pas exécuté `db/migrations/002_role_based_policies.sql` (ou
+confirmé que `db/schema.sql` correspond déjà à l'état réel), **l'état live
+de votre base ne reflète probablement pas encore cette correction**.
 
 ## 1. RLS — analyse du SQL versionné
 
@@ -37,32 +55,25 @@ Bonne nouvelle : la structure est saine.
 - Les 16 tables « métier » (produits, ventes, stock, etc.) suivent toutes le même
   pattern `tenant_all` : `using/with check (has_shop_access(shop_id))`.
 
-### Constat : aucune granularité par rôle au-delà de `shops`/`shop_members`
+### Constat (état du repo avant migration 002) : aucune granularité par rôle
+au-delà de `shops`/`shop_members`
 
-L'enum `app_role` (owner/manager/cashier/stock/accountant) existe et est
-consulté par `has_role_in_shop()`, mais **cette fonction n'est utilisée que
-pour les policies sur `shops` et `shop_members`**. Sur les 16 autres tables
-(ventes, paiements, stock, dépenses, etc.), n'importe quel membre de la
-boutique — y compris un simple `cashier` — a les 4 droits CRUD complets :
-il peut aujourd'hui, via l'API Supabase directe (pas seulement l'UI),
+L'enum `app_role` (owner/manager/cashier/stock/accountant) existe et était
+consultée par `has_role_in_shop()`, mais **cette fonction n'était utilisée
+que pour les policies sur `shops` et `shop_members`**. Sur les 16 autres
+tables (ventes, paiements, stock, dépenses, etc.), n'importe quel membre de
+la boutique — y compris un simple `cashier` — avait les 4 droits CRUD
+complets : il pouvait, via l'API Supabase directe (pas seulement l'UI),
 supprimer une vente déjà encaissée, modifier un `payments` a posteriori, ou
 écrire directement dans `stock_levels` en court-circuitant le trigger
 `apply_stock_movement` (donc sans laisser de trace dans `stock_movements`).
 
-Ce n'est pas une fuite inter-boutique (l'isolation `shop_id` tient), mais
-c'est un manque de séparation des droits en interne — qui correspond
-exactement au module « Équipe (permissions) » encore mocké et à connecter.
-**Recommandation** : quand vous connecterez Équipe, étendre les policies des
-tables sensibles (`sales`, `sale_items`, `payments`, `stock_levels`,
-`expenses`) avec des `has_role_in_shop()` différenciés par opération (ex :
-seul owner/manager peut `delete` une vente ou écrire sur `stock_levels`
-directement).
+Ce n'était pas une fuite inter-boutique (l'isolation `shop_id` tenait), mais
+un manque de séparation des droits en interne, correspondant au module
+« Équipe (permissions) » encore mocké. **Corrigé — voir section 4.**
 
 ### Autres points à surveiller (non bloquants)
 
-- Les `grant ... to authenticated` couvrent `stock_levels` en écriture directe
-  pour tout membre — voir ci-dessus, cette table ne devrait probablement être
-  mutée que par le trigger, pas en direct par le client.
 - Espace Super Admin (`/admin/*`) : encore 100% mocké côté front, aucune table
   ni policy dédiée dans le schéma. Quand vous le connecterez, ne pas le faire
   reposer sur `has_shop_access` (modèle mono-tenant) — prévoir soit une table
@@ -138,13 +149,113 @@ mock Paramètres avant que cet écran soit reconnecté.
 - `src/routes/inscription.tsx` — suppression de l'appel `startTrial()`
   (devenu obsolète).
 
-## 4. Prochaines étapes suggérées
+## 4. Permissions RLS différenciées par rôle (migration 002)
 
-1. Confirmer l'état live des policies (voir section 1) — soit en me donnant
-   un accès Supabase/Postgres, soit en partageant le résultat de
-   `select * from pg_policies where schemaname='public' order by tablename;`.
-2. Décider si/quand ajouter la granularité par rôle (`app_role`) sur les
-   tables métier, en particulier `stock_levels` en écriture directe.
-3. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.
-4. Prioriser la connexion de l'écran Paramètres (boutique + logo Supabase
+**Fichier de migration** : `db/migrations/002_role_based_policies.sql` —
+**à relire et exécuter vous-même dans le SQL Editor Supabase** avant toute
+application (je n'ai de toute façon pas les moyens de l'exécuter moi-même
+sans l'accès demandé en section « Limite importante »). `db/schema.sql` a
+aussi été mis à jour pour rester la référence canonique d'une installation
+fraîche — les deux fichiers doivent produire le même résultat final.
+
+Idempotent : chaque policy est `drop ... if exists` puis recréée, donc
+ré-exécutable sans erreur. Aucun changement de schéma, de données, de grants
+ou de triggers — uniquement des policies RLS, plus une fonction utilitaire
+`has_any_role_in_shop(_shop_id, _roles[])` qui complète `has_role_in_shop()`
+pour tester l'appartenance à plusieurs rôles à la fois (évite de répéter de
+longues chaînes de `OR` dans chaque policy).
+
+### Matrice de permissions
+
+Légende : **S**elect · **I**nsert · **U**pdate · **D**elete · `—` = refusé.
+O=owner, M=manager, C=cashier, St=stock, A=accountant.
+
+| Table | O | M | C | St | A |
+|---|---|---|---|---|---|
+| `categories` | SIUD | SIUD | S | SIUD | S |
+| `products` | SIUD | SIUD | S | SIUD | S |
+| `suppliers` | SIUD | SIUD | — | S | S |
+| `customers` | SIUD | SIUD | SIU | — | S |
+| `stock_levels` | S | S | S | S | S |
+| `stock_movements` | SI | SI | S + I*(sale/return) | SI | S |
+| `sales` | SIUD | SIUD | SI | — | S |
+| `sale_items` | SIUD | SIUD | SI | — | S |
+| `payments` | SIUD | SIUD | SI | — | S |
+| `quotes` | SIUD | SIUD | SI | — | S |
+| `quote_items` | SIUD | SIUD | SI | — | S |
+| `expenses` | SIUD | SIUD | — | — | SIUD |
+| `promotions` | SIUD | SIUD | S | — | S |
+| `notifications` | SIUD | SIUD | SIUD | SIUD | SIUD |
+| `subscriptions` | SIUD | SIUD | — | — | S |
+| `shop_settings` | SIUD | SIUD | S | S | S |
+
+\* le `cashier` ne peut insérer un `stock_movements` que si `type in
+('sale','return')` — les mouvements générés automatiquement par la caisse
+lors d'un encaissement (`useCreateSale` dans `hooks.ts`). Les mouvements
+manuels (`in`/`out`/`adjustment`/`transfer`) restent réservés à
+owner/manager/stock.
+
+### Décisions notables (à valider avec vous)
+
+- **`stock_levels` : plus aucune écriture directe, même pour owner/manager.**
+  Cette table n'est mutée que par le trigger `apply_stock_movement()`
+  (`security definer`, contourne RLS). Une correction de stock doit toujours
+  passer par un nouveau `stock_movements` de type `adjustment` — sinon on
+  retombe exactement dans le problème initial (écriture de stock sans trace
+  d'audit). C'est une restriction plus stricte que « droits complets
+  owner/manager partout » demandé, appliquée uniquement ici parce que c'est
+  une question d'intégrité des données, pas seulement de permission — dites-
+  moi si vous préférez rouvrir l'écriture directe pour owner/manager malgré
+  tout.
+- **`stock_movements` : aucune `update`/`delete`, même pour owner/manager**
+  (ledger immuable). Le trigger ne recalcule `stock_levels` qu'à
+  l'insertion : modifier ou supprimer une ligne après coup désynchroniserait
+  le stock sans laisser de trace de la correction. Même remarque que
+  ci-dessus — à valider si vous voulez une échappatoire pour owner.
+- **`notifications` reste inchangée** (accès complet à tout rôle sur ses
+  propres notifications) — hors périmètre de la demande, pas de donnée
+  sensible.
+- **`customers`** : le `cashier` peut créer/modifier (encaissement avec
+  fidélité) mais pas supprimer. `stock` n'y a aucun accès (pas mentionné
+  dans votre description, pas nécessaire à la gestion de stock).
+- **`quotes`/`quote_items`** : non couverts explicitement par votre
+  description initiale — traités par analogie avec `sales` (le cashier peut
+  créer un devis au comptoir, seul owner/manager peut le modifier/supprimer,
+  `accountant` en lecture pour ses rapports, `stock` sans accès).
+- **`shop_settings`** : lecture ouverte à tous (le ticket de caisse et les
+  taxes doivent s'afficher partout, y compris pour un cashier), écriture
+  réservée à owner/manager.
+
+### Impact sur les comptes existants
+
+Aujourd'hui, tous les comptes réels ont le rôle `owner` sur leur boutique —
+l'écran Équipe étant encore mocké, aucun flux d'invitation réel ne crée de
+`cashier`/`stock`/`accountant` en base. Cette migration ne change donc le
+comportement d'aucun utilisateur existant tant que personne n'est invité
+avec un rôle restreint.
+
+### Limite à connaître : pas encore de garde-fou côté UI
+
+Cette migration sécurise l'API/la base. Les écrans front (Produits, Stock,
+Ventes, Dépenses…) n'ont eux-mêmes aucune logique conditionnelle par rôle
+pour l'instant (pas de masquage de bouton « Supprimer » pour un cashier,
+par ex.) : ce n'est pas un trou de sécurité (RLS refusera la requête), mais
+un cashier verra un bouton qui échouera silencieusement ou avec une erreur
+Supabase brute. À traiter quand l'écran Équipe sera connecté et que les UI
+commenceront réellement à distinguer les rôles.
+
+## 5. Prochaines étapes suggérées
+
+1. Relire `db/migrations/002_role_based_policies.sql` et l'exécuter dans le
+   SQL Editor Supabase.
+2. Me donner un accès Supabase/Postgres en lecture (connecteur, ou rôle
+   read-only + variable d'environnement) pour que je confirme l'état live —
+   ou exécuter vous-même `select * from pg_policies where
+   schemaname='public' order by tablename, cmd;` et me partager le résultat.
+3. Décider si `stock_levels`/`stock_movements` doivent rester strictement
+   immuables pour owner/manager aussi, ou prévoir une échappatoire.
+4. Ajouter les garde-fous UI par rôle une fois l'écran Équipe connecté
+   (masquer les actions que RLS refuserait de toute façon).
+5. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.
+6. Prioriser la connexion de l'écran Paramètres (boutique + logo Supabase
    Storage + ticket), qui reste le résidu le plus visible pour l'utilisateur.
