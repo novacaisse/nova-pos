@@ -1,48 +1,46 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Download, Upload, Barcode, Edit3, Trash2, X, Save, LayoutGrid, List, Tag as TagIcon } from "lucide-react";
+import { Search, Plus, Edit3, Trash2, X, Save, LayoutGrid, List, Tag as TagIcon, Package } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { PRODUCTS as SEED, CATEGORIES as SEED_CATS, formatXOF, type Product, type Category } from "@/lib/mock/catalog";
+import {
+  useProducts, useUpsertProduct, useDeleteProduct,
+  useCategories, useUpsertCategory, useDeleteCategory,
+  formatXOF, type ProductWithStock, type Category,
+} from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/produits")({
   component: ProduitsPage,
 });
 
-const EMOJIS = ["📦", "🥤", "🧃", "☕", "🍫", "🍪", "🍚", "🫒", "🥫", "🧂", "🧼", "🪥", "🧻", "🧽", "💡", "🍎", "🥖"];
-
 function ProduitsPage() {
-  const [products, setProducts] = useState<Product[]>(SEED);
-  const [cats, setCats] = useState<Category[]>(SEED_CATS);
+  const { data: products = [], isLoading } = useProducts();
+  const { data: cats = [] } = useCategories();
+  const upsert = useUpsertProduct();
+  const remove = useDeleteProduct();
+
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<"all" | string>("all");
   const [view, setView] = useState<"grid" | "list">("list");
-  const [editing, setEditing] = useState<Product | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [confirmDel, setConfirmDel] = useState<Product | null>(null);
+  const [edit, setEdit] = useState<Partial<ProductWithStock> | null>(null);
+  const [confirmDel, setConfirmDel] = useState<ProductWithStock | null>(null);
   const [manageCats, setManageCats] = useState(false);
 
   const list = useMemo(() => products.filter((p) => {
     if (cat !== "all" && p.category_id !== cat) return false;
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+    return p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q) || (p.barcode ?? "").toLowerCase().includes(q);
   }), [products, query, cat]);
-
-  const upsert = (p: Product) => setProducts((l) => l.some((x) => x.id === p.id) ? l.map((x) => x.id === p.id ? p : x) : [p, ...l]);
-  const del = (id: string) => { setProducts((l) => l.filter((p) => p.id !== id)); setConfirmDel(null); };
 
   return (
     <div>
-      <PageHeader title="Produits" subtitle={`${products.length} références dans le catalogue`}
+      <PageHeader title="Produits" subtitle={`${products.length} référence${products.length > 1 ? "s" : ""} dans le catalogue`}
         actions={
           <>
             <button onClick={() => setManageCats(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><TagIcon className="h-4 w-4" /> Catégories</button>
-            <button className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Upload className="h-4 w-4" /> Importer</button>
-            <button className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Download className="h-4 w-4" /> Exporter</button>
-            <button className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Barcode className="h-4 w-4" /> Étiquettes</button>
-            <button onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouveau produit</button>
+            <button onClick={() => setEdit({ name: "", price: 0, cost: 0, unit: "pcs", is_active: true, low_stock_threshold: 5, tax_rate: 0 })} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouveau produit</button>
           </>
         }
       />
@@ -66,8 +64,16 @@ function ProduitsPage() {
           </div>
         </div>
 
-        {view === "list" ? (
-          <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        {isLoading ? (
+          <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">Chargement…</div>
+        ) : list.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
+            <Package className="mx-auto h-8 w-8 text-muted-foreground" />
+            <div className="mt-2 text-sm text-muted-foreground">Aucun produit. Commencez par créer votre catalogue.</div>
+            <button onClick={() => setEdit({ name: "", price: 0, cost: 0, unit: "pcs", is_active: true, low_stock_threshold: 5, tax_rate: 0 })} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter un produit</button>
+          </div>
+        ) : view === "list" ? (
+          <div className="overflow-x-auto rounded-2xl border border-border bg-card">
             <table className="w-full text-sm">
               <thead className="bg-muted/40">
                 <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -78,26 +84,27 @@ function ProduitsPage() {
               </thead>
               <tbody>
                 {list.map((p) => {
-                  const cost = Math.round(p.price * 0.68);
-                  const margin = Math.round(((p.price - cost) / p.price) * 100);
+                  const cost = Number(p.cost) || 0;
+                  const price = Number(p.price) || 0;
+                  const margin = price ? Math.round(((price - cost) / price) * 100) : 0;
                   const catName = cats.find((c) => c.id === p.category_id)?.name ?? "—";
                   return (
                     <tr key={p.id} className="border-t border-border/60 hover:bg-muted/40">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-xl">{p.emoji}</div>
+                          <div className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-lg">📦</div>
                           <div><div className="font-semibold">{p.name}</div><div className="text-[11px] text-muted-foreground">{p.unit}</div></div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">{p.sku}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{p.sku ?? "—"}</td>
                       <td className="px-4 py-3"><span className="rounded-full bg-muted px-2 py-0.5 text-xs">{catName}</span></td>
                       <td className="tabular px-4 py-3 text-right text-muted-foreground">{formatXOF(cost)}</td>
-                      <td className="tabular px-4 py-3 text-right font-semibold">{formatXOF(p.price)}</td>
-                      <td className="tabular px-4 py-3 text-right text-success">{margin}%</td>
-                      <td className={cn("tabular px-4 py-3 text-right font-bold", p.stock < 25 && "text-warning-foreground")}>{p.stock}</td>
+                      <td className="tabular px-4 py-3 text-right font-semibold">{formatXOF(price)}</td>
+                      <td className={cn("tabular px-4 py-3 text-right", margin > 0 ? "text-success" : "text-muted-foreground")}>{margin}%</td>
+                      <td className={cn("tabular px-4 py-3 text-right font-bold", p.stock < p.low_stock_threshold && "text-warning-foreground")}>{p.stock}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => setEditing(p)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
+                          <button onClick={() => setEdit(p)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
                           <button onClick={() => setConfirmDel(p)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
                         </div>
                       </td>
@@ -111,13 +118,13 @@ function ProduitsPage() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {list.map((p) => (
               <div key={p.id} className="group rounded-2xl border border-border bg-card p-3 hover:shadow-elegant">
-                <div className="grid aspect-square place-items-center rounded-xl bg-muted text-5xl">{p.emoji}</div>
+                <div className="grid aspect-square place-items-center rounded-xl bg-muted text-5xl">📦</div>
                 <div className="mt-3 truncate text-sm font-semibold">{p.name}</div>
-                <div className="text-[11px] text-muted-foreground">{p.sku}</div>
+                <div className="text-[11px] text-muted-foreground">{p.sku ?? "—"}</div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="tabular font-bold">{formatXOF(p.price)}</span>
+                  <span className="tabular font-bold">{formatXOF(Number(p.price))}</span>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setEditing(p)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => setEdit(p)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></button>
                     <button onClick={() => setConfirmDel(p)} className="grid h-7 w-7 place-items-center rounded-md text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 </div>
@@ -128,14 +135,18 @@ function ProduitsPage() {
       </div>
 
       <AnimatePresence>
-        {(editing || creating) && (
-          <ProductDialog initial={editing} cats={cats} onClose={() => { setEditing(null); setCreating(false); }} onSave={(p) => { upsert(p); setEditing(null); setCreating(false); }} />
+        {edit && (
+          <ProductDialog initial={edit} cats={cats}
+            onClose={() => setEdit(null)}
+            onSave={async (p) => { await upsert.mutateAsync(p); setEdit(null); }}
+          />
         )}
         {confirmDel && (
-          <ConfirmDialog title={`Supprimer ${confirmDel.name} ?`} onClose={() => setConfirmDel(null)} onConfirm={() => del(confirmDel.id)} />
+          <ConfirmDialog title={`Supprimer ${confirmDel.name} ?`} onClose={() => setConfirmDel(null)}
+            onConfirm={async () => { await remove.mutateAsync(confirmDel.id); setConfirmDel(null); }} />
         )}
         {manageCats && (
-          <CategoriesDialog cats={cats} setCats={setCats} onClose={() => setManageCats(false)} />
+          <CategoriesDialog cats={cats} onClose={() => setManageCats(false)} />
         )}
       </AnimatePresence>
     </div>
@@ -154,49 +165,42 @@ function Overlay({ children, onClose, w = "max-w-lg" }: { children: React.ReactN
   );
 }
 
-function ProductDialog({ initial, cats, onClose, onSave }: { initial: Product | null; cats: Category[]; onClose: () => void; onSave: (p: Product) => void }) {
-  const [form, setForm] = useState<Product>(initial ?? {
-    id: `p-${Date.now()}`, sku: `NEW-${Math.floor(Math.random() * 900) + 100}`, name: "", category_id: cats[0]?.id ?? "",
-    price: 0, stock: 0, unit: "unité", emoji: "📦",
-  });
-  const cost = Math.round(form.price * 0.68);
-  const margin = form.price ? Math.round(((form.price - cost) / form.price) * 100) : 0;
+function ProductDialog({ initial, cats, onClose, onSave }: { initial: Partial<ProductWithStock>; cats: Category[]; onClose: () => void; onSave: (p: any) => Promise<void> }) {
+  const [form, setForm] = useState<Partial<ProductWithStock>>(initial);
+  const inp = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
+  const price = Number(form.price) || 0;
+  const cost = Number(form.cost) || 0;
+  const margin = price ? Math.round(((price - cost) / price) * 100) : 0;
 
   return (
     <Overlay onClose={onClose}>
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
-        <div className="font-display text-lg font-bold">{initial ? "Modifier produit" : "Nouveau produit"}</div>
+        <div className="font-display text-lg font-bold">{initial.id ? "Modifier produit" : "Nouveau produit"}</div>
         <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
       </div>
       <div className="space-y-3 p-5">
         <div className="grid gap-3 sm:grid-cols-2">
-          <F label="Nom *"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} /></F>
-          <F label="SKU"><input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} className={inputCls} /></F>
-          <F label="Catégorie"><select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })} className={inputCls}>
+          <label className="block sm:col-span-2"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Nom *</div><input value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inp} /></label>
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">SKU</div><input value={form.sku ?? ""} onChange={(e) => setForm({ ...form, sku: e.target.value })} className={inp} /></label>
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Code-barres</div><input value={form.barcode ?? ""} onChange={(e) => setForm({ ...form, barcode: e.target.value })} className={inp} /></label>
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Catégorie</div><select value={form.category_id ?? ""} onChange={(e) => setForm({ ...form, category_id: e.target.value || null })} className={inp}>
+            <option value="">— Sans catégorie —</option>
             {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select></F>
-          <F label="Unité"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className={inputCls} /></F>
-          <F label="Prix vente (FCFA)"><input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) || 0 })} className={inputCls} /></F>
-          <F label="Stock initial"><input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: Number(e.target.value) || 0 })} className={inputCls} /></F>
+          </select></label>
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Unité</div><input value={form.unit ?? "pcs"} onChange={(e) => setForm({ ...form, unit: e.target.value })} className={inp} /></label>
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Prix achat (F)</div><input type="number" value={form.cost ?? 0} onChange={(e) => setForm({ ...form, cost: Number(e.target.value) || 0 })} className={inp} /></label>
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Prix vente (F) *</div><input type="number" value={form.price ?? 0} onChange={(e) => setForm({ ...form, price: Number(e.target.value) || 0 })} className={inp} /></label>
+          {!initial.id && (
+            <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Stock initial</div><input type="number" value={form.stock ?? 0} onChange={(e) => setForm({ ...form, stock: Number(e.target.value) || 0 })} className={inp} /></label>
+          )}
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Seuil stock bas</div><input type="number" value={form.low_stock_threshold ?? 5} onChange={(e) => setForm({ ...form, low_stock_threshold: Number(e.target.value) || 0 })} className={inp} /></label>
         </div>
-        <F label="Icône">
-          <div className="flex flex-wrap gap-1">
-            {EMOJIS.map((e) => (
-              <button key={e} onClick={() => setForm({ ...form, emoji: e })}
-                className={cn("grid h-10 w-10 place-items-center rounded-lg border text-2xl", form.emoji === e ? "border-primary bg-primary/10" : "border-border")}>
-                {e}
-              </button>
-            ))}
-          </div>
-        </F>
-        {form.price > 0 && (
-          <div className="rounded-xl bg-muted p-3 text-xs">
-            Coût estimé : <b>{formatXOF(cost)}</b> · Marge indicative : <b className="text-success">{margin}%</b>
-          </div>
+        {price > 0 && (
+          <div className="rounded-xl bg-muted p-3 text-xs">Marge indicative : <b className="text-success">{margin}%</b></div>
         )}
         <div className="flex gap-2 pt-1">
           <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
-          <button disabled={!form.name} onClick={() => onSave(form)} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+          <button disabled={!form.name || !form.price} onClick={() => onSave(form)} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
             <Save className="h-4 w-4" /> Enregistrer
           </button>
         </div>
@@ -205,35 +209,30 @@ function ProductDialog({ initial, cats, onClose, onSave }: { initial: Product | 
   );
 }
 
-function CategoriesDialog({ cats, setCats, onClose }: { cats: Category[]; setCats: (c: Category[]) => void; onClose: () => void }) {
+function CategoriesDialog({ cats, onClose }: { cats: Category[]; onClose: () => void }) {
   const [name, setName] = useState("");
-  const add = () => {
-    if (!name.trim()) return;
-    setCats([...cats, { id: `c-${Date.now()}`, name: name.trim(), color: "#0891b2" }]);
-    setName("");
-  };
-  const remove = (id: string) => setCats(cats.filter((c) => c.id !== id));
-  const rename = (id: string, n: string) => setCats(cats.map((c) => (c.id === id ? { ...c, name: n } : c)));
-
+  const upsertCat = useUpsertCategory();
+  const delCat = useDeleteCategory();
   return (
     <Overlay onClose={onClose}>
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
-        <div className="font-display text-lg font-bold">Catégories personnalisées</div>
+        <div className="font-display text-lg font-bold">Catégories</div>
         <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
       </div>
       <div className="space-y-2 p-5">
         <div className="flex gap-2">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nouvelle catégorie…"
             className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-sm" />
-          <button onClick={add} className="rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground">Ajouter</button>
+          <button onClick={async () => { if (name.trim()) { await upsertCat.mutateAsync({ name: name.trim(), color: "#0891b2" }); setName(""); } }} className="rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground">Ajouter</button>
         </div>
         <div className="space-y-1">
           {cats.map((c) => (
             <div key={c.id} className="flex items-center gap-2 rounded-lg border border-border p-2">
-              <input value={c.name} onChange={(e) => rename(c.id, e.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 text-sm focus:border-border focus:bg-background" />
-              <button onClick={() => remove(c.id)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+              <input defaultValue={c.name} onBlur={(e) => { if (e.target.value !== c.name) upsertCat.mutate({ id: c.id, name: e.target.value, color: c.color }); }} className="h-9 min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 text-sm focus:border-border focus:bg-background" />
+              <button onClick={() => delCat.mutate(c.id)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
             </div>
           ))}
+          {cats.length === 0 && <div className="py-4 text-center text-xs text-muted-foreground">Aucune catégorie.</div>}
         </div>
       </div>
     </Overlay>
@@ -252,16 +251,5 @@ function ConfirmDialog({ title, onClose, onConfirm }: { title: string; onClose: 
         </div>
       </div>
     </Overlay>
-  );
-}
-
-const inputCls = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
-
-function F({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-      {children}
-    </label>
   );
 }
