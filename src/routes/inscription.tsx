@@ -2,7 +2,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Zap, ArrowRight, Image as ImageIcon, Sparkles, AlertCircle, Loader2 } from "lucide-react";
-import { startTrial } from "@/lib/trial";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
@@ -80,7 +79,8 @@ function InscriptionPage() {
       shop_id: shop.id, user_id: userId, role: "owner",
     });
 
-    // 5. Paramètres locaux + trial
+    // 5. Paramètres locaux (préférences UI uniquement — l'essai gratuit et les
+    // infos boutique vivent en base via shops.trial_ends_at / shops.*)
     if (typeof window !== "undefined") {
       localStorage.setItem("nc_shop_name", form.shop);
       localStorage.setItem("nc_shop_phone", form.phone);
@@ -90,7 +90,6 @@ function InscriptionPage() {
       localStorage.removeItem("novacaisse.pwaBannerDismissed");
       localStorage.setItem("novacaisse.currentShopId", shop.id);
     }
-    startTrial();
     navigate({ to: "/app" });
   };
 
