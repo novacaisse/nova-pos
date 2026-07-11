@@ -3,45 +3,46 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Search, Plus, Minus, Trash2, Percent, Pause, Banknote, Smartphone, CreditCard,
-  UserPlus, ScanLine, X, Maximize2, Minimize2, RotateCcw, Printer, Wallet, Check,
+  UserPlus, ScanLine, X, Maximize2, Minimize2, RotateCcw, Printer, Check, Loader2,
 } from "lucide-react";
-import { CATEGORIES, PRODUCTS, formatXOF, type CartLine, type Product } from "@/lib/mock/catalog";
-import { CUSTOMERS, type Customer } from "@/lib/mock/customers";
 import { cn } from "@/lib/utils";
+import {
+  useCategories, useProducts, useCustomers, useUpsertCustomer,
+  useCreateSale, formatXOF, newTicketRef,
+  type ProductWithStock, type Customer,
+} from "@/lib/data/hooks";
+import { useShop } from "@/lib/auth/ShopProvider";
 
 export const Route = createFileRoute("/app/caisse")({
   component: CaissePage,
 });
 
-type PaymentMethod = "cash" | "mobile" | "card";
+type PaymentMethod = "cash" | "mobile_money" | "card";
 type PaymentType = "total" | "avance" | "acompte";
 
-type Line = CartLine & { discount_pct?: number };
-
-type HoldTicket = {
-  id: string;
-  createdAt: string;
-  lines: Line[];
-  discountPct: number;
-  customer?: Customer;
+type Line = {
+  product_id: string;
+  name: string;
+  unit_price: number;
+  quantity: number;
+  discount_pct?: number;
 };
 
+type HoldTicket = { id: string; createdAt: string; lines: Line[]; discountPct: number; customer?: Customer };
+
 type Receipt = {
-  ticket: string;
-  at: Date;
-  lines: Line[];
-  subtotal: number;
-  discountAmt: number;
-  total: number;
-  received: number;
-  paidNow: number;
-  due: number;
-  method: PaymentMethod;
-  type: PaymentType;
-  customer?: Customer;
+  ticket: string; at: Date; lines: Line[];
+  subtotal: number; discountAmt: number; total: number;
+  received: number; paidNow: number; due: number;
+  method: PaymentMethod; type: PaymentType; customer?: Customer;
 };
 
 function CaissePage() {
+  const { currentShop } = useShop();
+  const { data: products = [], isLoading: loadingProducts } = useProducts();
+  const { data: categories = [] } = useCategories();
+  const createSale = useCreateSale();
+
   const [query, setQuery] = useState("");
   const [categoryId, setCategoryId] = useState<string | "all">("all");
   const [cart, setCart] = useState<Line[]>([]);
@@ -55,30 +56,27 @@ function CaissePage() {
   const [showCustomer, setShowCustomer] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
 
-  // fullscreen toggles a body class read by the app layout
   useEffect(() => {
     document.body.classList.toggle("pos-fullscreen", fullscreen);
     return () => document.body.classList.remove("pos-fullscreen");
   }, [fullscreen]);
 
-  const products = useMemo(() => {
+  const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return PRODUCTS.filter((p) => {
+    return products.filter((p) => {
+      if (!p.is_active) return false;
       if (categoryId !== "all" && p.category_id !== categoryId) return false;
       if (!q) return true;
-      return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+      return p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q) || (p.barcode ?? "").includes(q);
     });
-  }, [query, categoryId]);
+  }, [products, query, categoryId]);
 
-  const subtotal = cart.reduce((s, l) => {
-    const d = l.discount_pct ?? 0;
-    return s + l.unit_price * l.quantity * (1 - d / 100);
-  }, 0);
+  const subtotal = cart.reduce((s, l) => s + l.unit_price * l.quantity * (1 - (l.discount_pct ?? 0) / 100), 0);
   const discountAmt = Math.round((subtotal * discountPct) / 100);
   const total = Math.round(subtotal - discountAmt);
   const itemsCount = cart.reduce((s, l) => s + l.quantity, 0);
 
-  function addProduct(p: Product) {
+  function addProduct(p: ProductWithStock) {
     setCart((c) => {
       const idx = c.findIndex((l) => l.product_id === p.id);
       if (idx >= 0) {
@@ -86,7 +84,7 @@ function CaissePage() {
         copy[idx] = { ...copy[idx], quantity: copy[idx].quantity + 1 };
         return copy;
       }
-      return [...c, { product_id: p.id, name: p.name, unit_price: p.price, quantity: 1 }];
+      return [...c, { product_id: p.id, name: p.name, unit_price: Number(p.price), quantity: 1 }];
     });
   }
   const updateQty = (id: string, delta: number) =>
@@ -107,61 +105,86 @@ function CaissePage() {
   const resumeHold = (id: string) => {
     const t = holds.find((h) => h.id === id);
     if (!t) return;
-    setCart(t.lines);
-    setDiscountPct(t.discountPct);
-    setCustomer(t.customer);
+    setCart(t.lines); setDiscountPct(t.discountPct); setCustomer(t.customer);
     setHolds((h) => h.filter((x) => x.id !== id));
     setShowHolds(false);
   };
 
+  async function handleConfirmPayment(r: Receipt) {
+    try {
+      const method: "cash" | "mobile_money" | "card" | "credit" =
+        r.due > 0 ? "credit" : r.method;
+      await createSale.mutateAsync({
+        reference: r.ticket,
+        customer_id: r.customer?.id ?? null,
+        items: cart.map((l) => ({
+          product_id: l.product_id, name: l.name,
+          quantity: l.quantity, unit_price: l.unit_price,
+          discount: Math.round(l.unit_price * l.quantity * ((l.discount_pct ?? 0) / 100)),
+        })),
+        discount: discountAmt,
+        payment_method: method,
+        paid: r.paidNow,
+        status: r.due > 0 ? "partially_refunded" : "completed",
+        notes: r.type !== "total" ? `Paiement ${r.type}` : undefined,
+      });
+      setShowPay(false);
+      setReceipt(r);
+    } catch (e: any) {
+      alert("Erreur enregistrement vente : " + (e?.message ?? "inconnue"));
+    }
+  }
+
+  if (!currentShop) {
+    return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une boutique.</div>;
+  }
+
   return (
     <div className={cn("grid gap-0", "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px]", fullscreen ? "h-screen" : "h-[calc(100vh-4rem)]")}>
-      {/* LEFT — catalogue */}
       <section className="flex min-w-0 flex-col overflow-hidden border-r border-border">
         <div className="border-b border-border bg-card px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2">
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+              <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
                 placeholder="Chercher un produit, un SKU, scanner…"
-                className="h-12 w-full rounded-xl border border-border bg-background pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
+                className="h-12 w-full rounded-xl border border-border bg-background pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
             </div>
             <button className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary hover:bg-primary/15" aria-label="Scanner">
               <ScanLine className="h-5 w-5" />
             </button>
-            <button
-              onClick={() => setFullscreen((f) => !f)}
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-border bg-card hover:bg-muted"
-              aria-label={fullscreen ? "Quitter plein écran" : "Plein écran"}
-              title={fullscreen ? "Quitter plein écran" : "Plein écran"}
-            >
+            <button onClick={() => setFullscreen((f) => !f)}
+              className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-border bg-card hover:bg-muted">
               {fullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
             </button>
           </div>
 
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            <CategoryPill active={categoryId === "all"} onClick={() => setCategoryId("all")} label="Tout" count={PRODUCTS.length} />
-            {CATEGORIES.map((c) => (
+            <CategoryPill active={categoryId === "all"} onClick={() => setCategoryId("all")} label="Tout" count={products.length} />
+            {categories.map((c) => (
               <CategoryPill key={c.id} active={categoryId === c.id} onClick={() => setCategoryId(c.id)} label={c.name}
-                count={PRODUCTS.filter((p) => p.category_id === c.id).length} />
+                count={products.filter((p) => p.category_id === c.id).length} />
             ))}
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 sm:p-5">
-          {products.length === 0 ? (
-            <div className="grid h-full place-items-center text-sm text-muted-foreground">Aucun résultat pour « {query} »</div>
+          {loadingProducts ? (
+            <div className="grid h-full place-items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin" /> Chargement du catalogue…
+            </div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">
+              {products.length === 0 ? "Aucun produit. Ajoutez-en depuis « Produits »." : `Aucun résultat pour « ${query} »`}
+            </div>
           ) : (
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-              {products.map((p) => <ProductCard key={p.id} product={p} onAdd={() => addProduct(p)} />)}
+              {filteredProducts.map((p) => <ProductCard key={p.id} product={p} onAdd={() => addProduct(p)} />)}
             </div>
           )}
         </div>
       </section>
 
-      {/* RIGHT — ticket */}
       <aside className="flex min-w-0 flex-col overflow-hidden bg-card">
         <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-4">
           <div className="min-w-0">
@@ -212,14 +235,14 @@ function CaissePage() {
                           <div className="tabular text-xs text-muted-foreground">{formatXOF(l.unit_price)} × {l.quantity}{dp ? ` · -${dp}%` : ""}</div>
                         </div>
                         <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
-                          <button onClick={() => updateQty(l.product_id, -1)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-background" aria-label="−"><Minus className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => updateQty(l.product_id, -1)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-background"><Minus className="h-3.5 w-3.5" /></button>
                           <span className="tabular w-6 text-center text-sm font-bold">{l.quantity}</span>
-                          <button onClick={() => updateQty(l.product_id, 1)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-background" aria-label="+"><Plus className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => updateQty(l.product_id, 1)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-background"><Plus className="h-3.5 w-3.5" /></button>
                         </div>
                         <div className="tabular w-20 text-right text-sm font-bold">{formatXOF(Math.round(lineTotal))}</div>
                         <button onClick={() => removeLine(l.product_id)}
-                          className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                          aria-label="Supprimer"><X className="h-3.5 w-3.5" /></button>
+                          className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100">
+                          <X className="h-3.5 w-3.5" /></button>
                       </div>
                       <div className="mt-1 flex items-center gap-2 pl-1">
                         <Percent className="h-3 w-3 text-muted-foreground" />
@@ -257,19 +280,19 @@ function CaissePage() {
               <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Total</div>
               <div className="font-display tabular text-3xl font-black leading-none">{formatXOF(total)}</div>
             </div>
-            <div className="text-right text-[11px] text-muted-foreground">
-              {customer ? customer.name : "Comptoir"}
-            </div>
+            <div className="text-right text-[11px] text-muted-foreground">{customer ? customer.name : "Comptoir"}</div>
           </div>
 
           <div className="mt-4 grid grid-cols-3 gap-2">
             <PayPill active={payment === "cash"} onClick={() => setPayment("cash")} icon={<Banknote className="h-4 w-4" />} label="Espèces" />
-            <PayPill active={payment === "mobile"} onClick={() => setPayment("mobile")} icon={<Smartphone className="h-4 w-4" />} label="Mobile" />
+            <PayPill active={payment === "mobile_money"} onClick={() => setPayment("mobile_money")} icon={<Smartphone className="h-4 w-4" />} label="Mobile" />
             <PayPill active={payment === "card"} onClick={() => setPayment("card")} icon={<CreditCard className="h-4 w-4" />} label="Carte" />
           </div>
 
-          <motion.button whileTap={{ scale: 0.98 }} disabled={cart.length === 0} onClick={() => setShowPay(true)}
-            className="mt-3 h-14 w-full rounded-xl bg-gradient-to-r from-primary to-primary-glow font-display text-base font-bold text-primary-foreground shadow-elegant transition-opacity disabled:cursor-not-allowed disabled:opacity-40">
+          <motion.button whileTap={{ scale: 0.98 }} disabled={cart.length === 0 || createSale.isPending}
+            onClick={() => setShowPay(true)}
+            className="mt-3 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary to-primary-glow font-display text-base font-bold text-primary-foreground shadow-elegant transition-opacity disabled:cursor-not-allowed disabled:opacity-40">
+            {createSale.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
             Encaisser · {formatXOF(total)}
           </motion.button>
         </div>
@@ -277,12 +300,10 @@ function CaissePage() {
 
       <AnimatePresence>
         {showPay && (
-          <PaymentDialog
-            total={total} method={payment} customer={customer}
-            onClose={() => setShowPay(false)}
-            onConfirm={(r) => { setShowPay(false); setReceipt(r); }}
+          <PaymentDialog total={total} method={payment} customer={customer}
             lines={cart} subtotal={subtotal} discountAmt={discountAmt}
-          />
+            onClose={() => setShowPay(false)} onConfirm={handleConfirmPayment}
+            pending={createSale.isPending} />
         )}
         {showHolds && (
           <HoldsDialog holds={holds} onClose={() => setShowHolds(false)} onResume={resumeHold}
@@ -312,13 +333,17 @@ function CategoryPill({ label, active, onClick, count }: { label: string; active
   );
 }
 
-function ProductCard({ product, onAdd }: { product: Product; onAdd: () => void }) {
-  const low = product.stock <= 20;
+function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () => void }) {
+  const low = product.stock <= product.low_stock_threshold;
   return (
     <motion.button whileTap={{ scale: 0.96 }} onClick={onAdd}
       className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card text-left transition-all hover:border-primary/40 hover:shadow-elegant">
       <div className="relative grid aspect-square place-items-center bg-gradient-to-br from-muted to-background text-5xl sm:text-6xl">
-        <span>{product.emoji}</span>
+        {product.image_url ? (
+          <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" />
+        ) : (
+          <span>📦</span>
+        )}
         {low && <span className="absolute right-2 top-2 rounded-full bg-warning/90 px-2 py-0.5 text-[10px] font-bold text-warning-foreground">Stock {product.stock}</span>}
         <span className="absolute bottom-2 right-2 grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-elegant transition-opacity group-hover:opacity-100">
           <Plus className="h-4 w-4" />
@@ -327,8 +352,8 @@ function ProductCard({ product, onAdd }: { product: Product; onAdd: () => void }
       <div className="min-w-0 px-3 py-2.5">
         <div className="truncate text-sm font-semibold">{product.name}</div>
         <div className="mt-0.5 flex items-center justify-between">
-          <span className="tabular text-sm font-bold text-primary">{formatXOF(product.price)}</span>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{product.sku}</span>
+          <span className="tabular text-sm font-bold text-primary">{formatXOF(Number(product.price))}</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{product.sku ?? ""}</span>
         </div>
       </div>
     </motion.button>
@@ -372,22 +397,20 @@ function DialogShell({ children, onClose, maxWidth = "max-w-md" }: { children: R
 }
 
 function PaymentDialog({
-  total, method, customer, lines, subtotal, discountAmt, onClose, onConfirm,
+  total, method, customer, lines, subtotal, discountAmt, onClose, onConfirm, pending,
 }: {
   total: number; method: PaymentMethod; customer?: Customer;
   lines: Line[]; subtotal: number; discountAmt: number;
-  onClose: () => void; onConfirm: (r: Receipt) => void;
+  onClose: () => void; onConfirm: (r: Receipt) => void; pending: boolean;
 }) {
   const [type, setType] = useState<PaymentType>("total");
   const [received, setReceived] = useState<string>(String(total));
   const rec = Number(received) || 0;
-
   const targetPaid = type === "total" ? total : Math.min(rec, total);
   const change = type === "total" ? Math.max(0, rec - total) : 0;
   const due = type === "total" ? 0 : Math.max(0, total - rec);
   const enough = type === "total" ? rec >= total : rec > 0;
-
-  const label = method === "cash" ? "Espèces" : method === "mobile" ? "Mobile Money" : "Carte bancaire";
+  const label = method === "cash" ? "Espèces" : method === "mobile_money" ? "Mobile Money" : "Carte bancaire";
 
   return (
     <DialogShell onClose={onClose}>
@@ -441,12 +464,13 @@ function PaymentDialog({
         </div>
 
         <div className="flex gap-2">
-          <button onClick={onClose} className="h-12 flex-1 rounded-xl border border-border bg-card text-sm font-semibold hover:bg-muted">Annuler</button>
-          <button disabled={!enough} onClick={() => onConfirm({
-            ticket: `T-${String(Date.now()).slice(-4)}`, at: new Date(), lines, subtotal, discountAmt, total,
+          <button onClick={onClose} disabled={pending} className="h-12 flex-1 rounded-xl border border-border bg-card text-sm font-semibold hover:bg-muted disabled:opacity-50">Annuler</button>
+          <button disabled={!enough || pending} onClick={() => onConfirm({
+            ticket: newTicketRef("T"), at: new Date(), lines, subtotal, discountAmt, total,
             received: rec, paidNow: targetPaid, due, method, type, customer,
           })}
-            className="h-12 flex-[2] rounded-xl bg-gradient-to-r from-success to-primary-glow text-sm font-bold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40">
+            className="flex h-12 flex-[2] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-success to-primary-glow text-sm font-bold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40">
+            {pending && <Loader2 className="h-4 w-4 animate-spin" />}
             Valider {type !== "total" ? `(${type})` : ""}
           </button>
         </div>
@@ -482,7 +506,7 @@ function HoldsDialog({ holds, onClose, onResume, onRemove }: {
         ) : holds.map((h) => {
           const t = h.lines.reduce((s, l) => s + l.unit_price * l.quantity * (1 - (l.discount_pct ?? 0) / 100), 0);
           return (
-            <div key={h.id} className="flex items-center gap-3 rounded-xl border border-border p-3 mb-2">
+            <div key={h.id} className="mb-2 flex items-center gap-3 rounded-xl border border-border p-3">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><Pause className="h-4 w-4" /></div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">{h.customer?.name ?? "Comptoir"} · {h.id}</div>
@@ -506,12 +530,21 @@ function HoldsDialog({ holds, onClose, onResume, onRemove }: {
 }
 
 function CustomerDialog({ onClose, onPick }: { onClose: () => void; onPick: (c: Customer) => void }) {
+  const { data: customers = [] } = useCustomers();
+  const upsertCustomer = useUpsertCustomer();
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "" });
-  const list = useMemo(() => CUSTOMERS.filter((c) =>
-    !q.trim() || c.name.toLowerCase().includes(q.toLowerCase()) || c.phone.includes(q)
-  ), [q]);
+
+  const list = useMemo(() => customers.filter((c) =>
+    !q.trim() || c.name.toLowerCase().includes(q.toLowerCase()) || (c.phone ?? "").includes(q)
+  ), [customers, q]);
+
+  const createAndPick = async () => {
+    if (!form.name) return;
+    const created = await upsertCustomer.mutateAsync({ name: form.name, phone: form.phone });
+    onPick(created as Customer);
+  };
 
   return (
     <DialogShell onClose={onClose} maxWidth="max-w-lg">
@@ -527,17 +560,15 @@ function CustomerDialog({ onClose, onPick }: { onClose: () => void; onPick: (c: 
               className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary" />
           </label>
           <label className="block">
-            <div className="mb-1 text-xs font-semibold text-muted-foreground">Téléphone *</div>
+            <div className="mb-1 text-xs font-semibold text-muted-foreground">Téléphone</div>
             <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              placeholder="+229 …" className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary" />
+              placeholder="+225 …" className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary" />
           </label>
           <div className="flex gap-2 pt-2">
             <button onClick={() => setCreating(false)} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Retour</button>
-            <button disabled={!form.name || !form.phone} onClick={() => onPick({
-              id: `cu-${Date.now()}`, name: form.name, phone: form.phone, city: "—",
-              total_spent: 0, visits: 0, loyalty_points: 0, credit_balance: 0,
-              last_visit: new Date().toISOString(), tags: ["Nouveau"],
-            })} className="h-11 flex-[2] rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+            <button disabled={!form.name || upsertCustomer.isPending} onClick={createAndPick}
+              className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+              {upsertCustomer.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Créer et sélectionner
             </button>
           </div>
@@ -552,6 +583,7 @@ function CustomerDialog({ onClose, onPick }: { onClose: () => void; onPick: (c: 
             </div>
           </div>
           <div className="max-h-80 overflow-y-auto p-2">
+            {list.length === 0 && <div className="grid place-items-center py-10 text-sm text-muted-foreground">Aucun client. Créez-en un.</div>}
             {list.map((c) => (
               <button key={c.id} onClick={() => onPick(c)}
                 className="flex w-full items-center gap-3 rounded-lg p-3 text-left hover:bg-muted">
@@ -560,9 +592,9 @@ function CustomerDialog({ onClose, onPick }: { onClose: () => void; onPick: (c: 
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{c.name}</div>
-                  <div className="text-xs text-muted-foreground">{c.phone} · {c.city}</div>
+                  <div className="text-xs text-muted-foreground">{c.phone ?? "—"}</div>
                 </div>
-                {c.credit_balance > 0 && (
+                {Number(c.credit_balance) > 0 && (
                   <span className="rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-bold text-warning-foreground">Créance</span>
                 )}
               </button>
@@ -581,12 +613,10 @@ function CustomerDialog({ onClose, onPick }: { onClose: () => void; onPick: (c: 
 }
 
 function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => void }) {
+  const { currentShop } = useShop();
   const ref = useRef<HTMLDivElement>(null);
-  const shopName = (typeof window !== "undefined" && localStorage.getItem("nc_shop_name")) || "Boutique Cotonou Centre";
-  const shopAddr = (typeof window !== "undefined" && localStorage.getItem("nc_shop_address")) || "Rue 12.345, Cotonou";
-  const shopPhone = (typeof window !== "undefined" && localStorage.getItem("nc_shop_phone")) || "+229 21 30 40 50";
-  const logo = typeof window !== "undefined" ? localStorage.getItem("nc_shop_logo") : null;
-  const thanks = (typeof window !== "undefined" && localStorage.getItem("nc_ticket_thanks")) || "Merci pour votre achat !";
+  const shopName = currentShop?.name ?? "Boutique";
+  const thanks = "Merci pour votre achat !";
 
   const print = () => {
     if (!ref.current) return;
@@ -611,11 +641,8 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
         <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
       </div>
       <div ref={ref} className="max-h-[60vh] overflow-y-auto bg-white p-5 text-black">
-        {logo && <img src={logo} alt="Logo" className="mx-auto mb-2 h-16 w-16 object-contain" />}
         <div className="center text-center">
           <div className="b text-base font-bold">{shopName}</div>
-          <div className="text-xs">{shopAddr}</div>
-          <div className="text-xs">{shopPhone}</div>
         </div>
         <hr className="my-2 border-dashed" />
         <div className="row flex justify-between text-xs"><span>Ticket</span><span className="b font-bold">{receipt.ticket}</span></div>
@@ -633,7 +660,7 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
         {receipt.discountAmt > 0 && <div className="row flex justify-between text-xs"><span>Remise</span><span>-{formatXOF(receipt.discountAmt)}</span></div>}
         <div className="row flex justify-between text-sm b font-bold"><span>TOTAL</span><span>{formatXOF(receipt.total)}</span></div>
         <div className="row flex justify-between text-xs"><span>Payé ({receipt.type})</span><span>{formatXOF(receipt.paidNow)}</span></div>
-        {receipt.due > 0 && <div className="row flex justify-between text-xs" style={{color:"#b91c1c"}}><span>Solde dû</span><span>{formatXOF(receipt.due)}</span></div>}
+        {receipt.due > 0 && <div className="row flex justify-between text-xs" style={{ color: "#b91c1c" }}><span>Solde dû</span><span>{formatXOF(receipt.due)}</span></div>}
         <hr className="my-2 border-dashed" />
         <div className="center mt-2 text-center text-xs italic">{thanks}</div>
       </div>
