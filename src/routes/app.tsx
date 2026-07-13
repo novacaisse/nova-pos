@@ -13,6 +13,7 @@ import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
 import { getTrialInfo } from "@/lib/trial";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { useShop } from "@/lib/auth/ShopProvider";
 
 export const Route = createFileRoute("/app")({
   component: AppLayout,
@@ -22,17 +23,20 @@ function AppLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user, loading } = useAuth();
+  const { currentShop, loading: shopLoading } = useShop();
 
   // Auth guard côté client (SPA)
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/connexion" });
   }, [loading, user, navigate]);
 
-  // Blocage automatique après expiration de l'essai gratuit
+  // Blocage automatique après expiration de l'essai gratuit — basé sur
+  // shops.trial_ends_at (Supabase), pas sur un flag local contournable.
   useEffect(() => {
-    const info = getTrialInfo();
-    if (info.startedAt && !info.active) navigate({ to: "/souscription" });
-  }, [pathname, navigate]);
+    if (shopLoading) return;
+    const info = getTrialInfo(currentShop);
+    if (info.onTrial && info.expired) navigate({ to: "/souscription" });
+  }, [pathname, currentShop, shopLoading, navigate]);
 
   if (loading || !user) {
     return (

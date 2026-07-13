@@ -1,18 +1,14 @@
-import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Clock, Sparkles } from "lucide-react";
 import { getTrialInfo } from "@/lib/trial";
+import { useShop } from "@/lib/auth/ShopProvider";
 import { cn } from "@/lib/utils";
 
 export function TrialBanner() {
-  const [info, setInfo] = useState<ReturnType<typeof getTrialInfo> | null>(null);
+  const { currentShop } = useShop();
+  const info = getTrialInfo(currentShop);
 
-  useEffect(() => {
-    setInfo(getTrialInfo());
-  }, []);
-
-  if (!info || !info.startedAt) return null;
-  if (!info.active) return null;
+  if (!info.onTrial || info.expired) return null;
 
   const urgent = info.daysLeft <= 1;
 

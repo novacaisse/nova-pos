@@ -1,24 +1,19 @@
-// Gestion locale de l'essai gratuit (3 jours). Sera remplacé par une colonne Supabase.
-const KEY = "nc_trial_started_at";
-const DURATION_DAYS = 3;
+// Essai gratuit — calculé côté client à partir de shops.plan / shops.trial_ends_at
+// (Supabase), jamais depuis le localStorage : un champ local est modifiable par
+// l'utilisateur (DevTools, vidage du cache) et permettrait de contourner
+// indéfiniment la fin de l'essai gratuit.
+export type TrialInfo = { onTrial: boolean; expired: boolean; daysLeft: number };
 
-export function startTrial() {
-  if (typeof window === "undefined") return;
-  if (!localStorage.getItem(KEY)) {
-    localStorage.setItem(KEY, new Date().toISOString());
+export function getTrialInfo(
+  shop: { plan: string; trial_ends_at: string | null } | null | undefined,
+): TrialInfo {
+  if (!shop || shop.plan !== "trial" || !shop.trial_ends_at) {
+    return { onTrial: false, expired: false, daysLeft: 0 };
   }
-}
-
-export function getTrialInfo(): { active: boolean; daysLeft: number; startedAt: string | null } {
-  if (typeof window === "undefined") return { active: true, daysLeft: DURATION_DAYS, startedAt: null };
-  const started = localStorage.getItem(KEY);
-  if (!started) return { active: true, daysLeft: DURATION_DAYS, startedAt: null };
-  const startedAt = new Date(started);
-  const elapsedMs = Date.now() - startedAt.getTime();
-  const daysLeft = Math.max(0, DURATION_DAYS - Math.floor(elapsedMs / 86_400_000));
-  return { active: daysLeft > 0, daysLeft, startedAt: started };
-}
-
-export function resetTrial() {
-  if (typeof window !== "undefined") localStorage.removeItem(KEY);
+  const msLeft = new Date(shop.trial_ends_at).getTime() - Date.now();
+  return {
+    onTrial: true,
+    expired: msLeft <= 0,
+    daysLeft: Math.max(0, Math.ceil(msLeft / 86_400_000)),
+  };
 }
