@@ -324,10 +324,12 @@ create policy shops_select on public.shops for select to authenticated
 drop policy if exists shops_insert on public.shops;
 create policy shops_insert on public.shops for insert to authenticated
   with check (owner_id = auth.uid());
+-- owner et manager peuvent modifier l'identité de la boutique (écran
+-- Paramètres) ; shops_delete reste volontairement owner-only ci-dessous.
 drop policy if exists shops_update on public.shops;
 create policy shops_update on public.shops for update to authenticated
-  using (public.has_role_in_shop(id, 'owner'))
-  with check (public.has_role_in_shop(id, 'owner'));
+  using (public.has_any_role_in_shop(id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_shop(id, array['owner','manager']::public.app_role[]));
 drop policy if exists shops_delete on public.shops;
 create policy shops_delete on public.shops for delete to authenticated
   using (public.has_role_in_shop(id, 'owner'));

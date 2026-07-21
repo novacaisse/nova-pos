@@ -231,7 +231,7 @@ commenceront réellement à distinguer les rôles.
 — à relire et exécuter dans le SQL Editor Supabase, comme la 002. `db/schema.sql`
 est mis à jour en parallèle pour rester la référence d'une installation fraîche.
 
-Deux ajouts indépendants :
+Trois ajouts :
 
 1. **`public.subscription_payments`** — une ligne par paiement d'abonnement
    (absente du schéma initial, nécessaire pour l'écran Abonnement). Colonnes :
@@ -245,6 +245,10 @@ Deux ajouts indépendants :
    restreinte à owner/manager de la boutique propriétaire du chemin
    (convention obligatoire : `{shop_id}/logo`). Policies sur `storage.objects`
    utilisant `has_any_role_in_shop()` comme le reste du schéma.
+3. **`shops_update` étendue à manager** (validé avec vous) — la policy du
+   schéma initial n'autorisait que `owner`. `shops_delete` reste
+   volontairement owner-only (suppression de boutique = action bien plus
+   destructrice, non demandée ici).
 
 ## 6. Écran Paramètres — connecté
 
@@ -261,18 +265,15 @@ Deux ajouts indépendants :
   même bucket).
 - Onglets Devise / Taxes / Transfert de stock : **laissés en mock**, hors
   périmètre demandé et sans table dédiée (`taxes`) en base.
-- Point de vigilance non corrigé : la policy `shops_update` (schéma initial,
-  hors migration 002) n'autorise que le rôle `owner` à modifier `shops.name`/
-  `logo_url` — un `manager` verra donc une erreur RLS en tentant d'enregistrer
-  l'onglet Boutique. À corriger via une future migration si vous voulez que
-  manager puisse aussi éditer l'identité de la boutique.
+- `shops_update` étendue à owner **et manager** (migration 003, section 3) —
+  point signalé lors de la connexion de l'écran, corrigé sur votre confirmation.
 
 ## 7. Prochaines étapes suggérées
 
-1. Relire et exécuter `db/migrations/003_subscription_payments_and_logo_storage.sql`.
-2. Décider si `shops_update` doit s'ouvrir à `manager` (voir point ci-dessus).
-3. Décider si `stock_levels`/`stock_movements` doivent rester strictement
+1. Relire et exécuter `db/migrations/003_subscription_payments_and_logo_storage.sql`
+   (mise à jour : inclut maintenant aussi l'ouverture de `shops_update` à manager).
+2. Décider si `stock_levels`/`stock_movements` doivent rester strictement
    immuables pour owner/manager aussi, ou prévoir une échappatoire.
-4. Ajouter les garde-fous UI par rôle une fois l'écran Équipe connecté
+3. Ajouter les garde-fous UI par rôle une fois l'écran Équipe connecté
    (masquer les actions que RLS refuserait de toute façon) — tâche #6 en cours.
-5. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.
+4. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.

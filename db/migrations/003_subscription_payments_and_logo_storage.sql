@@ -1,6 +1,6 @@
 -- =====================================================================
 -- NovaCaisse — Migration 003 : historique de paiements d'abonnement +
--- bucket Storage pour le logo boutique
+-- bucket Storage pour le logo boutique + ouverture de shops_update à manager
 -- À exécuter manuellement dans le SQL Editor de votre projet Supabase
 -- externe, APRÈS relecture. Idempotent (safe à ré-exécuter).
 --
@@ -11,6 +11,9 @@
 --   2. Bucket Supabase Storage "shop-logos" (public en lecture) + policies
 --      sur storage.objects restreignant l'écriture à owner/manager de la
 --      boutique concernée, via le préfixe de chemin {shop_id}/....
+--   3. shops_update (policy du schéma initial, hors migration 002) étendue
+--      à manager en plus de owner — un manager doit pouvoir modifier le nom
+--      et le logo de la boutique depuis l'écran Paramètres.
 -- =====================================================================
 
 -- =============== 1. subscription_payments ===============
@@ -93,9 +96,20 @@ create policy shop_logos_delete on storage.objects for delete to authenticated
     and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
   );
 
+-- =============== 3. shops_update — ouverture à manager ===============
+-- Jusqu'ici seul owner pouvait modifier shops.name/logo_url (policy du
+-- schéma initial). L'écran Paramètres doit aussi être utilisable par un
+-- manager — shops_delete reste volontairement owner-only (suppression
+-- d'une boutique = action bien plus destructrice, hors périmètre de cette
+-- demande).
+drop policy if exists shops_update on public.shops;
+create policy shops_update on public.shops for update to authenticated
+  using (public.has_any_role_in_shop(id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_shop(id, array['owner','manager']::public.app_role[]));
+
 -- =============== FIN ===============
 -- Rappel : subscription_payments a les mêmes grants que le reste (all à
 -- service_role via le grant déjà en place sur "all tables in schema
 -- public"). Le bucket shop-logos est public en lecture par design (logo de
 -- boutique = donnée non sensible), écriture strictement owner/manager de
--- la boutique propriétaire du chemin.
+-- la boutique propriétaire du chemin. shops_delete reste owner-only.
