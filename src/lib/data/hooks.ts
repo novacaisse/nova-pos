@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useShop } from "@/lib/auth/ShopProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import type { AppRole } from "@/lib/roles";
 
 // ============ TYPES (Supabase shape) ============
 export type Category = { id: string; shop_id: string; name: string; color: string | null };
@@ -440,4 +441,214 @@ export function newTicketRef(prefix = "T") {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${prefix}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+// ============ PROFIL (utilisateur courant) ============
+export type Profile = { id: string; full_name: string | null; phone: string | null; avatar_url: string | null };
+
+export function useProfile() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["profile", user?.id],
+    enabled: !!user,
+    queryFn: async (): Promise<Profile> => {
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", user!.id).single();
+      if (error) throw error;
+      return data as Profile;
+    },
+  });
+}
+
+export function useUpdateProfile() {
+  const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<Pick<Profile, "full_name" | "phone">>) => {
+      if (!user) throw new Error("Non authentifié");
+      const { data, error } = await supabase.from("profiles").update(patch).eq("id", user.id).select().single();
+      if (error) throw error;
+      return data as Profile;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profile", user?.id] }),
+  });
+}
+
+// ============ RÔLE de l'utilisateur courant dans la boutique active ============
+// Fondation partagée par Profil, Équipe et les garde-fous UI par rôle.
+export function useMyRole() {
+  const shopId = useShopId();
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["my_role", shopId, user?.id],
+    enabled: !!shopId && !!user,
+    queryFn: async (): Promise<AppRole | null> => {
+      const { data, error } = await supabase.from("shop_members")
+        .select("role").eq("shop_id", shopId!).eq("user_id", user!.id).maybeSingle();
+      if (error) throw error;
+      return (data?.role as AppRole | undefined) ?? null;
+    },
+  });
+}
+
+// ============ ÉQUIPE (shop_members + profils) ============
+// Pas de FK shop_members.user_id -> profiles.id (les deux référencent
+// auth.users indépendamment), donc pas d'embed PostgREST possible : on
+// fait deux requêtes et on fusionne côté client.
+export type ShopMember = {
+  id: string; shop_id: string; user_id: string; role: AppRole; created_at: string;
+  profile: { full_name: string | null; phone: string | null } | null;
+};
+
+export function useShopMembers() {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["shop_members", shopId],
+    enabled: !!shopId,
+    queryFn: async (): Promise<ShopMember[]> => {
+      const { data: members, error } = await supabase.from("shop_members")
+        .select("*").eq("shop_id", shopId!).order("created_at");
+      if (error) throw error;
+      const userIds = (members ?? []).map((m: any) => m.user_id);
+      let profiles: Record<string, { full_name: string | null; phone: string | null }> = {};
+      if (userIds.length) {
+        const { data: profs, error: profErr } = await supabase.from("profiles")
+          .select("id, full_name, phone").in("id", userIds);
+        if (profErr) throw profErr;
+        profiles = Object.fromEntries((profs ?? []).map((p: any) => [p.id, p]));
+      }
+      return (members ?? []).map((m: any) => ({ ...m, profile: profiles[m.user_id] ?? null }));
+    },
+  });
+}
+
+export function useInviteMember() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ email, role }: { email: string; role: AppRole }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const { data: userId, error: rpcErr } = await supabase.rpc("find_user_id_by_email", { _email: email.trim() });
+      if (rpcErr) throw rpcErr;
+      if (!userId) throw new Error("Aucun compte trouvé avec cet email. La personne doit d'abord créer un compte via /rejoindre.");
+      const { error } = await supabase.from("shop_members").insert({ shop_id: shopId, user_id: userId, role });
+      if (error) {
+        if ((error as any).code === "23505") throw new Error("Cette personne fait déjà partie de l'équipe.");
+        throw error;
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+  });
+}
+
+export function useUpdateMemberRole() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ memberId, role }: { memberId: string; role: AppRole }) => {
+      const { error } = await supabase.from("shop_members").update({ role }).eq("id", memberId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+  });
+}
+
+export function useRemoveMember() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (memberId: string) => {
+      const { error } = await supabase.from("shop_members").delete().eq("id", memberId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+  });
+}
+
+// ============ SHOP (identité + logo + ticket de caisse) ============
+// Les champs sans colonne dédiée sur `shops` (adresse, téléphone, RCCM/IFU,
+// réseaux sociaux) vivent dans shop_settings.data (jsonb), pour éviter une
+// migration de schéma supplémentaire.
+export type TicketConfig = {
+  showLogo?: boolean; showAddress?: boolean; showPhone?: boolean;
+  showFiscal?: boolean; showCashier?: boolean; showQr?: boolean;
+  thanks?: string;
+};
+export type ShopSettingsData = {
+  phone?: string; email?: string; address?: string;
+  rccm?: string; ifu?: string; facebook?: string; instagram?: string;
+  ticket?: TicketConfig;
+};
+export type ShopSettings = {
+  shop_id: string;
+  receipt_header: string | null;
+  receipt_footer: string | null;
+  receipt_logo_url: string | null;
+  tax_included: boolean;
+  data: ShopSettingsData;
+};
+
+const EMPTY_SHOP_SETTINGS: Omit<ShopSettings, "shop_id"> = {
+  receipt_header: null, receipt_footer: null, receipt_logo_url: null,
+  tax_included: true, data: {},
+};
+
+export function useShopSettings() {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["shop_settings", shopId],
+    enabled: !!shopId,
+    queryFn: async (): Promise<ShopSettings> => {
+      const { data, error } = await supabase.from("shop_settings")
+        .select("*").eq("shop_id", shopId!).maybeSingle();
+      if (error) throw error;
+      return (data as ShopSettings | null) ?? { shop_id: shopId!, ...EMPTY_SHOP_SETTINGS };
+    },
+  });
+}
+
+export function useUpdateShopSettings() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<Omit<ShopSettings, "shop_id">>) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("shop_settings")
+        .upsert({ shop_id: shopId, ...patch }).select().single();
+      if (error) throw error;
+      return data as ShopSettings;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_settings", shopId] }),
+  });
+}
+
+export function useUpdateShop() {
+  const shopId = useShopId();
+  const { refresh } = useShop();
+  return useMutation({
+    mutationFn: async (patch: { name?: string; logo_url?: string | null }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("shops")
+        .update(patch).eq("id", shopId).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => refresh(),
+  });
+}
+
+// Upload du logo vers le bucket Storage "shop-logos" (public en lecture,
+// écriture owner/manager — voir db/migrations/003_...). Un seul fichier par
+// boutique (clé fixe "{shop_id}/logo", écrasé à chaque upload) pour éviter
+// d'accumuler des fichiers orphelins.
+export function useUploadShopLogo() {
+  const shopId = useShopId();
+  const updateShop = useUpdateShop();
+  return useMutation({
+    mutationFn: async (file: File): Promise<string> => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const path = `${shopId}/logo`;
+      const { error: upErr } = await supabase.storage.from("shop-logos")
+        .upload(path, file, { upsert: true, cacheControl: "3600", contentType: file.type });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("shop-logos").getPublicUrl(path);
+      const url = `${data.publicUrl}?v=${Date.now()}`; // casse le cache navigateur après remplacement
+      await updateShop.mutateAsync({ logo_url: url });
+      return url;
+    },
+  });
 }

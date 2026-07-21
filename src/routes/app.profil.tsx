@@ -1,18 +1,82 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { User, Lock, Palette, Save, Sun, Moon, Monitor } from "lucide-react";
+import { useEffect, useState } from "react";
+import { User, Lock, Palette, Save, Sun, Moon, Monitor, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { CURRENT_USER } from "@/lib/mock/session";
-import { ROLE_LABEL } from "@/lib/mock/team";
+import { useAuth } from "@/lib/auth/AuthProvider";
+import { useProfile, useUpdateProfile, useMyRole } from "@/lib/data/hooks";
+import { ROLE_LABEL } from "@/lib/roles";
+import { useTheme, type ThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/profil")({
   component: ProfilPage,
 });
 
+function initials(name: string | null | undefined, email: string | null | undefined) {
+  const src = (name?.trim() || email || "?").trim();
+  const parts = src.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
+}
+
 function ProfilPage() {
   const [tab, setTab] = useState<"info" | "password" | "prefs">("info");
-  const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto");
+  const { user, updateEmail, updatePassword } = useAuth();
+  const { data: profile, isLoading: profileLoading } = useProfile();
+  const updateProfile = useUpdateProfile();
+  const { data: role } = useMyRole();
+  const { theme, setTheme } = useTheme();
+
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  const [currentPwd, setCurrentPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [pwdMsg, setPwdMsg] = useState<string | null>(null);
+  const [pwdBusy, setPwdBusy] = useState(false);
+
+  useEffect(() => {
+    if (profile) { setFullName(profile.full_name ?? ""); setPhone(profile.phone ?? ""); }
+  }, [profile]);
+  useEffect(() => {
+    if (user) setEmail(user.email ?? "");
+  }, [user]);
+
+  const saveInfo = async () => {
+    setInfoMsg(null);
+    try {
+      await updateProfile.mutateAsync({ full_name: fullName, phone });
+      if (email !== user?.email) {
+        const { error } = await updateEmail(email);
+        if (error) throw new Error(error);
+        setInfoMsg("Informations enregistrées. Vérifiez votre boîte mail pour confirmer le nouvel email.");
+      } else {
+        setInfoMsg("Informations enregistrées.");
+      }
+    } catch (e: any) {
+      setInfoMsg("Erreur : " + (e?.message ?? "inconnue"));
+    }
+  };
+
+  const savePassword = async () => {
+    setPwdMsg(null);
+    if (newPwd.length < 6) { setPwdMsg("Le nouveau mot de passe doit faire au moins 6 caractères."); return; }
+    if (newPwd !== confirmPwd) { setPwdMsg("La confirmation ne correspond pas."); return; }
+    setPwdBusy(true);
+    try {
+      const { error } = await updatePassword(currentPwd, newPwd);
+      if (error) throw new Error(error);
+      setPwdMsg("Mot de passe mis à jour.");
+      setCurrentPwd(""); setNewPwd(""); setConfirmPwd("");
+    } catch (e: any) {
+      setPwdMsg("Erreur : " + (e?.message ?? "inconnue"));
+    } finally {
+      setPwdBusy(false);
+    }
+  };
 
   return (
     <div>
@@ -22,12 +86,14 @@ function ProfilPage() {
         <div className="lg:col-span-1">
           <div className="rounded-2xl border border-border bg-card p-5 text-center">
             <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-primary to-primary-glow text-2xl font-bold text-primary-foreground shadow-glow">
-              {CURRENT_USER.avatar_initials}
+              {initials(profile?.full_name, user?.email)}
             </div>
-            <div className="mt-3 font-display text-lg font-bold">{CURRENT_USER.full_name}</div>
-            <div className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-              {ROLE_LABEL[CURRENT_USER.role]}
-            </div>
+            <div className="mt-3 font-display text-lg font-bold">{profile?.full_name || user?.email}</div>
+            {role && (
+              <div className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                {ROLE_LABEL[role]}
+              </div>
+            )}
             <div className="mt-4 space-y-1">
               {([
                 { k: "info", label: "Informations", icon: User },
@@ -49,26 +115,36 @@ function ProfilPage() {
             {tab === "info" && (
               <div className="space-y-4">
                 <h2 className="font-display text-lg font-bold">Informations personnelles</h2>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Nom complet" defaultValue={CURRENT_USER.full_name} />
-                  <Field label="Rôle" defaultValue={ROLE_LABEL[CURRENT_USER.role]} disabled />
-                  <Field label="Email" defaultValue="aicha@novacaisse.bj" type="email" />
-                  <Field label="Téléphone" defaultValue="+229 97 00 11 22" />
-                </div>
-                <button className="mt-2 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">
-                  <Save className="h-4 w-4" /> Enregistrer
-                </button>
+                {profileLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+                ) : (
+                  <>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label="Nom complet" value={fullName} onChange={setFullName} />
+                      <Field label="Rôle" value={role ? ROLE_LABEL[role] : "—"} disabled />
+                      <Field label="Email" type="email" value={email} onChange={setEmail} />
+                      <Field label="Téléphone" value={phone} onChange={setPhone} />
+                    </div>
+                    {infoMsg && <div className="text-xs text-muted-foreground">{infoMsg}</div>}
+                    <button onClick={saveInfo} disabled={updateProfile.isPending}
+                      className="mt-2 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                      <Save className="h-4 w-4" /> Enregistrer
+                    </button>
+                  </>
+                )}
               </div>
             )}
 
             {tab === "password" && (
               <div className="max-w-md space-y-4">
                 <h2 className="font-display text-lg font-bold">Changer de mot de passe</h2>
-                <Field label="Mot de passe actuel" type="password" />
-                <Field label="Nouveau mot de passe" type="password" />
-                <Field label="Confirmer le nouveau mot de passe" type="password" />
-                <button className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">
-                  <Lock className="h-4 w-4" /> Mettre à jour
+                <Field label="Mot de passe actuel" type="password" value={currentPwd} onChange={setCurrentPwd} />
+                <Field label="Nouveau mot de passe" type="password" value={newPwd} onChange={setNewPwd} />
+                <Field label="Confirmer le nouveau mot de passe" type="password" value={confirmPwd} onChange={setConfirmPwd} />
+                {pwdMsg && <div className="text-xs text-muted-foreground">{pwdMsg}</div>}
+                <button onClick={savePassword} disabled={pwdBusy || !currentPwd || !newPwd}
+                  className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                  {pwdBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />} Mettre à jour
                 </button>
               </div>
             )}
@@ -83,7 +159,7 @@ function ProfilPage() {
                       { k: "light", label: "Clair", icon: Sun },
                       { k: "dark", label: "Sombre", icon: Moon },
                       { k: "auto", label: "Auto", icon: Monitor },
-                    ] as const).map((t) => (
+                    ] as const satisfies { k: ThemePref; label: string; icon: typeof Sun }[]).map((t) => (
                       <button key={t.k} onClick={() => setTheme(t.k)}
                         className={cn("flex flex-col items-center gap-2 rounded-2xl border p-4 transition-colors",
                           theme === t.k ? "border-primary bg-primary/5" : "border-border hover:bg-muted")}>
@@ -92,13 +168,6 @@ function ProfilPage() {
                       </button>
                     ))}
                   </div>
-                </div>
-                <div>
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Langue</div>
-                  <select className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
-                    <option>Français</option>
-                    <option>English</option>
-                  </select>
                 </div>
               </div>
             )}
@@ -109,11 +178,14 @@ function ProfilPage() {
   );
 }
 
-function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+function Field({ label, value, onChange, ...props }: {
+  label: string; value?: string; onChange?: (v: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
   return (
     <label className="block">
       <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-      <input {...props} className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-60" />
+      <input value={value} onChange={(e) => onChange?.(e.target.value)} {...props}
+        className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-60" />
     </label>
   );
 }

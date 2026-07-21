@@ -18,7 +18,8 @@ const COUNTRIES = ["Bénin", "Burkina Faso", "Côte d'Ivoire", "Mali", "Sénéga
 function InscriptionPage() {
   const navigate = useNavigate();
   const { signUp } = useAuth();
-  const [logo, setLogo] = useState<string | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -31,8 +32,9 @@ function InscriptionPage() {
 
   const onLogo = (file?: File) => {
     if (!file) return;
+    setLogoFile(file);
     const r = new FileReader();
-    r.onload = () => setLogo(r.result as string);
+    r.onload = () => setLogoPreview(r.result as string);
     r.readAsDataURL(file);
   };
 
@@ -67,7 +69,7 @@ function InscriptionPage() {
     const { data: shop, error: shopErr } = await supabase.from("shops").insert({
       name: form.shop, slug, owner_id: userId,
       country: form.country, currency: "XOF",
-      logo_url: logo, plan: "trial", trial_ends_at: trialEnds,
+      plan: "trial", trial_ends_at: trialEnds,
     }).select().single();
     if (shopErr || !shop) {
       setError(shopErr?.message ?? "Impossible de créer la boutique.");
@@ -79,13 +81,24 @@ function InscriptionPage() {
       shop_id: shop.id, user_id: userId, role: "owner",
     });
 
-    // 5. Paramètres locaux (préférences UI uniquement — l'essai gratuit et les
-    // infos boutique vivent en base via shops.trial_ends_at / shops.*)
+    // 5. Logo (Supabase Storage — bucket "shop-logos") + coordonnées de la
+    // boutique (shop_settings.data, pas de colonnes dédiées pour ces champs).
+    if (logoFile) {
+      const path = `${shop.id}/logo`;
+      const { error: upErr } = await supabase.storage.from("shop-logos")
+        .upload(path, logoFile, { upsert: true, contentType: logoFile.type });
+      if (!upErr) {
+        const { data: pub } = supabase.storage.from("shop-logos").getPublicUrl(path);
+        await supabase.from("shops").update({ logo_url: pub.publicUrl }).eq("id", shop.id);
+      }
+    }
+    await supabase.from("shop_settings").upsert({
+      shop_id: shop.id,
+      data: { phone: form.phone, address: form.address || `${form.city}, ${form.country}` },
+    });
+
+    // 6. Préférences locales (UI uniquement)
     if (typeof window !== "undefined") {
-      localStorage.setItem("nc_shop_name", form.shop);
-      localStorage.setItem("nc_shop_phone", form.phone);
-      localStorage.setItem("nc_shop_address", form.address || `${form.city}, ${form.country}`);
-      if (logo) localStorage.setItem("nc_shop_logo", logo);
       localStorage.setItem("novacaisse.showPwaBanner", "1");
       localStorage.removeItem("novacaisse.pwaBannerDismissed");
       localStorage.setItem("novacaisse.currentShopId", shop.id);
@@ -118,7 +131,7 @@ function InscriptionPage() {
 
           <div className="mb-5 flex items-center gap-4 rounded-2xl border border-dashed border-border p-3">
             <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-muted">
-              {logo ? <img src={logo} alt="" className="h-full w-full object-contain" /> : <ImageIcon className="h-6 w-6 text-muted-foreground" />}
+              {logoPreview ? <img src={logoPreview} alt="" className="h-full w-full object-contain" /> : <ImageIcon className="h-6 w-6 text-muted-foreground" />}
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold">Logo de la boutique (optionnel)</div>
@@ -126,7 +139,7 @@ function InscriptionPage() {
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogo(e.target.files?.[0])} />
                 Choisir un fichier
               </label>
-              {logo && <button onClick={() => setLogo(null)} className="ml-2 text-xs text-destructive hover:underline">Retirer</button>}
+              {logoPreview && <button onClick={() => { setLogoFile(null); setLogoPreview(null); }} className="ml-2 text-xs text-destructive hover:underline">Retirer</button>}
             </div>
           </div>
 
