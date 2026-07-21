@@ -21,6 +21,8 @@ do $$ begin create type public.subscription_status as enum ('trialing','active',
 exception when duplicate_object then null; end $$;
 do $$ begin create type public.subscription_payment_status as enum ('pending','paid','failed','refunded');
 exception when duplicate_object then null; end $$;
+do $$ begin create type public.support_ticket_status as enum ('open','in_progress','resolved','closed');
+exception when duplicate_object then null; end $$;
 
 -- =============== TABLES ===============
 create table if not exists public.shops (
@@ -33,6 +35,7 @@ create table if not exists public.shops (
   logo_url text,
   plan text not null default 'trial',
   trial_ends_at timestamptz,
+  suspended boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -86,6 +89,20 @@ returns uuid language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.find_user_id_by_email(text) from public;
 grant execute on function public.find_user_id_by_email(text) to authenticated;
+
+-- Accès Super Admin — indépendant de shop_members (pas lié à une
+-- boutique). Aucun grant à "authenticated" sur cette table : gérée
+-- uniquement via le SQL Editor, jamais depuis l'app.
+create table if not exists public.super_admins (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+alter table public.super_admins enable row level security;
+
+create or replace function public.is_super_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.super_admins where user_id = auth.uid());
+$$;
 
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
@@ -283,6 +300,74 @@ create table if not exists public.shop_settings (
   updated_at timestamptz not null default now()
 );
 
+-- Catalogue de formules, éditable depuis /admin/parametres, lu publiquement
+-- par /tarifs (anon). id en text (slug) plutôt qu'uuid : shops.plan /
+-- subscriptions.plan restent des colonnes texte libres (pas de FK ajoutée),
+-- cohérent avec l'existant plutôt que de tout refaire.
+create table if not exists public.plans (
+  id text primary key,
+  name text not null,
+  price_month numeric(14,2) not null default 0,
+  price_year numeric(14,2) not null default 0,
+  currency text not null default 'XOF',
+  features jsonb not null default '[]'::jsonb,
+  limits jsonb not null default '{}'::jsonb,
+  is_active boolean not null default true,
+  is_recommended boolean not null default false,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+insert into public.plans (id, name, price_month, price_year, features, limits, is_active, is_recommended, sort_order)
+values
+  ('starter', 'Starter', 9000, 86400,
+    '["1 boutique","2 utilisateurs","Caisse + Produits + Stock","Assistance email"]'::jsonb,
+    '{"shops":1,"users":2,"products":500}'::jsonb, true, false, 1),
+  ('pro', 'Pro', 19000, 182400,
+    '["3 boutiques","10 utilisateurs","Tous modules + Rapports avancés","Assistant IA (500 req/mois)","Support prioritaire"]'::jsonb,
+    '{"shops":3,"users":10,"products":5000}'::jsonb, true, true, 2),
+  ('business', 'Business', 39000, 374400,
+    '["Boutiques illimitées","Utilisateurs illimités","IA illimitée + API","Support téléphonique 7j/7","Formation dédiée"]'::jsonb,
+    '{"shops":"∞","users":"∞","products":"∞"}'::jsonb, true, false, 3)
+on conflict (id) do nothing;
+
+-- Journal d'audit "se connecter en tant que" — écrit uniquement par
+-- l'Edge Function admin-impersonate (service role, contourne RLS).
+create table if not exists public.admin_impersonations (
+  id uuid primary key default gen_random_uuid(),
+  admin_user_id uuid not null references auth.users(id) on delete cascade,
+  target_user_id uuid not null references auth.users(id) on delete cascade,
+  shop_id uuid references public.shops(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+alter table public.admin_impersonations enable row level security;
+
+-- Support : un ticket appartient à une boutique, créé par n'importe quel
+-- membre ; les messages forment un fil append-only (pas d'update/delete,
+-- même logique que le ledger stock_movements).
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references public.shops(id) on delete cascade,
+  created_by uuid not null references auth.users(id) on delete cascade,
+  subject text not null,
+  status public.support_ticket_status not null default 'open',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_support_tickets_shop on public.support_tickets(shop_id);
+
+create table if not exists public.support_messages (
+  id uuid primary key default gen_random_uuid(),
+  ticket_id uuid not null references public.support_tickets(id) on delete cascade,
+  author_id uuid not null references auth.users(id) on delete cascade,
+  is_admin boolean not null default false,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_support_messages_ticket on public.support_messages(ticket_id);
+alter table public.support_tickets enable row level security;
+alter table public.support_messages enable row level security;
+
 -- =============== GRANTS (obligatoires pour la Data API PostgREST) ===============
 grant select, insert, update, delete on public.shops           to authenticated;
 grant select, insert, update, delete on public.profiles        to authenticated;
@@ -304,6 +389,11 @@ grant select, insert, update, delete on public.notifications   to authenticated;
 grant select, insert, update, delete on public.subscriptions   to authenticated;
 grant select, insert, update, delete on public.subscription_payments to authenticated;
 grant select, insert, update, delete on public.shop_settings   to authenticated;
+grant select on public.plans to anon, authenticated;
+grant insert, update, delete on public.plans to authenticated;
+grant select on public.admin_impersonations to authenticated;
+grant select, insert, update, delete on public.support_tickets to authenticated;
+grant select, insert on public.support_messages to authenticated;
 grant all on all tables in schema public to service_role;
 
 -- =============== RLS ===============
@@ -327,6 +417,7 @@ alter table public.notifications   enable row level security;
 alter table public.subscriptions   enable row level security;
 alter table public.subscription_payments enable row level security;
 alter table public.shop_settings   enable row level security;
+alter table public.plans           enable row level security;
 
 drop policy if exists shops_select on public.shops;
 create policy shops_select on public.shops for select to authenticated
@@ -344,6 +435,18 @@ drop policy if exists shops_delete on public.shops;
 create policy shops_delete on public.shops for delete to authenticated
   using (public.has_role_in_shop(id, 'owner'));
 
+-- Super Admin : accès complet à shops (liste, suspendre/prolonger,
+-- supprimer), en plus des policies owner/manager ci-dessus.
+drop policy if exists shops_select_admin on public.shops;
+create policy shops_select_admin on public.shops for select to authenticated
+  using (public.is_super_admin());
+drop policy if exists shops_update_admin on public.shops;
+create policy shops_update_admin on public.shops for update to authenticated
+  using (public.is_super_admin()) with check (public.is_super_admin());
+drop policy if exists shops_delete_admin on public.shops;
+create policy shops_delete_admin on public.shops for delete to authenticated
+  using (public.is_super_admin());
+
 drop policy if exists profiles_all on public.profiles;
 create policy profiles_all on public.profiles for all to authenticated
   using (id = auth.uid()) with check (id = auth.uid());
@@ -359,6 +462,10 @@ create policy profiles_select_shopmates on public.profiles for select to authent
       where me.user_id = auth.uid() and them.user_id = profiles.id
     )
   );
+-- Super Admin : coordonnées du owner visibles depuis la fiche Boutique.
+drop policy if exists profiles_select_admin on public.profiles;
+create policy profiles_select_admin on public.profiles for select to authenticated
+  using (public.is_super_admin());
 
 drop policy if exists shop_members_select on public.shop_members;
 create policy shop_members_select on public.shop_members for select to authenticated
@@ -596,6 +703,10 @@ create policy subscriptions_update on public.subscriptions for update to authent
 drop policy if exists subscriptions_delete on public.subscriptions;
 create policy subscriptions_delete on public.subscriptions for delete to authenticated
   using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+-- Super Admin : lecture cross-boutiques (Abonnements/Facturation).
+drop policy if exists subscriptions_select_admin on public.subscriptions;
+create policy subscriptions_select_admin on public.subscriptions for select to authenticated
+  using (public.is_super_admin());
 
 -- 15bis. subscription_payments — même matrice que subscriptions
 drop policy if exists subscription_payments_select on public.subscription_payments;
@@ -611,6 +722,10 @@ create policy subscription_payments_update on public.subscription_payments for u
 drop policy if exists subscription_payments_delete on public.subscription_payments;
 create policy subscription_payments_delete on public.subscription_payments for delete to authenticated
   using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+-- Super Admin : lecture cross-boutiques (Abonnements/Facturation).
+drop policy if exists subscription_payments_select_admin on public.subscription_payments;
+create policy subscription_payments_select_admin on public.subscription_payments for select to authenticated
+  using (public.is_super_admin());
 
 -- 16. shop_settings — lecture pour tous, écriture réservée à owner/manager
 drop policy if exists shop_settings_select on public.shop_settings;
@@ -626,6 +741,66 @@ create policy shop_settings_update on public.shop_settings for update to authent
 drop policy if exists shop_settings_delete on public.shop_settings;
 create policy shop_settings_delete on public.shop_settings for delete to authenticated
   using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+
+-- 17. plans — lecture publique des formules actives (anon inclus, /tarifs),
+-- gestion complète réservée au Super Admin.
+drop policy if exists plans_select_public on public.plans;
+create policy plans_select_public on public.plans for select to anon, authenticated
+  using (is_active = true);
+drop policy if exists plans_select_admin on public.plans;
+create policy plans_select_admin on public.plans for select to authenticated
+  using (public.is_super_admin());
+drop policy if exists plans_insert_admin on public.plans;
+create policy plans_insert_admin on public.plans for insert to authenticated
+  with check (public.is_super_admin());
+drop policy if exists plans_update_admin on public.plans;
+create policy plans_update_admin on public.plans for update to authenticated
+  using (public.is_super_admin()) with check (public.is_super_admin());
+drop policy if exists plans_delete_admin on public.plans;
+create policy plans_delete_admin on public.plans for delete to authenticated
+  using (public.is_super_admin());
+
+-- 18. admin_impersonations — journal d'audit, lecture Super Admin
+-- uniquement ; écriture réservée à l'Edge Function (service role).
+drop policy if exists admin_impersonations_select on public.admin_impersonations;
+create policy admin_impersonations_select on public.admin_impersonations for select to authenticated
+  using (public.is_super_admin());
+
+-- 19. support_tickets — visible par la boutique concernée ou le Super
+-- Admin ; création par tout membre ; statut réservé au Super Admin.
+drop policy if exists support_tickets_select on public.support_tickets;
+create policy support_tickets_select on public.support_tickets for select to authenticated
+  using (public.has_shop_access(shop_id) or public.is_super_admin());
+drop policy if exists support_tickets_insert on public.support_tickets;
+create policy support_tickets_insert on public.support_tickets for insert to authenticated
+  with check (public.has_shop_access(shop_id) and created_by = auth.uid());
+drop policy if exists support_tickets_update_admin on public.support_tickets;
+create policy support_tickets_update_admin on public.support_tickets for update to authenticated
+  using (public.is_super_admin()) with check (public.is_super_admin());
+drop policy if exists support_tickets_delete_admin on public.support_tickets;
+create policy support_tickets_delete_admin on public.support_tickets for delete to authenticated
+  using (public.is_super_admin());
+
+-- 20. support_messages — même visibilité que le ticket parent ; écriture
+-- par les membres de la boutique du ticket ou le Super Admin ; aucune
+-- update/delete (fil de discussion immuable).
+drop policy if exists support_messages_select on public.support_messages;
+create policy support_messages_select on public.support_messages for select to authenticated
+  using (
+    exists (
+      select 1 from public.support_tickets t
+      where t.id = ticket_id and (public.has_shop_access(t.shop_id) or public.is_super_admin())
+    )
+  );
+drop policy if exists support_messages_insert on public.support_messages;
+create policy support_messages_insert on public.support_messages for insert to authenticated
+  with check (
+    author_id = auth.uid()
+    and exists (
+      select 1 from public.support_tickets t
+      where t.id = ticket_id and (public.has_shop_access(t.shop_id) or public.is_super_admin())
+    )
+  );
 
 -- =============== TRIGGERS ===============
 create or replace function public.handle_new_user()
@@ -702,8 +877,14 @@ create policy shop_logos_delete on storage.objects for delete to authenticated
   );
 
 -- =============== FIN ===============
--- Rappel: RLS activé sur les 20 tables (19 + subscription_payments).
--- Aucune policy USING (true).
+-- Rappel: RLS activé sur les 26 tables (20 + super_admins, plans,
+-- admin_impersonations, support_tickets, support_messages).
+-- Aucune policy USING (true) — seule "plans" a une lecture ouverte à
+-- "anon" (formules publiques), volontairement et limitée à is_active=true.
 -- Permissions différenciées par app_role sur 15 des 16 tables métier
 -- (notifications reste ouverte à tout membre ; stock_levels est en lecture
 -- seule pour tous — voir db/AUDIT-SECURITE.md pour la matrice complète).
+-- Super Admin (is_super_admin()) : accès étendu strictement limité à
+-- shops, subscriptions, subscription_payments, profiles, plans,
+-- admin_impersonations, support_tickets, support_messages — jamais aux
+-- données opérationnelles des boutiques (sales/stock/customers/etc.).
