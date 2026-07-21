@@ -310,12 +310,53 @@ avec vous, contrairement à `shops_update`).
   RLS réelle de la section 4 — pas de table de permissions configurable en
   base, donc rien à rendre éditable sans mentir sur ce que l'UI ferait).
 
-## 9. Prochaines étapes suggérées
+## 9. Écran Rapports — connecté (trouvé mocké en cours de route)
 
-1. Relire et exécuter `db/migrations/004_find_user_by_email.sql`
-   (migration 003 confirmée exécutée).
-2. Décider si `stock_levels`/`stock_movements` doivent rester strictement
+`app.rapports.tsx` n'était dans aucune des deux listes du briefing initial
+(oubli probable). CA, ticket moyen, marge, meilleurs produits/clients,
+ventes par jour et heures de pointe sont désormais calculés à partir de
+`useSales`/`useProducts` réels ; export CSV/PDF reconnecté aux données
+réellement affichées. Deux limites assumées :
+- **Marge** approximative : basée sur `products.cost` *actuel*, pas le coût
+  au moment de la vente (non stocké dans le schéma) — une modification de
+  coût aujourd'hui recalcule rétroactivement la marge d'anciennes ventes.
+- **Rapport « Fournisseurs »** impossible à calculer : `products` n'a aucune
+  colonne `supplier_id`. Affiché en « Bientôt disponible » plutôt que
+  d'inventer des chiffres — nécessiterait une migration de schéma.
+
+L'assistant IA « Nova » reste mock, hors périmètre (nécessiterait une vraie
+intégration API Claude, sans rapport avec Supabase).
+
+`useSales` accepte désormais soit une limite (rétrocompatible), soit
+`{ limit, from, to }` pour filtrer par date côté requête.
+
+## 10. Garde-fous UI par rôle — appliqués
+
+Basé sur la matrice de la section 4. La RLS reste la seule barrière de
+sécurité réelle ; ceci est de l'ergonomie (éviter un bouton qui échoue ou
+un écran vide), pas une couche de protection supplémentaire.
+
+- **Barre latérale** (`AppSidebar.tsx`) : masque Point de vente/Ventes/
+  Devis/Clients pour `stock`, Fournisseurs pour `cashier`, Dépenses pour
+  `cashier`/`stock` (aucun accès `select` sur la table correspondante).
+- **Clients** : bouton Supprimer masqué pour `cashier` (SIU, pas D).
+- **Fournisseurs, Promotions, Produits** : création/modification/
+  suppression masquées pour les rôles n'ayant que `S` (voir matrice).
+  `stock` garde les droits d'écriture sur Produits (IUD réel).
+- **Stock** : formulaire « Nouveau mouvement » et édition du seuil d'alerte
+  masqués pour `cashier`/`accountant`.
+- **Paramètres** : champs et boutons Enregistrer (Boutique + Ticket)
+  désactivés/masqués pour tout rôle autre que owner/manager.
+- **Dépenses, Ventes, Équipe** : rien à ajouter (Dépenses n'est visible que
+  par des rôles ayant déjà tous les droits ; Ventes est déjà en lecture
+  seule ; Équipe gérait déjà ça depuis la tâche #3).
+
+## 11. Prochaines étapes suggérées
+
+1. Décider si `stock_levels`/`stock_movements` doivent rester strictement
    immuables pour owner/manager aussi, ou prévoir une échappatoire.
-3. Ajouter les garde-fous UI par rôle une fois l'écran Équipe connecté —
-   tâche #6, prochaine étape après Devis et Abonnement.
-4. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.
+2. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.
+3. Lier `products`/`suppliers` (colonne `supplier_id`) si le rapport
+   Fournisseurs devient prioritaire.
+4. Intégration réelle de l'assistant IA « Nova » (API Claude) — tâche
+   séparée, hors périmètre Supabase.

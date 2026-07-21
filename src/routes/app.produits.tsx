@@ -5,7 +5,7 @@ import { Search, Plus, Edit3, Trash2, X, Save, LayoutGrid, List, Tag as TagIcon,
 import { PageHeader } from "@/components/app/PageHeader";
 import {
   useProducts, useUpsertProduct, useDeleteProduct,
-  useCategories, useUpsertCategory, useDeleteCategory,
+  useCategories, useUpsertCategory, useDeleteCategory, useMyRole,
   formatXOF, type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,8 @@ function ProduitsPage() {
   const { data: cats = [] } = useCategories();
   const upsert = useUpsertProduct();
   const remove = useDeleteProduct();
+  const { data: myRole } = useMyRole();
+  const canManage = myRole === "owner" || myRole === "manager" || myRole === "stock"; // cashier/accountant : lecture seule
 
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<"all" | string>("all");
@@ -37,12 +39,12 @@ function ProduitsPage() {
   return (
     <div>
       <PageHeader title="Produits" subtitle={`${products.length} référence${products.length > 1 ? "s" : ""} dans le catalogue`}
-        actions={
+        actions={canManage && (
           <>
             <button onClick={() => setManageCats(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><TagIcon className="h-4 w-4" /> Catégories</button>
             <button onClick={() => setEdit({ name: "", price: 0, cost: 0, unit: "pcs", is_active: true, low_stock_threshold: 5, tax_rate: 0 })} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouveau produit</button>
           </>
-        }
+        )}
       />
 
       <div className="space-y-4 p-5 sm:p-8">
@@ -70,7 +72,9 @@ function ProduitsPage() {
           <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
             <Package className="mx-auto h-8 w-8 text-muted-foreground" />
             <div className="mt-2 text-sm text-muted-foreground">Aucun produit. Commencez par créer votre catalogue.</div>
-            <button onClick={() => setEdit({ name: "", price: 0, cost: 0, unit: "pcs", is_active: true, low_stock_threshold: 5, tax_rate: 0 })} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter un produit</button>
+            {canManage && (
+              <button onClick={() => setEdit({ name: "", price: 0, cost: 0, unit: "pcs", is_active: true, low_stock_threshold: 5, tax_rate: 0 })} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter un produit</button>
+            )}
           </div>
         ) : view === "list" ? (
           <div className="overflow-x-auto rounded-2xl border border-border bg-card">
@@ -103,10 +107,12 @@ function ProduitsPage() {
                       <td className={cn("tabular px-4 py-3 text-right", margin > 0 ? "text-success" : "text-muted-foreground")}>{margin}%</td>
                       <td className={cn("tabular px-4 py-3 text-right font-bold", p.stock < p.low_stock_threshold && "text-warning-foreground")}>{p.stock}</td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => setEdit(p)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
-                          <button onClick={() => setConfirmDel(p)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
-                        </div>
+                        {canManage && (
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => setEdit(p)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
+                            <button onClick={() => setConfirmDel(p)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -123,10 +129,12 @@ function ProduitsPage() {
                 <div className="text-[11px] text-muted-foreground">{p.sku ?? "—"}</div>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="tabular font-bold">{formatXOF(Number(p.price))}</span>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => setEdit(p)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></button>
-                    <button onClick={() => setConfirmDel(p)} className="grid h-7 w-7 place-items-center rounded-md text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
-                  </div>
+                  {canManage && (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setEdit(p)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setConfirmDel(p)} className="grid h-7 w-7 place-items-center rounded-md text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

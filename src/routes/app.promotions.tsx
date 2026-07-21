@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Tag, Percent, Gift, Trophy, Sparkles, Edit3, Trash2, X, Save } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { LOYALTY_TIERS } from "@/lib/mock/promotions";
-import { usePromotions, useUpsertPromotion, useDeletePromotion, formatXOF, type Promotion } from "@/lib/data/hooks";
+import { usePromotions, useUpsertPromotion, useDeletePromotion, useMyRole, formatXOF, type Promotion } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/promotions")({
@@ -18,6 +18,8 @@ function PromotionsPage() {
   const remove = useDeletePromotion();
   const [edit, setEdit] = useState<Partial<Promotion> | null>(null);
   const [del, setDel] = useState<Promotion | null>(null);
+  const { data: myRole } = useMyRole();
+  const canManage = myRole === "owner" || myRole === "manager"; // cashier/accountant : lecture seule
 
   const active = promos.filter((p) => p.is_active).length;
 
@@ -26,11 +28,11 @@ function PromotionsPage() {
       <PageHeader
         title="Promotions & Fidélité"
         subtitle="Remises, offres et programme client"
-        actions={
+        actions={canManage && (
           <button onClick={() => setEdit({ name: "", kind: "percent", value: 10, is_active: true })} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
             <Plus className="h-4 w-4" /> Nouvelle promotion
           </button>
-        }
+        )}
       />
 
       <div className="space-y-4 p-5 sm:p-8">
@@ -65,8 +67,12 @@ function PromotionsPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase", p.is_active ? "bg-success/15 text-success" : "bg-muted text-muted-foreground")}>{p.is_active ? "Active" : "Inactive"}</span>
-                      <button onClick={() => setEdit(p)} className="grid h-7 w-7 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => setDel(p)} className="grid h-7 w-7 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                      {canManage && (
+                        <>
+                          <button onClick={() => setEdit(p)} className="grid h-7 w-7 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => setDel(p)} className="grid h-7 w-7 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="mt-3 font-display text-lg font-bold">{p.name}</div>

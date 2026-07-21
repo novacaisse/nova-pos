@@ -1,4 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useMyRole } from "@/lib/data/hooks";
+import type { AppRole } from "@/lib/roles";
 import {
   LayoutDashboard,
   ScanBarcode,
@@ -79,20 +81,38 @@ const NAV: Record<string, NavItem[]> = {
   ],
 };
 
+// Masque les liens vers un écran où le rôle courant n'a aucun droit de
+// lecture côté RLS (migration 002) — évite un écran vide/en erreur plutôt
+// qu'une restriction de sécurité (la RLS reste la seule barrière réelle).
+const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
+  "/app/caisse": ["stock"],
+  "/app/ventes": ["stock"],
+  "/app/devis": ["stock"],
+  "/app/clients": ["stock"],
+  "/app/fournisseurs": ["cashier"],
+  "/app/depenses": ["cashier", "stock"],
+};
+
 export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const { data: myRole } = useMyRole();
 
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
+
+  const visible = (item: NavItem) => !myRole || !HIDDEN_FOR[item.url]?.includes(myRole);
 
   // Ferme automatiquement la sidebar sur mobile après un clic.
   const handleNavClick = () => {
     if (isMobile) setOpenMobile(false);
   };
 
-  const renderGroup = (label: string, items: NavItem[]) => (
+  const renderGroup = (label: string, items: NavItem[]) => {
+    const shown = items.filter(visible);
+    if (shown.length === 0) return null;
+    return (
     <SidebarGroup>
       {!collapsed && (
         <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50">
@@ -101,7 +121,7 @@ export function AppSidebar() {
       )}
       <SidebarGroupContent>
         <SidebarMenu>
-          {items.map((item) => {
+          {shown.map((item) => {
             const Icon = ICONS[item.icon];
             const active = isActive(item.url);
             return (
@@ -127,7 +147,8 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
-  );
+    );
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">

@@ -4,7 +4,7 @@ import { Store, Coins, Receipt, ArrowLeftRight, Save, Plus, Image as ImageIcon, 
 import { PageHeader } from "@/components/app/PageHeader";
 import { useShop } from "@/lib/auth/ShopProvider";
 import {
-  useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo,
+  useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
   type TicketConfig,
 } from "@/lib/data/hooks";
 import { SHOPS as MOCK_TRANSFER_SHOPS } from "@/lib/mock/session";
@@ -28,6 +28,8 @@ function ParametresPage() {
   const updateShop = useUpdateShop();
   const updateSettings = useUpdateShopSettings();
   const uploadLogo = useUploadShopLogo();
+  const { data: myRole } = useMyRole();
+  const canManage = myRole === "owner" || myRole === "manager"; // shops_update / shop_settings write
 
   const [name, setName] = useState("");
   const [shopExtra, setShopExtra] = useState({
@@ -122,23 +124,25 @@ function ParametresPage() {
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">Logo de la boutique</div>
                   <p className="mb-2 text-xs text-muted-foreground">Appliqué automatiquement sur les reçus, factures et devis (PNG/JPG, max 1 Mo).</p>
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted">
-                    <input type="file" accept="image/*" className="hidden" disabled={logoUploading}
-                      onChange={(e) => onLogo(e.target.files?.[0])} />
-                    Choisir un fichier
-                  </label>
+                  {canManage && (
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted">
+                      <input type="file" accept="image/*" className="hidden" disabled={logoUploading}
+                        onChange={(e) => onLogo(e.target.files?.[0])} />
+                      Choisir un fichier
+                    </label>
+                  )}
                 </div>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Nom" value={name} onChange={setName} />
-                <Field label="Téléphone" value={shopExtra.phone} onChange={(v) => setShopExtra({ ...shopExtra, phone: v })} />
-                <Field label="Email" value={shopExtra.email} onChange={(v) => setShopExtra({ ...shopExtra, email: v })} />
-                <Field label="Adresse complète" value={shopExtra.address} onChange={(v) => setShopExtra({ ...shopExtra, address: v })} className="sm:col-span-2" />
-                <Field label="RCCM" value={shopExtra.rccm} onChange={(v) => setShopExtra({ ...shopExtra, rccm: v })} />
-                <Field label="IFU / N° fiscal" value={shopExtra.ifu} onChange={(v) => setShopExtra({ ...shopExtra, ifu: v })} />
-                <Field label="Facebook" value={shopExtra.facebook} onChange={(v) => setShopExtra({ ...shopExtra, facebook: v })} />
-                <Field label="Instagram" value={shopExtra.instagram} onChange={(v) => setShopExtra({ ...shopExtra, instagram: v })} />
+                <Field label="Nom" value={name} onChange={setName} disabled={!canManage} />
+                <Field label="Téléphone" value={shopExtra.phone} onChange={(v) => setShopExtra({ ...shopExtra, phone: v })} disabled={!canManage} />
+                <Field label="Email" value={shopExtra.email} onChange={(v) => setShopExtra({ ...shopExtra, email: v })} disabled={!canManage} />
+                <Field label="Adresse complète" value={shopExtra.address} onChange={(v) => setShopExtra({ ...shopExtra, address: v })} className="sm:col-span-2" disabled={!canManage} />
+                <Field label="RCCM" value={shopExtra.rccm} onChange={(v) => setShopExtra({ ...shopExtra, rccm: v })} disabled={!canManage} />
+                <Field label="IFU / N° fiscal" value={shopExtra.ifu} onChange={(v) => setShopExtra({ ...shopExtra, ifu: v })} disabled={!canManage} />
+                <Field label="Facebook" value={shopExtra.facebook} onChange={(v) => setShopExtra({ ...shopExtra, facebook: v })} disabled={!canManage} />
+                <Field label="Instagram" value={shopExtra.instagram} onChange={(v) => setShopExtra({ ...shopExtra, instagram: v })} disabled={!canManage} />
               </div>
 
               <div className="mt-6">
@@ -159,10 +163,12 @@ function ParametresPage() {
                 </div>
               </div>
 
-              <button onClick={saveShop} disabled={updateShop.isPending || updateSettings.isPending}
-                className="mt-6 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
-                <Save className="h-4 w-4" /> Enregistrer
-              </button>
+              {canManage && (
+                <button onClick={saveShop} disabled={updateShop.isPending || updateSettings.isPending}
+                  className="mt-6 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                  <Save className="h-4 w-4" /> Enregistrer
+                </button>
+              )}
             </div>
           )}
 
@@ -211,16 +217,19 @@ function ParametresPage() {
                   ] as const).map(([k, label]) => (
                     <label key={k} className="flex items-center justify-between rounded-xl border border-border p-3 text-sm">
                       <span>{label}</span>
-                      <input type="checkbox" checked={!!ticket[k]} onChange={(e) => setTicket({ ...ticket, [k]: e.target.checked })} className="h-5 w-5 accent-primary" />
+                      <input type="checkbox" checked={!!ticket[k]} disabled={!canManage}
+                        onChange={(e) => setTicket({ ...ticket, [k]: e.target.checked })} className="h-5 w-5 accent-primary" />
                     </label>
                   ))}
-                  <Field label="Message de remerciement" value={ticket.thanks ?? ""} onChange={(v) => setTicket({ ...ticket, thanks: v })} />
-                  <Field label="Pied de page" value={footer} onChange={setFooter} />
+                  <Field label="Message de remerciement" value={ticket.thanks ?? ""} onChange={(v) => setTicket({ ...ticket, thanks: v })} disabled={!canManage} />
+                  <Field label="Pied de page" value={footer} onChange={setFooter} disabled={!canManage} />
                 </div>
-                <button onClick={saveTicket} disabled={updateSettings.isPending || settingsLoading}
-                  className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
-                  <Save className="h-4 w-4" /> Enregistrer
-                </button>
+                {canManage && (
+                  <button onClick={saveTicket} disabled={updateSettings.isPending || settingsLoading}
+                    className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                    <Save className="h-4 w-4" /> Enregistrer
+                  </button>
+                )}
               </div>
 
               <div className="sticky top-20">

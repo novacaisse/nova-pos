@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, Plus, Phone, Mail, MapPin, X, Star, CreditCard, Edit3, Trash2, Save } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
-  useCustomers, useUpsertCustomer, useDeleteCustomer,
+  useCustomers, useUpsertCustomer, useDeleteCustomer, useMyRole,
   formatXOF, type Customer,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,8 @@ function ClientsPage() {
   const { data: customers = [], isLoading } = useCustomers();
   const upsert = useUpsertCustomer();
   const remove = useDeleteCustomer();
+  const { data: myRole } = useMyRole();
+  const canDelete = myRole !== "cashier"; // cashier a SIU sur customers, pas D
 
   const list = useMemo(() => customers.filter((c) => {
     if (!query.trim()) return true;
@@ -81,7 +83,9 @@ function ClientsPage() {
                   </button>
                   <div className="flex gap-1">
                     <button onClick={() => setEdit(c)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
-                    <button onClick={() => setDel(c)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+                    {canDelete && (
+                      <button onClick={() => setDel(c)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 text-center">

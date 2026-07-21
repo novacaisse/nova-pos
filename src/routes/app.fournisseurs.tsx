@@ -3,7 +3,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Truck, Phone, Mail, FileText, PackageCheck, Edit3, Trash2, X, Save } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useSuppliers, useUpsertSupplier, useDeleteSupplier, formatXOF, type Supplier } from "@/lib/data/hooks";
+import { useSuppliers, useUpsertSupplier, useDeleteSupplier, useMyRole, formatXOF, type Supplier } from "@/lib/data/hooks";
 import { PURCHASE_ORDERS, type PurchaseOrder } from "@/lib/mock/suppliers";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +26,8 @@ function FournisseursPage() {
   const { data: suppliers = [], isLoading } = useSuppliers();
   const upsert = useUpsertSupplier();
   const remove = useDeleteSupplier();
+  const { data: myRole } = useMyRole();
+  const canManage = myRole === "owner" || myRole === "manager"; // stock/accountant : lecture seule
 
   const pending = PURCHASE_ORDERS.filter((p) => p.status === "envoyée" || p.status === "partielle").length;
 
@@ -34,12 +36,12 @@ function FournisseursPage() {
       <PageHeader
         title="Fournisseurs"
         subtitle="Partenaires et bons de commande"
-        actions={
+        actions={canManage && (
           <>
             <button onClick={() => setEdit({ name: "" })} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Nouveau fournisseur</button>
             <button className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><FileText className="h-4 w-4" /> Bon de commande</button>
           </>
-        }
+        )}
       />
 
       <div className="space-y-4 p-5 sm:p-8">
@@ -65,7 +67,9 @@ function FournisseursPage() {
           ) : suppliers.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
               <div className="text-sm text-muted-foreground">Aucun fournisseur pour l'instant.</div>
-              <button onClick={() => setEdit({ name: "" })} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter</button>
+              {canManage && (
+                <button onClick={() => setEdit({ name: "" })} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter</button>
+              )}
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -79,10 +83,12 @@ function FournisseursPage() {
                       <div className="truncate font-semibold">{s.name}</div>
                       <div className="text-xs text-muted-foreground">{s.contact ?? "—"}</div>
                     </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => setEdit(s)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
-                      <button onClick={() => setDel(s)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
-                    </div>
+                    {canManage && (
+                      <div className="flex gap-1">
+                        <button onClick={() => setEdit(s)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
+                        <button onClick={() => setDel(s)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-3 space-y-1 text-xs">
                     {s.phone && <div className="flex items-center gap-2 text-muted-foreground"><Phone className="h-3.5 w-3.5" /> {s.phone}</div>}

@@ -5,7 +5,7 @@ import { ArrowDownCircle, ArrowUpCircle, Sliders, AlertTriangle, ArrowLeftRight,
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
   useProducts, useUpsertProduct,
-  useStockMovements, useCreateStockMovement,
+  useStockMovements, useCreateStockMovement, useMyRole,
   formatXOF, type ProductWithStock,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,10 @@ function StockPage() {
   const { data: moves = [] } = useStockMovements(200);
   const createMove = useCreateStockMovement();
   const upsertProduct = useUpsertProduct();
+  const { data: myRole } = useMyRole();
+  // cashier ne génère un mouvement que via l'encaissement (déjà couvert par
+  // la RLS côté caisse) ; jamais manuellement. accountant : lecture seule.
+  const canManage = myRole === "owner" || myRole === "manager" || myRole === "stock";
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "in" | "out" | "adjustment" | "transfer" | "sale" | "return">("all");
@@ -49,7 +53,9 @@ function StockPage() {
   return (
     <div>
       <PageHeader title="Stock" subtitle="Suivi des mouvements et alertes"
-        actions={<button onClick={() => setShowAdjust(true)} disabled={products.length === 0} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90 disabled:opacity-40"><Plus className="h-4 w-4" /> Nouveau mouvement</button>}
+        actions={canManage && (
+          <button onClick={() => setShowAdjust(true)} disabled={products.length === 0} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90 disabled:opacity-40"><Plus className="h-4 w-4" /> Nouveau mouvement</button>
+        )}
       />
 
       <div className="space-y-4 p-5 sm:p-8">
@@ -163,7 +169,9 @@ function StockPage() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button onClick={() => setEditingThreshold(p)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
+                            {canManage && (
+                              <button onClick={() => setEditingThreshold(p)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
+                            )}
                           </td>
                         </tr>
                       );
