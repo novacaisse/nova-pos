@@ -489,6 +489,77 @@ export function useMyRole() {
   });
 }
 
+// ============ ÉQUIPE (shop_members + profils) ============
+// Pas de FK shop_members.user_id -> profiles.id (les deux référencent
+// auth.users indépendamment), donc pas d'embed PostgREST possible : on
+// fait deux requêtes et on fusionne côté client.
+export type ShopMember = {
+  id: string; shop_id: string; user_id: string; role: AppRole; created_at: string;
+  profile: { full_name: string | null; phone: string | null } | null;
+};
+
+export function useShopMembers() {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["shop_members", shopId],
+    enabled: !!shopId,
+    queryFn: async (): Promise<ShopMember[]> => {
+      const { data: members, error } = await supabase.from("shop_members")
+        .select("*").eq("shop_id", shopId!).order("created_at");
+      if (error) throw error;
+      const userIds = (members ?? []).map((m: any) => m.user_id);
+      let profiles: Record<string, { full_name: string | null; phone: string | null }> = {};
+      if (userIds.length) {
+        const { data: profs, error: profErr } = await supabase.from("profiles")
+          .select("id, full_name, phone").in("id", userIds);
+        if (profErr) throw profErr;
+        profiles = Object.fromEntries((profs ?? []).map((p: any) => [p.id, p]));
+      }
+      return (members ?? []).map((m: any) => ({ ...m, profile: profiles[m.user_id] ?? null }));
+    },
+  });
+}
+
+export function useInviteMember() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ email, role }: { email: string; role: AppRole }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const { data: userId, error: rpcErr } = await supabase.rpc("find_user_id_by_email", { _email: email.trim() });
+      if (rpcErr) throw rpcErr;
+      if (!userId) throw new Error("Aucun compte trouvé avec cet email. La personne doit d'abord créer un compte via /rejoindre.");
+      const { error } = await supabase.from("shop_members").insert({ shop_id: shopId, user_id: userId, role });
+      if (error) {
+        if ((error as any).code === "23505") throw new Error("Cette personne fait déjà partie de l'équipe.");
+        throw error;
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+  });
+}
+
+export function useUpdateMemberRole() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ memberId, role }: { memberId: string; role: AppRole }) => {
+      const { error } = await supabase.from("shop_members").update({ role }).eq("id", memberId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+  });
+}
+
+export function useRemoveMember() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (memberId: string) => {
+      const { error } = await supabase.from("shop_members").delete().eq("id", memberId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+  });
+}
+
 // ============ SHOP (identité + logo + ticket de caisse) ============
 // Les champs sans colonne dédiée sur `shops` (adresse, téléphone, RCCM/IFU,
 // réseaux sociaux) vivent dans shop_settings.data (jsonb), pour éviter une

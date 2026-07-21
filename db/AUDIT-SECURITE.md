@@ -268,12 +268,54 @@ Trois ajouts :
 - `shops_update` étendue à owner **et manager** (migration 003, section 3) —
   point signalé lors de la connexion de l'écran, corrigé sur votre confirmation.
 
-## 7. Prochaines étapes suggérées
+## 7. Migration 004 — invitation Équipe (à exécuter)
 
-1. Relire et exécuter `db/migrations/003_subscription_payments_and_logo_storage.sql`
-   (mise à jour : inclut maintenant aussi l'ouverture de `shops_update` à manager).
+**Fichier** : `db/migrations/004_find_user_by_email.sql`. Deux ajouts, tous
+deux nécessaires au fonctionnement de l'écran Équipe (connecté dans ce même
+lot de travail) :
+
+1. **`find_user_id_by_email(_email text) returns uuid`** — permet au owner
+   d'ajouter un membre existant à sa boutique sans API admin (pas de service
+   role key disponible). Ne renvoie que l'UUID, rien d'autre de `auth.users`.
+   Limite acceptée : n'importe quel compte authentifié peut vérifier si un
+   email donné est enregistré sur la plateforme (énumération d'emails) —
+   exécution réservée aux rôles authentifiés (pas `anon`) pour limiter
+   l'exposition, sans protection supplémentaire au-delà de ça dans ce scope.
+2. **`profiles_select_shopmates`** — correction trouvée en implémentant
+   l'écran : `profiles_all` (schéma initial) restreint déjà SELECT à
+   `id = auth.uid()`, donc un owner listant son équipe ne voyait ni nom ni
+   téléphone de ses coéquipiers (RLS filtrait silencieusement, sans erreur).
+   Nouvelle policy SELECT (OR avec l'existante) limitée à la lecture, pour
+   les personnes partageant au moins une boutique. `profiles_all` reste
+   inchangée et continue de restreindre insert/update/delete à soi-même.
+
+## 8. Écran Équipe — connecté (avec écarts assumés vs le mock)
+
+Flux d'invitation réel : la personne invitée crée son compte via la
+nouvelle route publique `/rejoindre` (aucune boutique créée, contrairement à
+`/inscription`), puis le owner l'ajoute à son équipe par email + rôle depuis
+Équipe. Invitation et changement de rôle restent **owner-only**
+(`shop_members_insert`/`_update`, schéma initial, non étendues — confirmé
+avec vous, contrairement à `shops_update`).
+
+Écarts par rapport au mock, tous validés avec vous :
+- **Statut actif/inactif** → pas de colonne dédiée sur `shop_members` :
+  remplacé par un vrai retrait (`delete`), qui coupe l'accès immédiatement.
+- **Dernière connexion** → non accessible côté client (vit dans
+  `auth.users`) : remplacé par « Membre depuis » (`shop_members.created_at`).
+- **Journal d'activité** → retiré, pas de table d'audit dans le schéma ;
+  tâche séparée si besoin plus tard.
+- **Onglet Permissions** → transformé en tableau **lecture seule**
+  (`src/lib/permissionsMatrix.ts`, dupliqué manuellement depuis la matrice
+  RLS réelle de la section 4 — pas de table de permissions configurable en
+  base, donc rien à rendre éditable sans mentir sur ce que l'UI ferait).
+
+## 9. Prochaines étapes suggérées
+
+1. Relire et exécuter `db/migrations/004_find_user_by_email.sql`
+   (migration 003 confirmée exécutée).
 2. Décider si `stock_levels`/`stock_movements` doivent rester strictement
    immuables pour owner/manager aussi, ou prévoir une échappatoire.
-3. Ajouter les garde-fous UI par rôle une fois l'écran Équipe connecté
-   (masquer les actions que RLS refuserait de toute façon) — tâche #6 en cours.
+3. Ajouter les garde-fous UI par rôle une fois l'écran Équipe connecté —
+   tâche #6, prochaine étape après Devis et Abonnement.
 4. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.

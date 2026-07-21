@@ -77,6 +77,16 @@ returns boolean language sql stable security definer set search_path = public as
     where shop_id = _shop_id and user_id = auth.uid() and role = any(_roles));
 $$;
 
+-- Recherche d'utilisateur par email pour le flux d'invitation Équipe — ne
+-- renvoie que l'UUID, rien d'autre de auth.users. Voir
+-- db/migrations/004_find_user_by_email.sql pour le détail et les limites.
+create or replace function public.find_user_id_by_email(_email text)
+returns uuid language sql stable security definer set search_path = public as $$
+  select id from auth.users where lower(email) = lower(_email) limit 1;
+$$;
+revoke all on function public.find_user_id_by_email(text) from public;
+grant execute on function public.find_user_id_by_email(text) to authenticated;
+
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   shop_id uuid not null references public.shops(id) on delete cascade,
@@ -337,6 +347,18 @@ create policy shops_delete on public.shops for delete to authenticated
 drop policy if exists profiles_all on public.profiles;
 create policy profiles_all on public.profiles for all to authenticated
   using (id = auth.uid()) with check (id = auth.uid());
+-- Lecture supplémentaire (OR avec profiles_all) : les coéquipiers d'une
+-- même boutique peuvent voir le nom/téléphone les uns des autres (écran
+-- Équipe) ; insert/update/delete restent strictement self-only ci-dessus.
+drop policy if exists profiles_select_shopmates on public.profiles;
+create policy profiles_select_shopmates on public.profiles for select to authenticated
+  using (
+    exists (
+      select 1 from public.shop_members me
+      join public.shop_members them on them.shop_id = me.shop_id
+      where me.user_id = auth.uid() and them.user_id = profiles.id
+    )
+  );
 
 drop policy if exists shop_members_select on public.shop_members;
 create policy shop_members_select on public.shop_members for select to authenticated
