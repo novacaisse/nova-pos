@@ -344,15 +344,22 @@ export function useCreateStockMovement() {
 }
 
 // ============ SALES ============
-export function useSales(limit = 200) {
+// Accepte soit une limite (rétrocompatible avec les appels existants), soit
+// des options incluant un filtre de date — utilisé par Rapports pour filtrer
+// côté requête plutôt que de tout charger et trier côté client.
+export function useSales(opts: number | { limit?: number; from?: string; to?: string } = 200) {
+  const { limit = 200, from, to } = typeof opts === "number" ? { limit: opts } : opts;
   const shopId = useShopId();
   return useQuery({
-    queryKey: ["sales", shopId, limit],
+    queryKey: ["sales", shopId, limit, from, to],
     enabled: !!shopId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("sales")
+      let q = supabase.from("sales")
         .select("*, sale_items(*), customers(name)")
-        .eq("shop_id", shopId!).order("created_at", { ascending: false }).limit(limit);
+        .eq("shop_id", shopId!);
+      if (from) q = q.gte("created_at", from);
+      if (to) q = q.lte("created_at", to);
+      const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []) as (Sale & { sale_items: SaleItem[]; customers: { name: string } | null })[];
     },

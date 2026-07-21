@@ -1,10 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package, Truck, FileSpreadsheet, FileText as FileIcon } from "lucide-react";
+import { Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package, Truck, FileSpreadsheet, FileText as FileIcon, Loader2 } from "lucide-react";
+import {
+  startOfDay, endOfDay, startOfWeek, startOfMonth, endOfMonth,
+  startOfYear, endOfYear, subMonths, subYears,
+} from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { SALES } from "@/lib/mock/sales";
-import { formatXOF } from "@/lib/mock/catalog";
+import { useSales, useProducts, formatXOF } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/rapports")({
@@ -21,6 +24,7 @@ const PERIODS = [
   { id: "last_year", label: "Année dernière" },
   { id: "custom", label: "Personnalisé" },
 ] as const;
+type PeriodId = (typeof PERIODS)[number]["id"];
 
 const REPORTS = [
   { id: "sales", label: "Ventes", icon: BarChart3 },
@@ -30,11 +34,12 @@ const REPORTS = [
   { id: "margin", label: "Marge réelle", icon: TrendingUp },
   { id: "peak", label: "Heures & jours de pointe", icon: Clock },
 ] as const;
+type ReportId = (typeof REPORTS)[number]["id"];
 
 const MOCK_AI = [
   "Ta meilleure journée cette semaine est jeudi (+34% vs moyenne).",
-  "Le produit 'Coca-Cola 33cl' est ton best-seller. Commande 200 unités avant vendredi.",
-  "Marge globale : 31,5% ce mois-ci, en baisse de 2 points. La catégorie Épicerie tire vers le bas.",
+  "Le produit le plus vendu ce mois-ci mérite une commande de réassort.",
+  "Regarde l'onglet Marge réelle pour repérer les produits qui tirent ta rentabilité vers le bas.",
 ];
 
 function downloadFile(name: string, content: string, mime: string) {
@@ -45,26 +50,120 @@ function downloadFile(name: string, content: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
+function periodRange(period: PeriodId, from: string, to: string): { from: string; to: string; label: string } {
+  const now = new Date();
+  switch (period) {
+    case "today": return { from: startOfDay(now).toISOString(), to: endOfDay(now).toISOString(), label: "Aujourd'hui" };
+    case "yesterday": {
+      const y = new Date(now); y.setDate(y.getDate() - 1);
+      return { from: startOfDay(y).toISOString(), to: endOfDay(y).toISOString(), label: "Hier" };
+    }
+    case "week": return { from: startOfWeek(now, { weekStartsOn: 1 }).toISOString(), to: endOfDay(now).toISOString(), label: "Cette semaine" };
+    case "month": return { from: startOfMonth(now).toISOString(), to: endOfDay(now).toISOString(), label: "Ce mois" };
+    case "last_month": {
+      const m = subMonths(now, 1);
+      return { from: startOfMonth(m).toISOString(), to: endOfMonth(m).toISOString(), label: "Mois dernier" };
+    }
+    case "year": return { from: startOfYear(now).toISOString(), to: endOfDay(now).toISOString(), label: "Cette année" };
+    case "last_year": {
+      const y = subYears(now, 1);
+      return { from: startOfYear(y).toISOString(), to: endOfYear(y).toISOString(), label: "Année dernière" };
+    }
+    case "custom":
+      return {
+        from: from ? startOfDay(new Date(from)).toISOString() : startOfMonth(now).toISOString(),
+        to: to ? endOfDay(new Date(to)).toISOString() : endOfDay(now).toISOString(),
+        label: "Personnalisé",
+      };
+  }
+}
+
 function RapportsPage() {
-  const [period, setPeriod] = useState<(typeof PERIODS)[number]["id"]>("month");
+  const [period, setPeriod] = useState<PeriodId>("month");
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
-  const [report, setReport] = useState<(typeof REPORTS)[number]["id"]>("sales");
+  const [report, setReport] = useState<ReportId>("sales");
   const [aiInput, setAiInput] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "ai"; text: string }[]>([
     { role: "ai", text: "Bonjour ! Je suis Nova. Posez-moi une question sur vos ventes, votre stock ou vos clients." },
   ]);
 
-  const ca = SALES.reduce((s, x) => s + x.total, 0);
-  const peakHours = [12, 20, 35, 48, 62, 78, 55, 40, 45, 68, 82, 74, 45].map((v, i) => ({ h: `${8 + i}h`, v }));
-  const maxPeak = Math.max(...peakHours.map((p) => p.v));
-  const periodLabel = PERIODS.find((p) => p.id === period)?.label ?? "";
+  const range = periodRange(period, from, to);
+  // Limite de sécurité côté requête : au-delà de ce volume sur la période
+  // choisie, ce rapport sous-estimera le total (pas de pagination ici).
+  const { data: sales = [], isLoading } = useSales({ from: range.from, to: range.to, limit: 2000 });
+  const { data: products = [] } = useProducts();
+
+  const costById = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.cost])), [products]);
+
+  const ca = sales.reduce((s, x) => s + x.total, 0);
+  const ticketMoyen = sales.length ? ca / sales.length : 0;
+  const totalCost = sales.reduce((sum, sale) =>
+    sum + sale.sale_items.reduce((s, it) => s + (it.product_id ? (costById[it.product_id] ?? 0) * it.quantity : 0), 0), 0);
+  const marginPct = ca > 0 ? ((ca - totalCost) / ca) * 100 : 0;
+
+  const topProducts = useMemo(() => {
+    const agg = new Map<string, { name: string; qty: number; ca: number; cost: number }>();
+    for (const sale of sales) {
+      for (const it of sale.sale_items) {
+        const key = it.product_id ?? `manuel:${it.name}`;
+        const cur = agg.get(key) ?? { name: it.name, qty: 0, ca: 0, cost: 0 };
+        cur.qty += it.quantity;
+        cur.ca += it.total;
+        cur.cost += it.product_id ? (costById[it.product_id] ?? 0) * it.quantity : 0;
+        agg.set(key, cur);
+      }
+    }
+    return [...agg.values()].map((p) => ({ ...p, marginPct: p.ca > 0 ? ((p.ca - p.cost) / p.ca) * 100 : 0 }));
+  }, [sales, costById]);
+
+  const topProductsByCa = useMemo(() => [...topProducts].sort((a, b) => b.ca - a.ca).slice(0, 8), [topProducts]);
+  const worstMarginProducts = useMemo(() => [...topProducts].sort((a, b) => a.marginPct - b.marginPct).slice(0, 8), [topProducts]);
+
+  const topCustomers = useMemo(() => {
+    const agg = new Map<string, { name: string; qty: number; ca: number }>();
+    for (const sale of sales) {
+      const key = sale.customer_id ?? "__none__";
+      const name = sale.customers?.name ?? "Client de passage";
+      const cur = agg.get(key) ?? { name, qty: 0, ca: 0 };
+      cur.qty += 1;
+      cur.ca += sale.total;
+      agg.set(key, cur);
+    }
+    return [...agg.values()].sort((a, b) => b.ca - a.ca).slice(0, 8);
+  }, [sales]);
+
+  const peakHours = useMemo(() => {
+    const counts = Array.from({ length: 24 }, () => 0);
+    for (const sale of sales) counts[new Date(sale.created_at).getHours()]++;
+    return counts.map((v, h) => ({ h: `${h}h`, v })).filter((p, i) => i >= 6 && i <= 22);
+  }, [sales]);
+  const maxPeak = Math.max(1, ...peakHours.map((p) => p.v));
+
+  const salesByDay = useMemo(() => {
+    const agg = new Map<string, { date: string; qty: number; ca: number }>();
+    for (const sale of sales) {
+      const day = sale.created_at.slice(0, 10);
+      const cur = agg.get(day) ?? { date: day, qty: 0, ca: 0 };
+      cur.qty += 1; cur.ca += sale.total;
+      agg.set(day, cur);
+    }
+    return [...agg.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 31);
+  }, [sales]);
+
+  const currentRows: { label: string; qty: number; ca: number; margin: string }[] = useMemo(() => {
+    if (report === "products") return topProductsByCa.map((p) => ({ label: p.name, qty: p.qty, ca: p.ca, margin: `${p.marginPct.toFixed(0)}%` }));
+    if (report === "margin") return worstMarginProducts.map((p) => ({ label: p.name, qty: p.qty, ca: p.ca, margin: `${p.marginPct.toFixed(0)}%` }));
+    if (report === "customers") return topCustomers.map((c) => ({ label: c.name, qty: c.qty, ca: c.ca, margin: "—" }));
+    if (report === "sales") return salesByDay.map((d) => ({ label: new Date(d.date).toLocaleDateString("fr-FR"), qty: d.qty, ca: d.ca, margin: "—" }));
+    return [];
+  }, [report, topProductsByCa, worstMarginProducts, topCustomers, salesByDay]);
 
   const exportCsv = () => {
     const rows = [
-      ["Rapport", REPORTS.find((r) => r.id === report)?.label, periodLabel].join(","),
+      ["Rapport", REPORTS.find((r) => r.id === report)?.label, range.label].join(","),
       "",
-      ["Libellé", "Quantité", "CA", "Marge %"].join(","),
-      ...Array.from({ length: 8 }).map((_, i) => [`Ligne ${i + 1}`, 15 + i * 7, 20000 + i * 8500, 28 + (i % 5)].join(",")),
+      ["Libellé", "Qté", "CA", "Marge"].join(","),
+      ...currentRows.map((r) => [r.label, r.qty, r.ca, r.margin].join(",")),
     ].join("\n");
     downloadFile(`rapport-${report}-${period}.csv`, rows, "text/csv");
   };
@@ -74,9 +173,9 @@ function RapportsPage() {
       <style>body{font-family:sans-serif;padding:24px}h1{color:#0891b2}table{width:100%;border-collapse:collapse;margin-top:16px}
       th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}th{background:#f5f5f5}</style></head>
       <body><h1>NovaCaisse — ${REPORTS.find((r) => r.id === report)?.label}</h1>
-      <p>Période : <b>${periodLabel}</b></p>
+      <p>Période : <b>${range.label}</b></p>
       <table><thead><tr><th>Libellé</th><th>Qté</th><th>CA</th><th>Marge</th></tr></thead>
-      <tbody>${Array.from({ length: 8 }).map((_, i) => `<tr><td>Ligne ${i + 1}</td><td>${15 + i * 7}</td><td>${formatXOF(20000 + i * 8500)}</td><td>${28 + (i % 5)}%</td></tr>`).join("")}</tbody></table>
+      <tbody>${currentRows.map((r) => `<tr><td>${r.label}</td><td>${r.qty}</td><td>${formatXOF(r.ca)}</td><td>${r.margin}</td></tr>`).join("")}</tbody></table>
       <p style="margin-top:24px;color:#666;font-size:12px">Généré le ${new Date().toLocaleString("fr-FR")}</p></body></html>`;
     const w = window.open("", "_blank", "width=900,height=700");
     if (!w) return;
@@ -123,63 +222,81 @@ function RapportsPage() {
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <StatCard label={`CA · ${periodLabel}`} value={formatXOF(ca)} accent="primary" trend={{ value: "+12%", positive: true }} />
-            <StatCard label="Marge réelle" value="31,5%" accent="success" trend={{ value: "-2 pts", positive: false }} />
-            <StatCard label="Ticket moyen" value={formatXOF(Math.round(ca / SALES.length))} accent="accent" trend={{ value: "+3%", positive: true }} />
-          </div>
-
-          <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
-            {REPORTS.map((r) => {
-              const Icon = r.icon;
-              return (
-                <button key={r.id} onClick={() => setReport(r.id)}
-                  className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium", report === r.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-                  <Icon className="h-3.5 w-3.5" /> {r.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {REPORTS.find((r) => r.id === report)?.label} · {periodLabel}
+          {isLoading ? (
+            <div className="flex items-center gap-2 rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <StatCard label={`CA · ${range.label}`} value={formatXOF(ca)} accent="primary" />
+                <StatCard label="Marge réelle (coût actuel)" value={`${marginPct.toFixed(1)}%`} accent="success" />
+                <StatCard label="Ticket moyen" value={formatXOF(Math.round(ticketMoyen))} accent="accent" />
               </div>
-            </div>
-            {report === "peak" ? (
-              <div className="flex h-64 items-end gap-2">
-                {peakHours.map((p) => (
-                  <div key={p.h} className="flex flex-1 flex-col items-center gap-1">
-                    <motion.div initial={{ height: 0 }} animate={{ height: `${(p.v / maxPeak) * 100}%` }}
-                      className="w-full rounded-t-md bg-gradient-to-t from-primary/70 to-primary-glow" style={{ minHeight: 8 }} />
-                    <div className="text-[10px] text-muted-foreground">{p.h}</div>
+
+              <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
+                {REPORTS.map((r) => {
+                  const Icon = r.icon;
+                  return (
+                    <button key={r.id} onClick={() => setReport(r.id)}
+                      className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium", report === r.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+                      <Icon className="h-3.5 w-3.5" /> {r.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {REPORTS.find((r) => r.id === report)?.label} · {range.label}
                   </div>
-                ))}
+                </div>
+                {report === "suppliers" ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">
+                    Bientôt disponible — nécessite de lier produits et fournisseurs (pas encore dans le schéma).
+                  </div>
+                ) : report === "peak" ? (
+                  peakHours.every((p) => p.v === 0) ? (
+                    <div className="p-8 text-center text-sm text-muted-foreground">Aucune vente sur cette période.</div>
+                  ) : (
+                    <div className="flex h-64 items-end gap-2">
+                      {peakHours.map((p) => (
+                        <div key={p.h} className="flex flex-1 flex-col items-center gap-1">
+                          <motion.div initial={{ height: 0 }} animate={{ height: `${(p.v / maxPeak) * 100}%` }}
+                            className="w-full rounded-t-md bg-gradient-to-t from-primary/70 to-primary-glow" style={{ minHeight: 4 }} />
+                          <div className="text-[10px] text-muted-foreground">{p.h}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                ) : currentRows.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">Aucune donnée sur cette période.</div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          <th className="px-3 py-2">{report === "sales" ? "Jour" : report === "customers" ? "Client" : "Produit"}</th>
+                          <th className="px-3 py-2 text-right">{report === "customers" ? "Achats" : "Qté"}</th>
+                          <th className="px-3 py-2 text-right">CA</th>
+                          <th className="px-3 py-2 text-right">Marge</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {currentRows.map((r, i) => (
+                          <tr key={i} className="border-t border-border/60">
+                            <td className="px-3 py-2 font-medium">{r.label}</td>
+                            <td className="tabular px-3 py-2 text-right">{r.qty}</td>
+                            <td className="tabular px-3 py-2 text-right font-semibold">{formatXOF(r.ca)}</td>
+                            <td className="tabular px-3 py-2 text-right text-success">{r.margin}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="overflow-hidden rounded-xl border border-border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40">
-                    <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <th className="px-3 py-2">Libellé</th><th className="px-3 py-2 text-right">Qté</th>
-                      <th className="px-3 py-2 text-right">CA</th><th className="px-3 py-2 text-right">Marge</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Array.from({ length: 8 }).map((_, i) => (
-                      <tr key={i} className="border-t border-border/60">
-                        <td className="px-3 py-2 font-medium">{report === "customers" ? `Client ${i + 1}` : report === "suppliers" ? `Fournisseur ${i + 1}` : `Ligne ${i + 1}`}</td>
-                        <td className="tabular px-3 py-2 text-right">{15 + i * 7}</td>
-                        <td className="tabular px-3 py-2 text-right font-semibold">{formatXOF(20000 + i * 8500)}</td>
-                        <td className="tabular px-3 py-2 text-right text-success">{28 + (i % 5)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         <div className="rounded-2xl border border-border bg-gradient-to-br from-primary/10 to-accent/10 p-5">
@@ -189,7 +306,7 @@ function RapportsPage() {
             </div>
             <div>
               <div className="font-display text-sm font-bold">Nova · Analyste IA</div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Réponses en langage naturel</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Réponses en langage naturel (démo)</div>
             </div>
           </div>
 
