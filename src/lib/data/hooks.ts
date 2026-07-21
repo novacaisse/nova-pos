@@ -436,6 +436,129 @@ export function useCreateSale() {
   });
 }
 
+// ============ DEVIS ============
+export type QuoteStatus = "draft" | "sent" | "accepted" | "refused" | "converted" | "expired";
+export type Quote = {
+  id: string; shop_id: string; reference: string;
+  customer_id: string | null;
+  status: QuoteStatus;
+  subtotal: number; discount: number; tax: number; total: number;
+  valid_until: string | null;
+  converted_sale_id: string | null;
+  notes: string | null; created_at: string;
+};
+export type QuoteItem = {
+  id: string; shop_id: string; quote_id: string; product_id: string | null;
+  name: string; quantity: number; unit_price: number; discount: number;
+  tax_rate: number; total: number;
+};
+export type QuoteWithItems = Quote & { quote_items: QuoteItem[]; customers: { name: string } | null };
+
+export function useQuotes(limit = 200) {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["quotes", shopId, limit],
+    enabled: !!shopId,
+    queryFn: async (): Promise<QuoteWithItems[]> => {
+      const { data, error } = await supabase.from("quotes")
+        .select("*, quote_items(*), customers(name)")
+        .eq("shop_id", shopId!).order("created_at", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data ?? []) as QuoteWithItems[];
+    },
+  });
+}
+
+// Crée ou met à jour un devis + ses lignes (remplace toutes les lignes à
+// chaque enregistrement — plus simple qu'un diff, acceptable vu le volume
+// de lignes d'un devis). Éditer un devis existant nécessite un delete sur
+// quote_items, réservé à owner/manager par la RLS — un cashier ne peut donc
+// créer que de nouveaux devis, pas modifier les existants.
+export function useUpsertQuote() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id?: string;
+      reference?: string;
+      customer_id?: string | null;
+      valid_until?: string | null;
+      notes?: string | null;
+      status?: QuoteStatus;
+      items: { product_id: string | null; name: string; quantity: number; unit_price: number; discount?: number; tax_rate?: number }[];
+    }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const items = input.items.map((it) => {
+        const line = it.quantity * it.unit_price - (it.discount ?? 0);
+        return { ...it, discount: it.discount ?? 0, tax_rate: it.tax_rate ?? 0, total: line };
+      });
+      const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
+      const itemsDiscount = items.reduce((s, i) => s + (i.discount ?? 0), 0);
+      const total = Math.max(0, subtotal - itemsDiscount);
+
+      const payload = {
+        shop_id: shopId,
+        reference: input.reference ?? newTicketRef("DEV"),
+        customer_id: input.customer_id ?? null,
+        status: input.status ?? "draft",
+        subtotal, discount: itemsDiscount, tax: 0, total,
+        valid_until: input.valid_until ?? null,
+        notes: input.notes ?? null,
+      };
+
+      let quoteId = input.id;
+      if (quoteId) {
+        const { error } = await supabase.from("quotes").update(payload).eq("id", quoteId);
+        if (error) throw error;
+        const { error: delErr } = await supabase.from("quote_items").delete().eq("quote_id", quoteId);
+        if (delErr) throw delErr;
+      } else {
+        const { data, error } = await supabase.from("quotes").insert(payload).select().single();
+        if (error) throw error;
+        quoteId = data.id;
+      }
+
+      if (items.length) {
+        const itemsPayload = items.map((it) => ({
+          shop_id: shopId, quote_id: quoteId,
+          product_id: it.product_id, name: it.name,
+          quantity: it.quantity, unit_price: it.unit_price,
+          discount: it.discount, tax_rate: it.tax_rate, total: it.total,
+        }));
+        const { error } = await supabase.from("quote_items").insert(itemsPayload);
+        if (error) throw error;
+      }
+      return quoteId!;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", shopId] }),
+  });
+}
+
+export function useDeleteQuote() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("quotes").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", shopId] }),
+  });
+}
+
+// Marque un devis converti après création réussie de la vente (voir
+// useCreateSale, réutilisé tel quel pour la conversion — pas de logique de
+// vente dupliquée).
+export function useMarkQuoteConverted() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ quoteId, saleId }: { quoteId: string; saleId: string }) => {
+      const { error } = await supabase.from("quotes")
+        .update({ status: "converted" as QuoteStatus, converted_sale_id: saleId }).eq("id", quoteId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", shopId] }),
+  });
+}
+
 // Helper — generate a short unique ticket ref.
 export function newTicketRef(prefix = "T") {
   const d = new Date();
