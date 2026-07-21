@@ -19,6 +19,8 @@ do $$ begin create type public.quote_status as enum ('draft','sent','accepted','
 exception when duplicate_object then null; end $$;
 do $$ begin create type public.subscription_status as enum ('trialing','active','past_due','canceled','expired');
 exception when duplicate_object then null; end $$;
+do $$ begin create type public.subscription_payment_status as enum ('pending','paid','failed','refunded');
+exception when duplicate_object then null; end $$;
 
 -- =============== TABLES ===============
 create table if not exists public.shops (
@@ -248,6 +250,21 @@ create table if not exists public.subscriptions (
 );
 create index if not exists idx_subs_shop on public.subscriptions(shop_id);
 
+create table if not exists public.subscription_payments (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references public.shops(id) on delete cascade,
+  subscription_id uuid not null references public.subscriptions(id) on delete cascade,
+  amount numeric(14,2) not null,
+  currency text not null default 'XOF',
+  method public.payment_method not null default 'mobile_money',
+  status public.subscription_payment_status not null default 'pending',
+  provider text default 'moneyfusion', provider_ref text,
+  paid_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_sub_payments_shop on public.subscription_payments(shop_id);
+create index if not exists idx_sub_payments_subscription on public.subscription_payments(subscription_id);
+
 create table if not exists public.shop_settings (
   shop_id uuid primary key references public.shops(id) on delete cascade,
   receipt_header text, receipt_footer text, receipt_logo_url text,
@@ -275,6 +292,7 @@ grant select, insert, update, delete on public.expenses        to authenticated;
 grant select, insert, update, delete on public.promotions      to authenticated;
 grant select, insert, update, delete on public.notifications   to authenticated;
 grant select, insert, update, delete on public.subscriptions   to authenticated;
+grant select, insert, update, delete on public.subscription_payments to authenticated;
 grant select, insert, update, delete on public.shop_settings   to authenticated;
 grant all on all tables in schema public to service_role;
 
@@ -297,6 +315,7 @@ alter table public.expenses        enable row level security;
 alter table public.promotions      enable row level security;
 alter table public.notifications   enable row level security;
 alter table public.subscriptions   enable row level security;
+alter table public.subscription_payments enable row level security;
 alter table public.shop_settings   enable row level security;
 
 drop policy if exists shops_select on public.shops;
@@ -554,6 +573,21 @@ drop policy if exists subscriptions_delete on public.subscriptions;
 create policy subscriptions_delete on public.subscriptions for delete to authenticated
   using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
 
+-- 15bis. subscription_payments — même matrice que subscriptions
+drop policy if exists subscription_payments_select on public.subscription_payments;
+create policy subscription_payments_select on public.subscription_payments for select to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager','accountant']::public.app_role[]));
+drop policy if exists subscription_payments_write on public.subscription_payments;
+create policy subscription_payments_write on public.subscription_payments for insert to authenticated
+  with check (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+drop policy if exists subscription_payments_update on public.subscription_payments;
+create policy subscription_payments_update on public.subscription_payments for update to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+drop policy if exists subscription_payments_delete on public.subscription_payments;
+create policy subscription_payments_delete on public.subscription_payments for delete to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+
 -- 16. shop_settings — lecture pour tous, écriture réservée à owner/manager
 drop policy if exists shop_settings_select on public.shop_settings;
 create policy shop_settings_select on public.shop_settings for select to authenticated
@@ -609,8 +643,43 @@ create trigger trg_stock_mov
   after insert on public.stock_movements
   for each row execute function public.apply_stock_movement();
 
+-- =============== STORAGE ===============
+-- Bucket pour le logo boutique : public en lecture (affiché sur tickets et
+-- reçus), écriture restreinte à owner/manager de la boutique propriétaire
+-- du chemin. Convention de chemin obligatoire côté client : {shop_id}/<fichier>.
+insert into storage.buckets (id, name, public)
+values ('shop-logos', 'shop-logos', true)
+on conflict (id) do nothing;
+
+drop policy if exists shop_logos_select on storage.objects;
+create policy shop_logos_select on storage.objects for select
+  using (bucket_id = 'shop-logos');
+drop policy if exists shop_logos_insert on storage.objects;
+create policy shop_logos_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'shop-logos'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+drop policy if exists shop_logos_update on storage.objects;
+create policy shop_logos_update on storage.objects for update to authenticated
+  using (
+    bucket_id = 'shop-logos'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  )
+  with check (
+    bucket_id = 'shop-logos'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+drop policy if exists shop_logos_delete on storage.objects;
+create policy shop_logos_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'shop-logos'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+
 -- =============== FIN ===============
--- Rappel: RLS activé sur les 19 tables. Aucune policy USING (true).
+-- Rappel: RLS activé sur les 20 tables (19 + subscription_payments).
+-- Aucune policy USING (true).
 -- Permissions différenciées par app_role sur 15 des 16 tables métier
 -- (notifications reste ouverte à tout membre ; stock_levels est en lecture
 -- seule pour tous — voir db/AUDIT-SECURITE.md pour la matrice complète).

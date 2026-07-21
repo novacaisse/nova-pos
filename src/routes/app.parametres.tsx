@@ -1,8 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Store, Coins, Receipt, ArrowLeftRight, Save, Plus, Image as ImageIcon, FileText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Store, Coins, Receipt, ArrowLeftRight, Save, Plus, Image as ImageIcon, FileText, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { SHOPS } from "@/lib/mock/session";
+import { useShop } from "@/lib/auth/ShopProvider";
+import {
+  useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo,
+  type TicketConfig,
+} from "@/lib/data/hooks";
+import { SHOPS as MOCK_TRANSFER_SHOPS } from "@/lib/mock/session";
 import { PRODUCTS, formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
@@ -10,62 +15,75 @@ export const Route = createFileRoute("/app/parametres")({
   component: ParametresPage,
 });
 
-type TicketConfig = {
-  showLogo: boolean; showAddress: boolean; showPhone: boolean;
-  showFiscal: boolean; showCashier: boolean; showQr: boolean;
-  thanks: string; footer: string;
-};
-
 const DEFAULT_TICKET: TicketConfig = {
   showLogo: true, showAddress: true, showPhone: true,
   showFiscal: true, showCashier: true, showQr: false,
-  thanks: "Merci pour votre achat !", footer: "À bientôt chez nous",
+  thanks: "Merci pour votre achat !",
 };
 
 function ParametresPage() {
   const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer">("shop");
+  const { shops, currentShop } = useShop();
+  const { data: settings, isLoading: settingsLoading } = useShopSettings();
+  const updateShop = useUpdateShop();
+  const updateSettings = useUpdateShopSettings();
+  const uploadLogo = useUploadShopLogo();
 
-  // shop info (persisted locally so the receipt can read them)
-  const [logo, setLogo] = useState<string | null>(null);
-  const [shop, setShop] = useState({
-    name: "Boutique Cotonou Centre", city: "Cotonou", phone: "+229 21 30 40 50",
-    email: "contact@novacaisse.bj", address: "Rue 12.345, Cotonou",
-    rccm: "RCCM COT/2024/B/1234", ifu: "3202400123456",
-    facebook: "novacaisse.bj", instagram: "@novacaisse",
+  const [name, setName] = useState("");
+  const [shopExtra, setShopExtra] = useState({
+    phone: "", email: "", address: "", rccm: "", ifu: "", facebook: "", instagram: "",
   });
   const [ticket, setTicket] = useState<TicketConfig>(DEFAULT_TICKET);
+  const [footer, setFooter] = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    setLogo(localStorage.getItem("nc_shop_logo"));
-    setShop((s) => ({
-      ...s,
-      name: localStorage.getItem("nc_shop_name") ?? s.name,
-      address: localStorage.getItem("nc_shop_address") ?? s.address,
-      phone: localStorage.getItem("nc_shop_phone") ?? s.phone,
-    }));
-    const t = localStorage.getItem("nc_ticket_cfg");
-    if (t) try { setTicket(JSON.parse(t)); } catch {}
-  }, []);
+    if (currentShop) setName(currentShop.name);
+  }, [currentShop]);
 
-  const saveShop = () => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem("nc_shop_name", shop.name);
-    localStorage.setItem("nc_shop_address", shop.address);
-    localStorage.setItem("nc_shop_phone", shop.phone);
-    if (logo) localStorage.setItem("nc_shop_logo", logo); else localStorage.removeItem("nc_shop_logo");
-  };
-  const saveTicket = () => {
-    localStorage.setItem("nc_ticket_cfg", JSON.stringify(ticket));
-    localStorage.setItem("nc_ticket_thanks", ticket.thanks);
+  useEffect(() => {
+    if (!settings) return;
+    setShopExtra((s) => ({ ...s, ...settings.data }));
+    setTicket((t) => ({ ...t, ...settings.data.ticket }));
+    setFooter(settings.receipt_footer ?? "");
+  }, [settings]);
+
+  const onLogo = async (file?: File) => {
+    if (!file || !currentShop) return;
+    setLogoUploading(true);
+    try {
+      await uploadLogo.mutateAsync(file);
+    } catch (e: any) {
+      alert("Erreur upload logo : " + (e?.message ?? "inconnue"));
+    } finally {
+      setLogoUploading(false);
+    }
   };
 
-  const onLogo = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setLogo(reader.result as string);
-    reader.readAsDataURL(file);
+  const saveShop = async () => {
+    if (!currentShop) return;
+    try {
+      await updateShop.mutateAsync({ name });
+      await updateSettings.mutateAsync({ data: { ...(settings?.data ?? {}), ...shopExtra, ticket } });
+    } catch (e: any) {
+      alert("Erreur enregistrement boutique : " + (e?.message ?? "inconnue"));
+    }
   };
+
+  const saveTicket = async () => {
+    try {
+      await updateSettings.mutateAsync({
+        receipt_footer: footer,
+        data: { ...(settings?.data ?? {}), ticket },
+      });
+    } catch (e: any) {
+      alert("Erreur enregistrement ticket : " + (e?.message ?? "inconnue"));
+    }
+  };
+
+  if (!currentShop) {
+    return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une boutique.</div>;
+  }
 
   return (
     <div>
@@ -96,30 +114,31 @@ function ParametresPage() {
               <h2 className="mb-4 font-display text-lg font-bold">Informations de la boutique</h2>
 
               <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-border p-4">
-                <div className="grid h-24 w-24 place-items-center overflow-hidden rounded-2xl bg-muted">
-                  {logo ? <img src={logo} alt="Logo" className="h-full w-full object-contain" /> : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
+                <div className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl bg-muted">
+                  {logoUploading ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    : currentShop.logo_url ? <img src={currentShop.logo_url} alt="Logo" className="h-full w-full object-contain" />
+                    : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">Logo de la boutique</div>
                   <p className="mb-2 text-xs text-muted-foreground">Appliqué automatiquement sur les reçus, factures et devis (PNG/JPG, max 1 Mo).</p>
                   <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted">
-                    <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogo(e.target.files?.[0])} />
+                    <input type="file" accept="image/*" className="hidden" disabled={logoUploading}
+                      onChange={(e) => onLogo(e.target.files?.[0])} />
                     Choisir un fichier
                   </label>
-                  {logo && <button onClick={() => setLogo(null)} className="ml-2 text-xs text-destructive hover:underline">Retirer</button>}
                 </div>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Nom" value={shop.name} onChange={(v) => setShop({ ...shop, name: v })} />
-                <Field label="Ville" value={shop.city} onChange={(v) => setShop({ ...shop, city: v })} />
-                <Field label="Téléphone" value={shop.phone} onChange={(v) => setShop({ ...shop, phone: v })} />
-                <Field label="Email" value={shop.email} onChange={(v) => setShop({ ...shop, email: v })} />
-                <Field label="Adresse complète" value={shop.address} onChange={(v) => setShop({ ...shop, address: v })} className="sm:col-span-2" />
-                <Field label="RCCM" value={shop.rccm} onChange={(v) => setShop({ ...shop, rccm: v })} />
-                <Field label="IFU / N° fiscal" value={shop.ifu} onChange={(v) => setShop({ ...shop, ifu: v })} />
-                <Field label="Facebook" value={shop.facebook} onChange={(v) => setShop({ ...shop, facebook: v })} />
-                <Field label="Instagram" value={shop.instagram} onChange={(v) => setShop({ ...shop, instagram: v })} />
+                <Field label="Nom" value={name} onChange={setName} />
+                <Field label="Téléphone" value={shopExtra.phone} onChange={(v) => setShopExtra({ ...shopExtra, phone: v })} />
+                <Field label="Email" value={shopExtra.email} onChange={(v) => setShopExtra({ ...shopExtra, email: v })} />
+                <Field label="Adresse complète" value={shopExtra.address} onChange={(v) => setShopExtra({ ...shopExtra, address: v })} className="sm:col-span-2" />
+                <Field label="RCCM" value={shopExtra.rccm} onChange={(v) => setShopExtra({ ...shopExtra, rccm: v })} />
+                <Field label="IFU / N° fiscal" value={shopExtra.ifu} onChange={(v) => setShopExtra({ ...shopExtra, ifu: v })} />
+                <Field label="Facebook" value={shopExtra.facebook} onChange={(v) => setShopExtra({ ...shopExtra, facebook: v })} />
+                <Field label="Instagram" value={shopExtra.instagram} onChange={(v) => setShopExtra({ ...shopExtra, instagram: v })} />
               </div>
 
               <div className="mt-6">
@@ -128,20 +147,20 @@ function ParametresPage() {
                   <button className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-muted"><Plus className="h-3 w-3" /> Ajouter</button>
                 </div>
                 <div className="space-y-2">
-                  {SHOPS.map((s) => (
+                  {shops.map((s) => (
                     <div key={s.id} className="flex items-center gap-3 rounded-xl border border-border p-3">
                       <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary"><Store className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold">{s.name}</div>
-                        <div className="text-xs text-muted-foreground">{s.city} · Plan {s.plan}</div>
+                        <div className="text-xs text-muted-foreground">{s.country} · Plan {s.plan}</div>
                       </div>
-                      <button className="rounded-lg px-2 py-1 text-xs font-medium text-primary hover:underline">Modifier</button>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <button onClick={saveShop} className="mt-6 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">
+              <button onClick={saveShop} disabled={updateShop.isPending || updateSettings.isPending}
+                className="mt-6 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
                 <Save className="h-4 w-4" /> Enregistrer
               </button>
             </div>
@@ -192,13 +211,14 @@ function ParametresPage() {
                   ] as const).map(([k, label]) => (
                     <label key={k} className="flex items-center justify-between rounded-xl border border-border p-3 text-sm">
                       <span>{label}</span>
-                      <input type="checkbox" checked={ticket[k]} onChange={(e) => setTicket({ ...ticket, [k]: e.target.checked })} className="h-5 w-5 accent-primary" />
+                      <input type="checkbox" checked={!!ticket[k]} onChange={(e) => setTicket({ ...ticket, [k]: e.target.checked })} className="h-5 w-5 accent-primary" />
                     </label>
                   ))}
-                  <Field label="Message de remerciement" value={ticket.thanks} onChange={(v) => setTicket({ ...ticket, thanks: v })} />
-                  <Field label="Pied de page" value={ticket.footer} onChange={(v) => setTicket({ ...ticket, footer: v })} />
+                  <Field label="Message de remerciement" value={ticket.thanks ?? ""} onChange={(v) => setTicket({ ...ticket, thanks: v })} />
+                  <Field label="Pied de page" value={footer} onChange={setFooter} />
                 </div>
-                <button onClick={saveTicket} className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">
+                <button onClick={saveTicket} disabled={updateSettings.isPending || settingsLoading}
+                  className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
                   <Save className="h-4 w-4" /> Enregistrer
                 </button>
               </div>
@@ -206,12 +226,12 @@ function ParametresPage() {
               <div className="sticky top-20">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Aperçu</div>
                 <div className="rounded-2xl bg-white p-5 text-black shadow-elegant" style={{ fontFamily: "monospace" }}>
-                  {ticket.showLogo && logo && <img src={logo} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />}
+                  {ticket.showLogo && currentShop.logo_url && <img src={currentShop.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />}
                   <div className="text-center">
-                    <div className="text-sm font-bold">{shop.name}</div>
-                    {ticket.showAddress && <div className="text-xs">{shop.address}</div>}
-                    {ticket.showPhone && <div className="text-xs">{shop.phone}</div>}
-                    {ticket.showFiscal && <div className="text-xs">IFU {shop.ifu}</div>}
+                    <div className="text-sm font-bold">{name || currentShop.name}</div>
+                    {ticket.showAddress && shopExtra.address && <div className="text-xs">{shopExtra.address}</div>}
+                    {ticket.showPhone && shopExtra.phone && <div className="text-xs">{shopExtra.phone}</div>}
+                    {ticket.showFiscal && shopExtra.ifu && <div className="text-xs">IFU {shopExtra.ifu}</div>}
                   </div>
                   <hr className="my-2 border-dashed" />
                   <div className="flex justify-between text-xs"><span>Ticket</span><span className="font-bold">T-1234</span></div>
@@ -222,7 +242,7 @@ function ParametresPage() {
                   <hr className="my-2 border-dashed" />
                   <div className="flex justify-between text-sm font-bold"><span>TOTAL</span><span>1 400 F</span></div>
                   <div className="mt-3 text-center text-xs italic">{ticket.thanks}</div>
-                  <div className="text-center text-[10px] text-gray-600">{ticket.footer}</div>
+                  <div className="text-center text-[10px] text-gray-600">{footer}</div>
                 </div>
               </div>
             </div>
@@ -232,8 +252,8 @@ function ParametresPage() {
             <div className="rounded-2xl border border-border bg-card p-6">
               <h2 className="mb-4 font-display text-lg font-bold">Transfert de stock entre boutiques</h2>
               <div className="grid gap-4 sm:grid-cols-2">
-                <SelectField label="Depuis" options={SHOPS.map((s) => s.name)} />
-                <SelectField label="Vers" options={SHOPS.map((s) => s.name)} />
+                <SelectField label="Depuis" options={MOCK_TRANSFER_SHOPS.map((s) => s.name)} />
+                <SelectField label="Vers" options={MOCK_TRANSFER_SHOPS.map((s) => s.name)} />
               </div>
               <div className="mt-4">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Produits à transférer</div>

@@ -441,3 +441,96 @@ export function newTicketRef(prefix = "T") {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${prefix}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
+
+// ============ SHOP (identité + logo + ticket de caisse) ============
+// Les champs sans colonne dédiée sur `shops` (adresse, téléphone, RCCM/IFU,
+// réseaux sociaux) vivent dans shop_settings.data (jsonb), pour éviter une
+// migration de schéma supplémentaire.
+export type TicketConfig = {
+  showLogo?: boolean; showAddress?: boolean; showPhone?: boolean;
+  showFiscal?: boolean; showCashier?: boolean; showQr?: boolean;
+  thanks?: string;
+};
+export type ShopSettingsData = {
+  phone?: string; email?: string; address?: string;
+  rccm?: string; ifu?: string; facebook?: string; instagram?: string;
+  ticket?: TicketConfig;
+};
+export type ShopSettings = {
+  shop_id: string;
+  receipt_header: string | null;
+  receipt_footer: string | null;
+  receipt_logo_url: string | null;
+  tax_included: boolean;
+  data: ShopSettingsData;
+};
+
+const EMPTY_SHOP_SETTINGS: Omit<ShopSettings, "shop_id"> = {
+  receipt_header: null, receipt_footer: null, receipt_logo_url: null,
+  tax_included: true, data: {},
+};
+
+export function useShopSettings() {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["shop_settings", shopId],
+    enabled: !!shopId,
+    queryFn: async (): Promise<ShopSettings> => {
+      const { data, error } = await supabase.from("shop_settings")
+        .select("*").eq("shop_id", shopId!).maybeSingle();
+      if (error) throw error;
+      return (data as ShopSettings | null) ?? { shop_id: shopId!, ...EMPTY_SHOP_SETTINGS };
+    },
+  });
+}
+
+export function useUpdateShopSettings() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<Omit<ShopSettings, "shop_id">>) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("shop_settings")
+        .upsert({ shop_id: shopId, ...patch }).select().single();
+      if (error) throw error;
+      return data as ShopSettings;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_settings", shopId] }),
+  });
+}
+
+export function useUpdateShop() {
+  const shopId = useShopId();
+  const { refresh } = useShop();
+  return useMutation({
+    mutationFn: async (patch: { name?: string; logo_url?: string | null }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("shops")
+        .update(patch).eq("id", shopId).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => refresh(),
+  });
+}
+
+// Upload du logo vers le bucket Storage "shop-logos" (public en lecture,
+// écriture owner/manager — voir db/migrations/003_...). Un seul fichier par
+// boutique (clé fixe "{shop_id}/logo", écrasé à chaque upload) pour éviter
+// d'accumuler des fichiers orphelins.
+export function useUploadShopLogo() {
+  const shopId = useShopId();
+  const updateShop = useUpdateShop();
+  return useMutation({
+    mutationFn: async (file: File): Promise<string> => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const path = `${shopId}/logo`;
+      const { error: upErr } = await supabase.storage.from("shop-logos")
+        .upload(path, file, { upsert: true, cacheControl: "3600", contentType: file.type });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("shop-logos").getPublicUrl(path);
+      const url = `${data.publicUrl}?v=${Date.now()}`; // casse le cache navigateur après remplacement
+      await updateShop.mutateAsync({ logo_url: url });
+      return url;
+    },
+  });
+}

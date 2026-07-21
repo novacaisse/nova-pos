@@ -1,43 +1,24 @@
 # Audit de sécurité — NovaCaisse
 
-Date : 2026-07-11 (mise à jour : correction des permissions par rôle)
+Date : 2026-07-11 (mise à jour : permissions par rôle, puis connexion des écrans restants)
 Portée : schéma Supabase (`db/schema.sql`), couche de données (`src/lib/data/hooks.ts`),
 auth/contexte boutique (`src/lib/auth/*`), et résidus front-end pré-Supabase.
 
-## ⚠️ Limite importante de cet audit — toujours d'actualité
+## ✅ Vérification live — confirmée par l'utilisateur (2026-07-21)
 
-Vous avez demandé de vérifier l'état live des policies via un accès Supabase
-configuré, mais **à ce jour cet accès n'est toujours pas présent dans cette
-session** : aucune variable d'environnement (`SUPABASE_*`, `DATABASE_URL`,
-`service_role`, etc.) n'est définie, et `ListConnectors` ne renseigne aucun
-connecteur Supabase/Postgres disponible. Le message précédent contenait un
-paragraphe entre crochets non complété (« décris ici comment tu lui donnes
-l'accès ») — je n'ai donc reçu aucun moyen concret de me connecter.
-
-Je n'ai **pas exécuté** `select * from pg_policies where schemaname='public';`
-contre l'instance live, et je ne veux pas fabriquer un résultat. Ce qui suit
-reste une revue statique du SQL versionné dans le repo (`db/schema.sql`),
-comme lors du premier audit. Pour que je fasse la vérification live demandée,
-il faut l'un de ces deux moyens :
-1. **Connecteur** : si votre organisation claude.ai dispose d'un connecteur
-   Supabase/Postgres, l'activer pour cette session (menu connecteurs).
-2. **Accès direct en lecture seule** : créer un rôle Postgres en lecture
-   seule sur `pg_policies`/`information_schema` dans votre projet Supabase
-   (Database → Roles) et me fournir sa chaîne de connexion comme variable
-   d'environnement de session — évitez de partager la `service_role key`
-   elle-même, elle n'est pas nécessaire pour cette vérification.
-
-En attendant, l'option la plus rapide reste d'exécuter vous-même dans le SQL
-Editor : `select * from pg_policies where schemaname='public' order by
-tablename, cmd;` et de me coller le résultat — je compare immédiatement avec
-`db/schema.sql`.
-
-**Important** : la faille de permissions par rôle (section 4) a été corrigée
-dans le repo sans attendre cet accès, car elle ne nécessitait pas de lire
-l'état live — seulement d'écrire une migration à appliquer. Mais tant que
-vous n'avez pas exécuté `db/migrations/002_role_based_policies.sql` (ou
-confirmé que `db/schema.sql` correspond déjà à l'état réel), **l'état live
-de votre base ne reflète probablement pas encore cette correction**.
+Une variable d'environnement `AUDIT_DB_URL` (rôle `audit_readonly`, lecture
+seule, aucun droit sur les tables métier) a été configurée pour donner à
+cette session un accès Postgres en lecture. Elle n'était cependant pas
+visible dans les sessions suivantes (`env | grep -i audit` vide à chaque
+tentative) — probablement injectée après le démarrage du conteneur. Faute
+d'accès effectif de mon côté, **l'utilisateur a exécuté lui-même**
+`select * from pg_policies where schemaname='public' order by tablename,
+cmd;` dans le SQL Editor Supabase et a confirmé : permissions par rôle
+actives sur les 16 tables, `stock_levels`/`stock_movements` immuables comme
+prévu, isolation multi-tenant intacte. La migration 002 est donc bien
+appliquée en base. Je n'ai toujours pas d'accès direct à l'instance live —
+les migrations suivantes (003 et au-delà) suivent le même protocole :
+je fournis le SQL, vous l'exécutez et confirmez.
 
 ## 1. RLS — analyse du SQL versionné
 
@@ -244,18 +225,54 @@ un cashier verra un bouton qui échouera silencieusement ou avec une erreur
 Supabase brute. À traiter quand l'écran Équipe sera connecté et que les UI
 commenceront réellement à distinguer les rôles.
 
-## 5. Prochaines étapes suggérées
+## 5. Migration 003 — subscription_payments + bucket logo (à exécuter)
 
-1. Relire `db/migrations/002_role_based_policies.sql` et l'exécuter dans le
-   SQL Editor Supabase.
-2. Me donner un accès Supabase/Postgres en lecture (connecteur, ou rôle
-   read-only + variable d'environnement) pour que je confirme l'état live —
-   ou exécuter vous-même `select * from pg_policies where
-   schemaname='public' order by tablename, cmd;` et me partager le résultat.
+**Fichier** : `db/migrations/003_subscription_payments_and_logo_storage.sql`
+— à relire et exécuter dans le SQL Editor Supabase, comme la 002. `db/schema.sql`
+est mis à jour en parallèle pour rester la référence d'une installation fraîche.
+
+Deux ajouts indépendants :
+
+1. **`public.subscription_payments`** — une ligne par paiement d'abonnement
+   (absente du schéma initial, nécessaire pour l'écran Abonnement). Colonnes :
+   `shop_id`, `subscription_id`, `amount`, `currency`, `method`
+   (`payment_method` existant), `status` (nouvel enum `pending/paid/failed/refunded`),
+   `provider`/`provider_ref` (référence MoneyFusion), `paid_at`, `created_at`.
+   RLS alignée sur `subscriptions` : select owner/manager/accountant, écriture
+   owner/manager uniquement.
+2. **Bucket Storage `shop-logos`** — public en lecture (le logo n'est pas une
+   donnée sensible et doit s'afficher sur les tickets/reçus), écriture
+   restreinte à owner/manager de la boutique propriétaire du chemin
+   (convention obligatoire : `{shop_id}/logo`). Policies sur `storage.objects`
+   utilisant `has_any_role_in_shop()` comme le reste du schéma.
+
+## 6. Écran Paramètres — connecté
+
+- `shops.name` / `shops.logo_url` : lus/écrits directement (colonnes réelles).
+- Coordonnées boutique (téléphone, email, adresse, RCCM/IFU, réseaux sociaux) :
+  stockées dans `shop_settings.data` (jsonb) — pas de nouvelle colonne, décision
+  validée avec vous.
+- Ticket de caisse : `shop_settings.receipt_footer` pour le pied de page,
+  reste (message de remerciement, cases à cocher d'affichage) dans `shop_settings.data.ticket`.
+- Logo : upload réel vers le bucket `shop-logos` (migration 003), remplace le
+  stockage base64/localStorage précédemment signalé — **résidu de l'audit
+  initial maintenant refermé**, y compris côté inscription (`inscription.tsx`
+  uploadait le logo en base64 dans `shops.logo_url` ; il utilise maintenant le
+  même bucket).
+- Onglets Devise / Taxes / Transfert de stock : **laissés en mock**, hors
+  périmètre demandé et sans table dédiée (`taxes`) en base.
+- Point de vigilance non corrigé : la policy `shops_update` (schéma initial,
+  hors migration 002) n'autorise que le rôle `owner` à modifier `shops.name`/
+  `logo_url` — un `manager` verra donc une erreur RLS en tentant d'enregistrer
+  l'onglet Boutique. À corriger via une future migration si vous voulez que
+  manager puisse aussi éditer l'identité de la boutique.
+
+## 7. Prochaines étapes suggérées
+
+1. Relire et exécuter `db/migrations/003_subscription_payments_and_logo_storage.sql`.
+2. Décider si `shops_update` doit s'ouvrir à `manager` (voir point ci-dessus).
 3. Décider si `stock_levels`/`stock_movements` doivent rester strictement
    immuables pour owner/manager aussi, ou prévoir une échappatoire.
 4. Ajouter les garde-fous UI par rôle une fois l'écran Équipe connecté
-   (masquer les actions que RLS refuserait de toute façon).
+   (masquer les actions que RLS refuserait de toute façon) — tâche #6 en cours.
 5. Décider si le blocage de fin d'essai doit aussi être renforcé côté RLS.
-6. Prioriser la connexion de l'écran Paramètres (boutique + logo Supabase
-   Storage + ticket), qui reste le résidu le plus visible pour l'utilisateur.
