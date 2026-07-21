@@ -290,12 +290,12 @@ function ParametresPage() {
   );
 }
 
-function Field({ label, value, onChange, className, defaultValue }: { label: string; value?: string; onChange?: (v: string) => void; className?: string; defaultValue?: string }) {
+function Field({ label, value, onChange, className, defaultValue, disabled }: { label: string; value?: string; onChange?: (v: string) => void; className?: string; defaultValue?: string; disabled?: boolean }) {
   return (
     <label className={cn("block", className)}>
       <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-      <input value={value} defaultValue={defaultValue} onChange={(e) => onChange?.(e.target.value)}
-        className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+      <input value={value} defaultValue={defaultValue} onChange={(e) => onChange?.(e.target.value)} disabled={disabled}
+        className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-60" />
     </label>
   );
 }
