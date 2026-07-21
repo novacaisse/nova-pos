@@ -360,3 +360,7 @@ un écran vide), pas une couche de protection supplémentaire.
    Fournisseurs devient prioritaire.
 4. Intégration réelle de l'assistant IA « Nova » (API Claude) — tâche
    séparée, hors périmètre Supabase.
+5. `app.fournisseurs.tsx` importe encore `PURCHASE_ORDERS` depuis les mocks
+   (onglet « Bons de commande ») — les fiches fournisseurs elles-mêmes sont
+   connectées, mais pas les bons de commande. Hors périmètre des 6 tâches
+   initiales (signalé par l'utilisateur, pas de table dédiée à ce jour).
