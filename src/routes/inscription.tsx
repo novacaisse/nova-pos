@@ -81,6 +81,13 @@ function InscriptionPage() {
       shop_id: shop.id, user_id: userId, role: "owner",
     });
 
+    // 4bis. Ligne subscriptions correspondant à l'essai — cohérence des
+    // données dès le départ, avant l'arrivée de l'intégration MoneyFusion.
+    await supabase.from("subscriptions").insert({
+      shop_id: shop.id, plan: "trial", status: "trialing",
+      amount: 0, currency: "XOF", current_period_end: trialEnds,
+    });
+
     // 5. Logo (Supabase Storage — bucket "shop-logos") + coordonnées de la
     // boutique (shop_settings.data, pas de colonnes dédiées pour ces champs).
     if (logoFile) {

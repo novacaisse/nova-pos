@@ -1,16 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Check, Download, Sparkles, CreditCard } from "lucide-react";
+import { Check, Sparkles, CreditCard, Loader2, Clock } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { PLANS, CURRENT_PLAN_ID, INVOICES } from "@/lib/mock/subscription";
-import { formatXOF } from "@/lib/mock/catalog";
+import { useShop } from "@/lib/auth/ShopProvider";
+import { useSubscription, useSubscriptionPayments, formatXOF } from "@/lib/data/hooks";
+import { getTrialInfo } from "@/lib/trial";
+import { PLANS } from "@/lib/mock/subscription";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/abonnement")({
   component: AbonnementPage,
 });
 
+const PAYMENT_STATUS_LABEL: Record<string, string> = {
+  pending: "En attente", paid: "Payé", failed: "Échoué", refunded: "Remboursé",
+};
+
 function AbonnementPage() {
-  const current = PLANS.find((p) => p.id === CURRENT_PLAN_ID)!;
+  const { currentShop } = useShop();
+  const { data: subscription, isLoading: subLoading } = useSubscription();
+  const { data: payments = [], isLoading: paymentsLoading } = useSubscriptionPayments();
+  const trial = getTrialInfo(currentShop);
+
+  const currentPlan = PLANS.find((p) => p.id === subscription?.plan);
 
   return (
     <div>
@@ -18,31 +29,57 @@ function AbonnementPage() {
 
       <div className="space-y-6 p-5 sm:p-8">
         <div className="rounded-2xl border border-primary/40 bg-gradient-to-br from-primary/10 to-accent/10 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Formule actuelle</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="font-display text-3xl font-bold">{current.name}</span>
-                <span className="tabular text-sm text-muted-foreground">{formatXOF(current.price_month)} / mois</span>
+          {subLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Formule actuelle</div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="font-display text-3xl font-bold">{currentPlan?.name ?? "Essai gratuit"}</span>
+                  {currentPlan && <span className="tabular text-sm text-muted-foreground">{formatXOF(currentPlan.price_month)} / mois</span>}
+                </div>
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  {trial.onTrial ? (
+                    <>
+                      <Clock className="h-3.5 w-3.5 text-primary" />
+                      <span className="font-semibold text-primary">
+                        {trial.expired ? "Essai terminé" : `Essai gratuit · ${trial.daysLeft} jour${trial.daysLeft > 1 ? "s" : ""} restant${trial.daysLeft > 1 ? "s" : ""}`}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="inline-block h-2 w-2 rounded-full bg-success" />
+                      <span className="font-semibold text-success">
+                        {subscription?.status === "active" ? "Actif" : subscription?.status === "past_due" ? "Paiement en retard" : subscription?.status ?? "—"}
+                      </span>
+                      {subscription?.current_period_end && (
+                        <span className="text-muted-foreground">· Prochaine échéance le {new Date(subscription.current_period_end).toLocaleDateString("fr-FR")}</span>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="mt-2 flex items-center gap-2 text-xs">
-                <span className="inline-block h-2 w-2 rounded-full bg-success" />
-                <span className="font-semibold text-success">Actif</span>
-                <span className="text-muted-foreground">· Prochain prélèvement le 01/08/2026</span>
+              <div className="flex gap-2">
+                <button disabled title="Bientôt disponible" className="cursor-not-allowed rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-muted-foreground opacity-60">
+                  Gérer le paiement
+                </button>
+                <button disabled title="Bientôt disponible" className="cursor-not-allowed rounded-xl bg-muted px-4 py-2 text-sm font-semibold text-muted-foreground opacity-60">
+                  Résilier
+                </button>
               </div>
             </div>
-            <div className="flex gap-2">
-              <button className="rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted">Gérer le paiement</button>
-              <button className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">Résilier</button>
-            </div>
-          </div>
+          )}
         </div>
 
         <div>
-          <h2 className="mb-3 font-display text-lg font-bold">Changer de formule</h2>
+          <h2 className="mb-1 font-display text-lg font-bold">Changer de formule</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Le paiement en ligne (MoneyFusion) arrive bientôt — le changement de formule n'est pas encore disponible.
+          </p>
           <div className="grid gap-3 md:grid-cols-3">
             {PLANS.map((p) => {
-              const isCurrent = p.id === CURRENT_PLAN_ID;
+              const isCurrent = p.id === subscription?.plan;
               return (
                 <div key={p.id} className={cn(
                   "relative flex flex-col rounded-2xl border p-5 transition-shadow",
@@ -62,9 +99,9 @@ function AbonnementPage() {
                       <li key={f} className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /> {f}</li>
                     ))}
                   </ul>
-                  <button disabled={isCurrent} className={cn(
-                    "mt-5 rounded-xl py-2.5 text-sm font-semibold",
-                    isCurrent ? "cursor-not-allowed bg-muted text-muted-foreground" : "bg-primary text-primary-foreground hover:opacity-90",
+                  <button disabled title="Bientôt disponible" className={cn(
+                    "mt-5 cursor-not-allowed rounded-xl py-2.5 text-sm font-semibold opacity-60",
+                    isCurrent ? "bg-muted text-muted-foreground" : "bg-primary text-primary-foreground",
                   )}>
                     {isCurrent ? "Formule actuelle" : "Passer à " + p.name}
                   </button>
@@ -75,37 +112,42 @@ function AbonnementPage() {
         </div>
 
         <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold">Historique de facturation</h2>
-            <button className="flex items-center gap-2 text-sm font-medium text-primary hover:underline">
-              <Download className="h-4 w-4" /> Tout télécharger
-            </button>
-          </div>
+          <h2 className="mb-3 font-display text-lg font-bold">Historique de facturation</h2>
           <div className="overflow-hidden rounded-2xl border border-border bg-card">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40">
-                <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <th className="px-4 py-3">Référence</th>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Méthode</th>
-                  <th className="px-4 py-3">Statut</th>
-                  <th className="px-4 py-3 text-right">Montant</th>
-                  <th className="px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {INVOICES.map((i) => (
-                  <tr key={i.id} className="border-t border-border/60 hover:bg-muted/40">
-                    <td className="px-4 py-3 font-mono text-xs font-semibold">{i.ref}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{i.date}</td>
-                    <td className="px-4 py-3 text-xs"><CreditCard className="mr-1 inline h-3.5 w-3.5" /> {i.method}</td>
-                    <td className="px-4 py-3"><span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-bold uppercase text-success">{i.status}</span></td>
-                    <td className="tabular px-4 py-3 text-right font-bold">{formatXOF(i.amount)}</td>
-                    <td className="px-4 py-3 text-right"><button className="text-xs font-medium text-primary hover:underline">PDF</button></td>
+            {paymentsLoading ? (
+              <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+            ) : payments.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                Aucun paiement pour l'instant — l'intégration MoneyFusion arrive bientôt.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Méthode</th>
+                    <th className="px-4 py-3">Statut</th>
+                    <th className="px-4 py-3 text-right">Montant</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {payments.map((p) => (
+                    <tr key={p.id} className="border-t border-border/60 hover:bg-muted/40">
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{new Date(p.created_at).toLocaleDateString("fr-FR")}</td>
+                      <td className="px-4 py-3 text-xs"><CreditCard className="mr-1 inline h-3.5 w-3.5" /> {p.method}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                          p.status === "paid" && "bg-success/15 text-success",
+                          p.status === "pending" && "bg-muted text-muted-foreground",
+                          (p.status === "failed" || p.status === "refunded") && "bg-destructive/15 text-destructive",
+                        )}>{PAYMENT_STATUS_LABEL[p.status] ?? p.status}</span>
+                      </td>
+                      <td className="tabular px-4 py-3 text-right font-bold">{formatXOF(p.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       </div>

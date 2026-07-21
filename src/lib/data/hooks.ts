@@ -559,6 +559,53 @@ export function useMarkQuoteConverted() {
   });
 }
 
+// ============ ABONNEMENT ============
+export type SubscriptionStatus = "trialing" | "active" | "past_due" | "canceled" | "expired";
+export type Subscription = {
+  id: string; shop_id: string; plan: string; status: SubscriptionStatus;
+  amount: number; currency: string; started_at: string;
+  current_period_end: string | null; provider: string | null; provider_ref: string | null;
+  created_at: string;
+};
+
+export function useSubscription() {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["subscription", shopId],
+    enabled: !!shopId,
+    queryFn: async (): Promise<Subscription | null> => {
+      const { data, error } = await supabase.from("subscriptions")
+        .select("*").eq("shop_id", shopId!)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (error) throw error;
+      return data as Subscription | null;
+    },
+  });
+}
+
+export type SubscriptionPaymentStatus = "pending" | "paid" | "failed" | "refunded";
+export type SubscriptionPayment = {
+  id: string; shop_id: string; subscription_id: string;
+  amount: number; currency: string; method: string; status: SubscriptionPaymentStatus;
+  provider: string | null; provider_ref: string | null;
+  paid_at: string | null; created_at: string;
+};
+
+export function useSubscriptionPayments(limit = 50) {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["subscription_payments", shopId, limit],
+    enabled: !!shopId,
+    queryFn: async (): Promise<SubscriptionPayment[]> => {
+      const { data, error } = await supabase.from("subscription_payments")
+        .select("*").eq("shop_id", shopId!)
+        .order("created_at", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data ?? []) as SubscriptionPayment[];
+    },
+  });
+}
+
 // Helper — generate a short unique ticket ref.
 export function newTicketRef(prefix = "T") {
   const d = new Date();
