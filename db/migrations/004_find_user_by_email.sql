@@ -9,8 +9,8 @@
 -- crée elle-même son compte via /rejoindre (aucune boutique créée), puis le
 -- owner l'ajoute à son équipe depuis Équipe en saisissant son email. Comme
 -- le client ne peut pas interroger auth.users directement (RLS), cette
--- fonction resigne security definer ne renvoie que l'UUID correspondant à
--- un email — rien d'autre de auth.users n'est exposé.
+-- fonction (security definer) ne renvoie que l'UUID correspondant à un
+-- email — rien d'autre de auth.users n'est exposé.
 --
 -- Limite connue, acceptée pour ce scope minimal : n'importe quel compte
 -- authentifié peut vérifier si un email donné est déjà enregistré sur la
