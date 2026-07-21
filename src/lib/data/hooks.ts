@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useShop } from "@/lib/auth/ShopProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import type { AppRole } from "@/lib/roles";
 
 // ============ TYPES (Supabase shape) ============
 export type Category = { id: string; shop_id: string; name: string; color: string | null };
@@ -440,6 +441,52 @@ export function newTicketRef(prefix = "T") {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${prefix}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+// ============ PROFIL (utilisateur courant) ============
+export type Profile = { id: string; full_name: string | null; phone: string | null; avatar_url: string | null };
+
+export function useProfile() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["profile", user?.id],
+    enabled: !!user,
+    queryFn: async (): Promise<Profile> => {
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", user!.id).single();
+      if (error) throw error;
+      return data as Profile;
+    },
+  });
+}
+
+export function useUpdateProfile() {
+  const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<Pick<Profile, "full_name" | "phone">>) => {
+      if (!user) throw new Error("Non authentifié");
+      const { data, error } = await supabase.from("profiles").update(patch).eq("id", user.id).select().single();
+      if (error) throw error;
+      return data as Profile;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profile", user?.id] }),
+  });
+}
+
+// ============ RÔLE de l'utilisateur courant dans la boutique active ============
+// Fondation partagée par Profil, Équipe et les garde-fous UI par rôle.
+export function useMyRole() {
+  const shopId = useShopId();
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["my_role", shopId, user?.id],
+    enabled: !!shopId && !!user,
+    queryFn: async (): Promise<AppRole | null> => {
+      const { data, error } = await supabase.from("shop_members")
+        .select("role").eq("shop_id", shopId!).eq("user_id", user!.id).maybeSingle();
+      if (error) throw error;
+      return (data?.role as AppRole | undefined) ?? null;
+    },
+  });
 }
 
 // ============ SHOP (identité + logo + ticket de caisse) ============

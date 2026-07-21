@@ -9,6 +9,8 @@ type AuthCtx = {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  updateEmail: (newEmail: string) => Promise<{ error: string | null }>;
+  updatePassword: (currentPassword: string, newPassword: string) => Promise<{ error: string | null }>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -48,6 +50,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     async signOut() {
       await supabase.auth.signOut();
+    },
+    async updateEmail(newEmail) {
+      const { error } = await supabase.auth.updateUser({ email: newEmail });
+      return { error: error?.message ?? null };
+    },
+    async updatePassword(currentPassword, newPassword) {
+      const email = session?.user.email;
+      if (!email) return { error: "Session invalide." };
+      // Revérifie l'ancien mot de passe avant de le changer, pour qu'une
+      // session oubliée ouverte ne suffise pas à elle seule.
+      const { error: reauthErr } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+      if (reauthErr) return { error: "Mot de passe actuel incorrect." };
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      return { error: error?.message ?? null };
     },
   };
 
