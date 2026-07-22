@@ -1,6 +1,6 @@
-import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Loader2, Store, RotateCw, Mail, LogOut } from "lucide-react";
+import { Loader2, Store, RotateCw, Mail, LogOut, ShoppingCart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/AppSidebar";
@@ -74,6 +74,11 @@ function AppLayout() {
                 <GlobalSearch />
               </div>
               <div className="ml-auto flex items-center gap-2">
+                <Link to="/app/caisse"
+                  className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
+                  aria-label="Aller à la caisse">
+                  <ShoppingCart className="h-4 w-4" /> PDV
+                </Link>
                 <ThemeToggle />
                 <NotificationsBell />
                 <AiBubble />
