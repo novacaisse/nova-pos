@@ -9,7 +9,7 @@ import type { AppRole } from "@/lib/roles";
 // ============ TYPES (Supabase shape) ============
 export type Category = { id: string; shop_id: string; name: string; color: string | null };
 export type Product = {
-  id: string; shop_id: string; category_id: string | null;
+  id: string; shop_id: string; category_id: string | null; supplier_id: string | null;
   sku: string | null; barcode: string | null; name: string; description: string | null;
   price: number; cost: number; tax_rate: number; unit: string | null;
   image_url: string | null; is_active: boolean; low_stock_threshold: number;
@@ -244,6 +244,150 @@ export function useDeleteSupplier() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["suppliers", shopId] }),
+  });
+}
+
+// ============ BONS DE COMMANDE (Fournisseurs) ============
+// draft éditable librement, sent verrouillée (annulable), received marque
+// la réception en un bloc : crée les mouvements de stock 'in' pour chaque
+// ligne liée à un produit et met à jour products.cost au dernier coût
+// facturé. Pas de réception partielle ligne par ligne (migration 014).
+export type PurchaseOrderStatus = "draft" | "sent" | "received" | "cancelled";
+export type PurchaseOrder = {
+  id: string; shop_id: string; supplier_id: string;
+  reference: string; status: PurchaseOrderStatus;
+  expected_at: string | null; notes: string | null;
+  created_by: string | null; created_at: string;
+};
+export type PurchaseOrderItem = {
+  id: string; shop_id: string; purchase_order_id: string;
+  product_id: string | null; name: string;
+  quantity: number; unit_cost: number; total: number;
+};
+export type PurchaseOrderWithItems = PurchaseOrder & {
+  purchase_order_items: PurchaseOrderItem[]; suppliers: { name: string } | null;
+};
+
+export function usePurchaseOrders() {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["purchase_orders", shopId],
+    enabled: !!shopId,
+    queryFn: async (): Promise<PurchaseOrderWithItems[]> => {
+      const { data, error } = await supabase.from("purchase_orders")
+        .select("*, purchase_order_items(*), suppliers(name)")
+        .eq("shop_id", shopId!).order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as PurchaseOrderWithItems[];
+    },
+  });
+}
+
+export function useUpsertPurchaseOrder() {
+  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id?: string; supplier_id: string; expected_at?: string | null; notes?: string | null;
+      items: { product_id: string | null; name: string; quantity: number; unit_cost: number }[];
+    }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const items = input.items.map((it) => ({ ...it, total: it.quantity * it.unit_cost }));
+      const payload = {
+        shop_id: shopId, supplier_id: input.supplier_id,
+        expected_at: input.expected_at || null, notes: input.notes ?? null,
+      };
+
+      let poId = input.id;
+      if (poId) {
+        const { error } = await supabase.from("purchase_orders").update(payload).eq("id", poId);
+        if (error) throw error;
+        const { error: delErr } = await supabase.from("purchase_order_items").delete().eq("purchase_order_id", poId);
+        if (delErr) throw delErr;
+      } else {
+        const { data, error } = await supabase.from("purchase_orders").insert({
+          ...payload, reference: newTicketRef("BC"), created_by: user?.id,
+        }).select().single();
+        if (error) throw error;
+        poId = data.id;
+      }
+
+      if (items.length) {
+        const itemsPayload = items.map((it) => ({ shop_id: shopId, purchase_order_id: poId, ...it }));
+        const { error } = await supabase.from("purchase_order_items").insert(itemsPayload);
+        if (error) throw error;
+      }
+      return poId!;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+  });
+}
+
+export function useDeletePurchaseOrder() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+  });
+}
+
+export function useSendPurchaseOrder() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("purchase_orders").update({ status: "sent" }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+  });
+}
+
+export function useCancelPurchaseOrder() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("purchase_orders").update({ status: "cancelled" }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+  });
+}
+
+// Réception : crée les mouvements de stock 'in' pour chaque ligne liée à
+// un produit, met à jour products.cost au dernier coût facturé (logique
+// "dernier coût connu", pas de moyenne pondérée), puis passe le bon à
+// 'received'.
+export function useReceivePurchaseOrder() {
+  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (po: PurchaseOrderWithItems) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const stockRows = po.purchase_order_items
+        .filter((it) => it.product_id)
+        .map((it) => ({
+          shop_id: shopId, product_id: it.product_id!,
+          type: "in" as const, quantity: it.quantity, unit_cost: it.unit_cost,
+          reason: `Réception ${po.reference}`, reference: po.reference,
+          created_by: user?.id,
+        }));
+      if (stockRows.length) {
+        const { error: e1 } = await supabase.from("stock_movements").insert(stockRows);
+        if (e1) throw e1;
+      }
+      for (const it of po.purchase_order_items) {
+        if (!it.product_id) continue;
+        await supabase.from("products").update({ cost: it.unit_cost }).eq("id", it.product_id);
+      }
+      const { error: e2 } = await supabase.from("purchase_orders").update({ status: "received" }).eq("id", po.id);
+      if (e2) throw e2;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] });
+      qc.invalidateQueries({ queryKey: ["products", shopId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+    },
   });
 }
 

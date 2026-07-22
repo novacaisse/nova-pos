@@ -7,7 +7,7 @@ import {
   startOfYear, endOfYear, subMonths, subYears,
 } from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useSales, useProducts, formatXOF } from "@/lib/data/hooks";
+import { useSales, useProducts, useSuppliers, formatXOF } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/rapports")({
@@ -92,8 +92,11 @@ function RapportsPage() {
   // choisie, ce rapport sous-estimera le total (pas de pagination ici).
   const { data: sales = [], isLoading } = useSales({ from: range.from, to: range.to, limit: 2000 });
   const { data: products = [] } = useProducts();
+  const { data: suppliers = [] } = useSuppliers();
 
   const costById = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.cost])), [products]);
+  const supplierByProductId = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.supplier_id])), [products]);
+  const supplierNameById = useMemo(() => Object.fromEntries(suppliers.map((s) => [s.id, s.name])), [suppliers]);
 
   const ca = sales.reduce((s, x) => s + x.total, 0);
   const ticketMoyen = sales.length ? ca / sales.length : 0;
@@ -118,6 +121,28 @@ function RapportsPage() {
 
   const topProductsByCa = useMemo(() => [...topProducts].sort((a, b) => b.ca - a.ca).slice(0, 8), [topProducts]);
   const worstMarginProducts = useMemo(() => [...topProducts].sort((a, b) => a.marginPct - b.marginPct).slice(0, 8), [topProducts]);
+
+  // CA généré sur la période par les produits de chaque fournisseur (via
+  // products.supplier_id) — pas les bons de commande eux-mêmes, qui ne
+  // reflètent qu'un coût d'achat, pas une performance de vente.
+  const topSuppliers = useMemo(() => {
+    const agg = new Map<string, { name: string; qty: number; ca: number; cost: number }>();
+    for (const sale of sales) {
+      for (const it of sale.sale_items) {
+        const supplierId = it.product_id ? supplierByProductId[it.product_id] : null;
+        if (!supplierId) continue;
+        const name = supplierNameById[supplierId] ?? "Fournisseur inconnu";
+        const cur = agg.get(supplierId) ?? { name, qty: 0, ca: 0, cost: 0 };
+        cur.qty += it.quantity;
+        cur.ca += it.total;
+        cur.cost += it.product_id ? (costById[it.product_id] ?? 0) * it.quantity : 0;
+        agg.set(supplierId, cur);
+      }
+    }
+    return [...agg.values()]
+      .map((s) => ({ ...s, marginPct: s.ca > 0 ? ((s.ca - s.cost) / s.ca) * 100 : 0 }))
+      .sort((a, b) => b.ca - a.ca).slice(0, 8);
+  }, [sales, supplierByProductId, supplierNameById, costById]);
 
   const topCustomers = useMemo(() => {
     const agg = new Map<string, { name: string; qty: number; ca: number }>();
@@ -154,9 +179,10 @@ function RapportsPage() {
     if (report === "products") return topProductsByCa.map((p) => ({ label: p.name, qty: p.qty, ca: p.ca, margin: `${p.marginPct.toFixed(0)}%` }));
     if (report === "margin") return worstMarginProducts.map((p) => ({ label: p.name, qty: p.qty, ca: p.ca, margin: `${p.marginPct.toFixed(0)}%` }));
     if (report === "customers") return topCustomers.map((c) => ({ label: c.name, qty: c.qty, ca: c.ca, margin: "—" }));
+    if (report === "suppliers") return topSuppliers.map((s) => ({ label: s.name, qty: s.qty, ca: s.ca, margin: `${s.marginPct.toFixed(0)}%` }));
     if (report === "sales") return salesByDay.map((d) => ({ label: new Date(d.date).toLocaleDateString("fr-FR"), qty: d.qty, ca: d.ca, margin: "—" }));
     return [];
-  }, [report, topProductsByCa, worstMarginProducts, topCustomers, salesByDay]);
+  }, [report, topProductsByCa, worstMarginProducts, topCustomers, topSuppliers, salesByDay]);
 
   const exportCsv = () => {
     const rows = [
@@ -250,11 +276,7 @@ function RapportsPage() {
                     {REPORTS.find((r) => r.id === report)?.label} · {range.label}
                   </div>
                 </div>
-                {report === "suppliers" ? (
-                  <div className="p-8 text-center text-sm text-muted-foreground">
-                    Bientôt disponible — nécessite de lier produits et fournisseurs (pas encore dans le schéma).
-                  </div>
-                ) : report === "peak" ? (
+                {report === "peak" ? (
                   peakHours.every((p) => p.v === 0) ? (
                     <div className="p-8 text-center text-sm text-muted-foreground">Aucune vente sur cette période.</div>
                   ) : (
@@ -275,7 +297,7 @@ function RapportsPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/40">
                         <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          <th className="px-3 py-2">{report === "sales" ? "Jour" : report === "customers" ? "Client" : "Produit"}</th>
+                          <th className="px-3 py-2">{report === "sales" ? "Jour" : report === "customers" ? "Client" : report === "suppliers" ? "Fournisseur" : "Produit"}</th>
                           <th className="px-3 py-2 text-right">{report === "customers" ? "Achats" : "Qté"}</th>
                           <th className="px-3 py-2 text-right">CA</th>
                           <th className="px-3 py-2 text-right">Marge</th>

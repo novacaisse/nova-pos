@@ -159,6 +159,48 @@ create table if not exists public.suppliers (
 );
 create index if not exists idx_suppliers_shop on public.suppliers(shop_id);
 
+-- products.supplier_id (Bloc 12) — ajoutée ici via alter (plutôt qu'inline
+-- dans products plus haut) car suppliers n'existe qu'à partir d'ici dans ce
+-- script cumulatif.
+alter table public.products
+  add column if not exists supplier_id uuid references public.suppliers(id) on delete set null;
+create index if not exists idx_products_supplier on public.products(supplier_id);
+
+-- Bons de commande (Bloc 12) — draft éditable, sent verrouillée (annulable),
+-- received marque la réception en un bloc : crée les mouvements de stock
+-- 'in' pour chaque ligne liée à un produit et met à jour products.cost au
+-- dernier coût facturé. Pas de réception partielle ligne par ligne.
+do $$ begin
+  create type public.purchase_order_status as enum ('draft', 'sent', 'received', 'cancelled');
+exception when duplicate_object then null; end $$;
+
+create table if not exists public.purchase_orders (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references public.shops(id) on delete cascade,
+  supplier_id uuid not null references public.suppliers(id) on delete restrict,
+  reference text not null,
+  status public.purchase_order_status not null default 'draft',
+  expected_at date,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (shop_id, reference)
+);
+create index if not exists idx_po_shop on public.purchase_orders(shop_id);
+create index if not exists idx_po_supplier on public.purchase_orders(supplier_id);
+
+create table if not exists public.purchase_order_items (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null references public.shops(id) on delete cascade,
+  purchase_order_id uuid not null references public.purchase_orders(id) on delete cascade,
+  product_id uuid references public.products(id) on delete set null,
+  name text not null,
+  quantity numeric(14,3) not null default 0,
+  unit_cost numeric(14,2) not null default 0,
+  total numeric(14,2) not null default 0
+);
+create index if not exists idx_poi_po on public.purchase_order_items(purchase_order_id);
+
 create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(),
   shop_id uuid not null references public.shops(id) on delete cascade,
@@ -473,6 +515,8 @@ grant insert, update, delete on public.plans to authenticated;
 grant select on public.admin_impersonations to authenticated;
 grant select, insert, update, delete on public.support_tickets to authenticated;
 grant select, insert on public.support_messages to authenticated;
+grant select, insert, update, delete on public.purchase_orders to authenticated;
+grant select, insert, update, delete on public.purchase_order_items to authenticated;
 grant all on all tables in schema public to service_role;
 
 -- =============== RLS ===============
@@ -496,6 +540,8 @@ alter table public.subscriptions   enable row level security;
 alter table public.subscription_payments enable row level security;
 alter table public.shop_settings   enable row level security;
 alter table public.plans           enable row level security;
+alter table public.purchase_orders      enable row level security;
+alter table public.purchase_order_items enable row level security;
 
 drop policy if exists shops_select on public.shops;
 create policy shops_select on public.shops for select to authenticated
@@ -616,6 +662,36 @@ create policy suppliers_update on public.suppliers for update to authenticated
 drop policy if exists suppliers_delete on public.suppliers;
 create policy suppliers_delete on public.suppliers for delete to authenticated
   using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+
+-- 3bis. purchase_orders / purchase_order_items — même matrice que products
+-- (owner/manager/stock écrivent, accountant lit pour le suivi des coûts).
+drop policy if exists purchase_orders_select on public.purchase_orders;
+create policy purchase_orders_select on public.purchase_orders for select to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager','stock','accountant']::public.app_role[]));
+drop policy if exists purchase_orders_insert on public.purchase_orders;
+create policy purchase_orders_insert on public.purchase_orders for insert to authenticated
+  with check (public.has_any_role_in_shop(shop_id, array['owner','manager','stock']::public.app_role[]));
+drop policy if exists purchase_orders_update on public.purchase_orders;
+create policy purchase_orders_update on public.purchase_orders for update to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager','stock']::public.app_role[]))
+  with check (public.has_any_role_in_shop(shop_id, array['owner','manager','stock']::public.app_role[]));
+drop policy if exists purchase_orders_delete on public.purchase_orders;
+create policy purchase_orders_delete on public.purchase_orders for delete to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+
+drop policy if exists purchase_order_items_select on public.purchase_order_items;
+create policy purchase_order_items_select on public.purchase_order_items for select to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager','stock','accountant']::public.app_role[]));
+drop policy if exists purchase_order_items_insert on public.purchase_order_items;
+create policy purchase_order_items_insert on public.purchase_order_items for insert to authenticated
+  with check (public.has_any_role_in_shop(shop_id, array['owner','manager','stock']::public.app_role[]));
+drop policy if exists purchase_order_items_update on public.purchase_order_items;
+create policy purchase_order_items_update on public.purchase_order_items for update to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager','stock']::public.app_role[]))
+  with check (public.has_any_role_in_shop(shop_id, array['owner','manager','stock']::public.app_role[]));
+drop policy if exists purchase_order_items_delete on public.purchase_order_items;
+create policy purchase_order_items_delete on public.purchase_order_items for delete to authenticated
+  using (public.has_any_role_in_shop(shop_id, array['owner','manager','stock']::public.app_role[]));
 
 -- 4. customers — lecture owner/manager/cashier/accountant, écriture (create/update)
 --    owner/manager/cashier, suppression réservée à owner/manager

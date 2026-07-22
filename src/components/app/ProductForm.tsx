@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Save, Trash2, Image as ImageIcon, Wand2, Loader2, X } from "lucide-react";
 import {
-  useUpsertProduct, useDeleteProduct, useUploadProductImage,
+  useUpsertProduct, useDeleteProduct, useUploadProductImage, useSuppliers,
   formatXOF, type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
 import { generateSku, generateBarcode } from "@/lib/generateProductCodes";
@@ -17,6 +17,7 @@ export function ProductForm({ initial, cats, canManage }: {
   const upsert = useUpsertProduct();
   const remove = useDeleteProduct();
   const uploadImage = useUploadProductImage();
+  const { data: suppliers = [] } = useSuppliers();
   const isNew = !initial.id;
 
   const [form, setForm] = useState<Partial<ProductWithStock>>(initial);
@@ -166,6 +167,13 @@ export function ProductForm({ initial, cats, canManage }: {
                 <select value={form.category_id ?? ""} onChange={(e) => setForm({ ...form, category_id: e.target.value || null })} disabled={!canManage} className={inp}>
                   <option value="">— Sans catégorie —</option>
                   {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Fournisseur</div>
+                <select value={form.supplier_id ?? ""} onChange={(e) => setForm({ ...form, supplier_id: e.target.value || null })} disabled={!canManage} className={inp}>
+                  <option value="">— Aucun —</option>
+                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </label>
               <label className="block">
