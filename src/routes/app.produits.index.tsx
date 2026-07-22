@@ -5,7 +5,7 @@ import { Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Packa
 import { PageHeader } from "@/components/app/PageHeader";
 import {
   useProducts, useDeleteProduct,
-  useCategories, useUpsertCategory, useDeleteCategory, useMyRole,
+  useCategories, useUpsertCategory, useDeleteCategory, useMyRole, useTeamPermissions,
   formatXOF, type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,10 @@ function ProduitsPage() {
   const remove = useDeleteProduct();
   const { data: myRole } = useMyRole();
   const canManage = myRole === "owner" || myRole === "manager" || myRole === "stock"; // cashier/accountant : lecture seule
+  const perms = useTeamPermissions();
+  // Bascule Bloc 15 : masque prix d'achat / marge au rôle Caissier si la
+  // boutique l'a désactivé (activé par défaut, comportement inchangé).
+  const canSeeCostMargin = myRole !== "cashier" || perms.cashier_view_cost_margin;
 
   const [query, setQuery] = useState(q ?? "");
   const [cat, setCat] = useState<"all" | string>("all");
@@ -84,8 +88,10 @@ function ProduitsPage() {
               <thead className="bg-muted/40">
                 <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   <th className="px-4 py-3">Produit</th><th className="px-4 py-3">SKU</th><th className="px-4 py-3">Catégorie</th>
-                  <th className="px-4 py-3 text-right">Prix achat</th><th className="px-4 py-3 text-right">Prix vente</th>
-                  <th className="px-4 py-3 text-right">Marge</th><th className="px-4 py-3 text-right">Stock</th><th className="px-4 py-3"></th>
+                  {canSeeCostMargin && <th className="px-4 py-3 text-right">Prix achat</th>}
+                  <th className="px-4 py-3 text-right">Prix vente</th>
+                  {canSeeCostMargin && <th className="px-4 py-3 text-right">Marge</th>}
+                  <th className="px-4 py-3 text-right">Stock</th><th className="px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -106,9 +112,9 @@ function ProduitsPage() {
                       </td>
                       <td className="px-4 py-3 font-mono text-xs">{p.sku ?? "—"}</td>
                       <td className="px-4 py-3"><span className="rounded-full bg-muted px-2 py-0.5 text-xs">{catName}</span></td>
-                      <td className="tabular px-4 py-3 text-right text-muted-foreground">{formatXOF(cost)}</td>
+                      {canSeeCostMargin && <td className="tabular px-4 py-3 text-right text-muted-foreground">{formatXOF(cost)}</td>}
                       <td className="tabular px-4 py-3 text-right font-semibold">{formatXOF(price)}</td>
-                      <td className={cn("tabular px-4 py-3 text-right", margin > 0 ? "text-success" : "text-muted-foreground")}>{margin}%</td>
+                      {canSeeCostMargin && <td className={cn("tabular px-4 py-3 text-right", margin > 0 ? "text-success" : "text-muted-foreground")}>{margin}%</td>}
                       <td className={cn("tabular px-4 py-3 text-right font-bold", p.stock < p.low_stock_threshold && "text-warning-foreground")}>{p.stock}</td>
                       <td className="px-4 py-3">
                         {canManage && (

@@ -10,7 +10,7 @@ import { PeriodSelector, periodRange, type Period } from "@/components/app/Perio
 import { useShop } from "@/lib/auth/ShopProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import {
-  useSales, useMyRole, useCancelSale, useAddSalePayment,
+  useSales, useMyRole, useCancelSale, useAddSalePayment, useTeamPermissions,
   useShopSettings, useProfile, DEFAULT_TICKET_CONFIG,
   formatXOF, type Sale, type SaleItem,
 } from "@/lib/data/hooks";
@@ -41,7 +41,20 @@ function VentesPage() {
   const [customTo, setCustomTo] = useState("");
   const { from, to } = periodRange(period, customFrom, customTo);
 
-  const { data: sales = [], isLoading } = useSales({ from: from.toISOString(), to: to.toISOString(), limit: 1000 });
+  const { data: allSales = [], isLoading } = useSales({ from: from.toISOString(), to: to.toISOString(), limit: 1000 });
+  const { data: myRole } = useMyRole();
+  const { user } = useAuth();
+  const perms = useTeamPermissions();
+  // Bascule Bloc 15 : un caissier ne voit que ses propres tickets si la
+  // boutique a activé cette restriction — le reste de l'équipe (et un
+  // caissier si la bascule est désactivée, comportement par défaut) voit
+  // toute la période comme avant.
+  const sales = useMemo(() => {
+    if (myRole === "cashier" && perms.cashier_sees_only_own_sales) {
+      return allSales.filter((s) => s.cashier_id === user?.id);
+    }
+    return allSales;
+  }, [allSales, myRole, perms.cashier_sees_only_own_sales, user?.id]);
   const [query, setQuery] = useState(q ?? "");
   const [payFilter, setPayFilter] = useState<"all" | Sale["payment_method"]>("all");
   const [selected, setSelected] = useState<SaleFull | null>(null);

@@ -1038,12 +1038,28 @@ export const DEFAULT_TICKET_CONFIG: TicketConfig = {
   thanks: "Merci pour votre achat !",
 };
 export type TaxRate = { id: string; name: string; rate: number; active: boolean };
+// Bascules de permissions ciblées (Bloc 15) : quelques réglages sensibles
+// pour le rôle cashier, en plus du système de rôle existant — pas une
+// refonte de la RLS (décision confirmée en amont de ce bloc). Ce sont des
+// préférences UI/requête, pas une nouvelle frontière de sécurité : la RLS
+// (table par table, par rôle) reste la seule vraie barrière, inchangée.
+export type TeamPermissions = {
+  cashier_can_discount: boolean;
+  cashier_view_cost_margin: boolean;
+  cashier_sees_only_own_sales: boolean;
+};
+export const DEFAULT_TEAM_PERMISSIONS: TeamPermissions = {
+  cashier_can_discount: true,
+  cashier_view_cost_margin: true,
+  cashier_sees_only_own_sales: false,
+};
 export type ShopSettingsData = {
   phone?: string; email?: string; address?: string;
   rccm?: string; ifu?: string; facebook?: string; instagram?: string;
   ticket?: TicketConfig;
   expense_categories?: string[];
   tax_rates?: TaxRate[];
+  permissions?: Partial<TeamPermissions>;
 };
 export type ShopSettings = {
   shop_id: string;
@@ -1085,6 +1101,14 @@ export function useUpdateShopSettings() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_settings", shopId] }),
   });
+}
+
+// Résout les bascules de permissions ciblées avec leurs valeurs par défaut
+// (préserve le comportement actuel pour les boutiques qui n'ont jamais
+// touché ce réglage — aucune régression silencieuse).
+export function useTeamPermissions(): TeamPermissions {
+  const { data: settings } = useShopSettings();
+  return { ...DEFAULT_TEAM_PERMISSIONS, ...(settings?.data.permissions ?? {}) };
 }
 
 export function useUpdateShop() {

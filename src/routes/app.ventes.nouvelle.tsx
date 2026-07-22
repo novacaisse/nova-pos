@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
-  useProducts, useCustomers, useCreateSale, formatXOF, newTicketRef,
+  useProducts, useCustomers, useCreateSale, useMyRole, useTeamPermissions, formatXOF, newTicketRef,
   type ProductWithStock, type Customer, type Sale,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,9 @@ function NouvelleVentePage() {
   const { data: products = [] } = useProducts();
   const { data: customers = [] } = useCustomers();
   const createSale = useCreateSale();
+  const { data: myRole } = useMyRole();
+  const perms = useTeamPermissions();
+  const canDiscount = myRole !== "cashier" || perms.cashier_can_discount;
 
   const [productQuery, setProductQuery] = useState("");
   const [cart, setCart] = useState<Line[]>([]);
@@ -186,11 +189,13 @@ function NouvelleVentePage() {
             <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Paiement</div>
             <div className="space-y-3">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Sous-total</span><span className="tabular font-semibold">{formatXOF(subtotal)}</span></div>
-              <label className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-muted-foreground">Remise (montant)</span>
-                <input type="number" min={0} value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
-                  className="tabular h-9 w-28 rounded-lg border border-border bg-background px-2 text-right text-sm" />
-              </label>
+              {canDiscount && (
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">Remise (montant)</span>
+                  <input type="number" min={0} value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
+                    className="tabular h-9 w-28 rounded-lg border border-border bg-background px-2 text-right text-sm" />
+                </label>
+              )}
               <div className="flex items-center justify-between rounded-xl bg-muted px-3 py-2">
                 <span className="text-sm font-semibold">Total</span>
                 <span className="tabular font-display text-lg font-bold">{formatXOF(total)}</span>

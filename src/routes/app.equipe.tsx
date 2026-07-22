@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Plus, Shield, UserCog, X, Trash2, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Plus, Shield, UserCog, X, Trash2, Loader2, Save } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
   useShopMembers, useCreateTeamMember, useUpdateMemberRole, useRemoveMember, useMyRole,
-  type ShopMember,
+  useShopSettings, useUpdateShopSettings, useTeamPermissions, DEFAULT_TEAM_PERMISSIONS,
+  type ShopMember, type TeamPermissions,
 } from "@/lib/data/hooks";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { ROLE_LABEL, type AppRole } from "@/lib/roles";
@@ -93,6 +94,9 @@ function EquipePage() {
         )}
 
         {tab === "perms" && (
+          <div className="space-y-4">
+            <TogglesPanel isOwner={isOwner} />
+
           <div className="rounded-2xl border border-border bg-card p-5">
             <div className="mb-4 text-sm font-semibold">
               Matrice de permissions réelle (fixée par les règles de sécurité de la base — non modifiable ici)
@@ -123,10 +127,67 @@ function EquipePage() {
               S = lecture, I = création, U = modification, D = suppression. « — » = aucun accès.
             </p>
           </div>
+          </div>
         )}
       </div>
 
       {inviting && <CreateMemberModal onClose={() => setInviting(false)} />}
+    </div>
+  );
+}
+
+const TOGGLES: { key: keyof TeamPermissions; label: string; hint: string }[] = [
+  { key: "cashier_can_discount", label: "Remise à la caisse", hint: "Autorise le rôle Caissier à appliquer une remise sur une vente." },
+  { key: "cashier_view_cost_margin", label: "Prix d'achat et marge", hint: "Affiche le prix d'achat et la marge au rôle Caissier dans le catalogue Produits." },
+  { key: "cashier_sees_only_own_sales", label: "Historique des ventes limité", hint: "Un Caissier ne voit dans Ventes que ses propres tickets, pas ceux de toute l'équipe." },
+];
+
+function TogglesPanel({ isOwner }: { isOwner: boolean }) {
+  const { data: settings } = useShopSettings();
+  const current = useTeamPermissions();
+  const updateSettings = useUpdateShopSettings();
+  const [local, setLocal] = useState<TeamPermissions>(current);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { setLocal(current); }, [settings]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = async () => {
+    setSaved(false);
+    await updateSettings.mutateAsync({ data: { ...(settings?.data ?? {}), permissions: local } });
+    setSaved(true);
+  };
+
+  const dirty = TOGGLES.some((t) => local[t.key] !== current[t.key]);
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="mb-1 text-sm font-semibold">Bascules pour le rôle Caissier</div>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Réglages ciblés en plus du système de rôle — pas une nouvelle grille de permissions complète.
+        Les valeurs par défaut préservent le comportement actuel.
+      </p>
+      <div className="space-y-2">
+        {TOGGLES.map((t) => (
+          <label key={t.key} className="flex items-center justify-between gap-4 rounded-xl border border-border p-3 text-sm">
+            <div>
+              <div className="font-medium">{t.label}</div>
+              <div className="text-xs text-muted-foreground">{t.hint}</div>
+            </div>
+            <input type="checkbox" checked={local[t.key]} disabled={!isOwner}
+              onChange={(e) => setLocal((l) => ({ ...l, [t.key]: e.target.checked }))}
+              className="h-5 w-5 shrink-0 accent-primary" />
+          </label>
+        ))}
+      </div>
+      {isOwner && (
+        <div className="mt-4 flex items-center gap-3">
+          <button onClick={save} disabled={!dirty || updateSettings.isPending}
+            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40">
+            {updateSettings.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
+          </button>
+          {saved && !dirty && <span className="text-xs text-success">Enregistré.</span>}
+        </div>
+      )}
     </div>
   );
 }

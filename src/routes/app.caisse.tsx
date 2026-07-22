@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 import {
   useCategories, useProducts, useCustomers, useUpsertCustomer,
   useCreateSale, useShopSettings, useProfile, DEFAULT_TICKET_CONFIG, formatXOF, newTicketRef,
-  useHoldTickets, useSaveHoldTicket, useDeleteHoldTicket, type HoldTicket,
-  type ProductWithStock, type Customer,
+  useHoldTickets, useSaveHoldTicket, useDeleteHoldTicket, useMyRole, useTeamPermissions,
+  type HoldTicket, type ProductWithStock, type Customer,
 } from "@/lib/data/hooks";
 import { useShop } from "@/lib/auth/ShopProvider";
 
@@ -50,6 +50,11 @@ function CaissePage() {
   const { data: holds = [] } = useHoldTickets();
   const saveHold = useSaveHoldTicket();
   const deleteHold = useDeleteHoldTicket();
+  const { data: myRole } = useMyRole();
+  const perms = useTeamPermissions();
+  // Bascule Bloc 15 : activé par défaut, comportement inchangé sauf si le
+  // owner désactive explicitement la remise pour le rôle Caissier.
+  const canDiscount = myRole !== "cashier" || perms.cashier_can_discount;
 
   // Entrée directe depuis Ventes ("Modifier" sur un brouillon) : ?holdId=
   // reprend ce ticket précis puis nettoie l'URL pour ne pas re-déclencher
@@ -283,13 +288,15 @@ function CaissePage() {
                           className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100">
                           <X className="h-3.5 w-3.5" /></button>
                       </div>
-                      <div className="mt-1 flex items-center gap-2 pl-1">
-                        <Percent className="h-3 w-3 text-muted-foreground" />
-                        <input type="number" min={0} max={100} value={dp || ""} placeholder="Remise ligne"
-                          onChange={(e) => setLineDiscount(l.product_id, Number(e.target.value) || 0)}
-                          className="tabular h-6 w-20 rounded-md border border-border bg-card px-2 text-right text-[11px]" />
-                        <span className="text-[10px] text-muted-foreground">% sur la ligne</span>
-                      </div>
+                      {canDiscount && (
+                        <div className="mt-1 flex items-center gap-2 pl-1">
+                          <Percent className="h-3 w-3 text-muted-foreground" />
+                          <input type="number" min={0} max={100} value={dp || ""} placeholder="Remise ligne"
+                            onChange={(e) => setLineDiscount(l.product_id, Number(e.target.value) || 0)}
+                            className="tabular h-6 w-20 rounded-md border border-border bg-card px-2 text-right text-[11px]" />
+                          <span className="text-[10px] text-muted-foreground">% sur la ligne</span>
+                        </div>
+                      )}
                     </motion.li>
                   );
                 })}
@@ -301,28 +308,30 @@ function CaissePage() {
         <div className="border-t border-border bg-background/40 p-4 sm:p-5">
           <div className="space-y-1.5 text-sm">
             <Row label="Sous-total" value={formatXOF(Math.round(subtotal))} />
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Percent className="h-3.5 w-3.5" />
-                <span>Remise globale</span>
-                <div className="flex rounded-md border border-border bg-card p-0.5">
-                  <button type="button" onClick={() => setDiscountMode("pct")}
-                    className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "pct" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>%</button>
-                  <button type="button" onClick={() => setDiscountMode("amount")}
-                    className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "amount" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>F</button>
+            {canDiscount && (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <Percent className="h-3.5 w-3.5" />
+                  <span>Remise globale</span>
+                  <div className="flex rounded-md border border-border bg-card p-0.5">
+                    <button type="button" onClick={() => setDiscountMode("pct")}
+                      className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "pct" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>%</button>
+                    <button type="button" onClick={() => setDiscountMode("amount")}
+                      className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "amount" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>F</button>
+                  </div>
+                  {discountMode === "pct" ? (
+                    <input type="number" min={0} max={100} value={discountPct}
+                      onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                      className="tabular h-7 w-14 rounded-md border border-border bg-card px-2 text-right text-xs" />
+                  ) : (
+                    <input type="number" min={0} value={discountAmountInput}
+                      onChange={(e) => setDiscountAmountInput(Math.max(0, Number(e.target.value) || 0))}
+                      className="tabular h-7 w-20 rounded-md border border-border bg-card px-2 text-right text-xs" />
+                  )}
                 </div>
-                {discountMode === "pct" ? (
-                  <input type="number" min={0} max={100} value={discountPct}
-                    onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                    className="tabular h-7 w-14 rounded-md border border-border bg-card px-2 text-right text-xs" />
-                ) : (
-                  <input type="number" min={0} value={discountAmountInput}
-                    onChange={(e) => setDiscountAmountInput(Math.max(0, Number(e.target.value) || 0))}
-                    className="tabular h-7 w-20 rounded-md border border-border bg-card px-2 text-right text-xs" />
-                )}
+                <span className="tabular font-medium">− {formatXOF(discountAmt)}</span>
               </div>
-              <span className="tabular font-medium">− {formatXOF(discountAmt)}</span>
-            </div>
+            )}
           </div>
 
           <div className="mt-3 flex items-end justify-between border-t border-dashed border-border pt-3">
