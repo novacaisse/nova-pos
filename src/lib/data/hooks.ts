@@ -401,6 +401,83 @@ export function useCreateSale() {
   });
 }
 
+// ============ TICKETS EN ATTENTE (Caisse) ============
+// Persistés comme de vraies lignes `sales` (status: 'draft', déjà prévu
+// dans l'enum sale_status) au lieu d'un state React perdu au reload. Le
+// libellé personnalisé du ticket est stocké dans `notes` (déjà existant,
+// pas de migration nécessaire). Aucun mouvement de stock ni paiement n'est
+// créé pour un brouillon — reprendre un ticket recharge son panier puis
+// supprime le brouillon ; le paiement final passe par le circuit normal
+// useCreateSale (status "completed"), qui reste inchangé.
+export type HoldTicket = Sale & { sale_items: SaleItem[]; customers: { name: string } | null };
+
+export function useHoldTickets() {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["hold_tickets", shopId],
+    enabled: !!shopId,
+    queryFn: async (): Promise<HoldTicket[]> => {
+      const { data, error } = await supabase.from("sales")
+        .select("*, sale_items(*), customers(name)")
+        .eq("shop_id", shopId!).eq("status", "draft")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as HoldTicket[];
+    },
+  });
+}
+
+export function useSaveHoldTicket() {
+  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      label?: string;
+      customer_id?: string | null;
+      items: { product_id: string | null; name: string; quantity: number; unit_price: number; discount?: number }[];
+      discount?: number;
+    }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const items = input.items.map((it) => ({
+        ...it, discount: it.discount ?? 0, tax_rate: 0,
+        total: it.quantity * it.unit_price - (it.discount ?? 0),
+      }));
+      const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
+      const discount = input.discount ?? 0;
+      const total = Math.max(0, subtotal - discount);
+
+      const { data: sale, error: e1 } = await supabase.from("sales").insert({
+        shop_id: shopId, reference: newTicketRef("H"),
+        customer_id: input.customer_id ?? null, cashier_id: user?.id,
+        status: "draft", subtotal, discount, tax: 0, total,
+        paid: 0, change_due: 0, payment_method: "cash",
+        notes: input.label?.trim() || null,
+      }).select().single();
+      if (e1) throw e1;
+
+      const itemsPayload = items.map((it) => ({
+        shop_id: shopId, sale_id: sale.id,
+        product_id: it.product_id, name: it.name, quantity: it.quantity,
+        unit_price: it.unit_price, discount: it.discount, tax_rate: it.tax_rate, total: it.total,
+      }));
+      const { error: e2 } = await supabase.from("sale_items").insert(itemsPayload);
+      if (e2) throw e2;
+      return sale;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hold_tickets", shopId] }),
+  });
+}
+
+export function useDeleteHoldTicket() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("sales").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hold_tickets", shopId] }),
+  });
+}
+
 // ============ DEVIS ============
 export type QuoteStatus = "draft" | "sent" | "accepted" | "refused" | "converted" | "expired";
 export type Quote = {

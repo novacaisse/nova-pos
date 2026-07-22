@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import {
   useCategories, useProducts, useCustomers, useUpsertCustomer,
   useCreateSale, useShopSettings, useProfile, DEFAULT_TICKET_CONFIG, formatXOF, newTicketRef,
+  useHoldTickets, useSaveHoldTicket, useDeleteHoldTicket, type HoldTicket,
   type ProductWithStock, type Customer,
 } from "@/lib/data/hooks";
 import { useShop } from "@/lib/auth/ShopProvider";
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/app/caisse")({
 
 type PaymentMethod = "cash" | "mobile_money" | "card";
 type PaymentType = "total" | "avance" | "acompte";
+type DiscountMode = "pct" | "amount";
 
 type Line = {
   product_id: string;
@@ -27,8 +29,6 @@ type Line = {
   quantity: number;
   discount_pct?: number;
 };
-
-type HoldTicket = { id: string; createdAt: string; lines: Line[]; discountPct: number; customer?: Customer };
 
 type Receipt = {
   ticket: string; at: Date; lines: Line[];
@@ -42,16 +42,21 @@ function CaissePage() {
   const { data: products = [], isLoading: loadingProducts } = useProducts();
   const { data: categories = [] } = useCategories();
   const createSale = useCreateSale();
+  const { data: holds = [] } = useHoldTickets();
+  const saveHold = useSaveHoldTicket();
+  const deleteHold = useDeleteHoldTicket();
 
   const [query, setQuery] = useState("");
   const [categoryId, setCategoryId] = useState<string | "all">("all");
   const [cart, setCart] = useState<Line[]>([]);
+  const [discountMode, setDiscountMode] = useState<DiscountMode>("pct");
   const [discountPct, setDiscountPct] = useState(0);
+  const [discountAmountInput, setDiscountAmountInput] = useState(0);
   const [payment, setPayment] = useState<PaymentMethod>("cash");
   const [showPay, setShowPay] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [holds, setHolds] = useState<HoldTicket[]>([]);
   const [showHolds, setShowHolds] = useState(false);
+  const [showHoldLabel, setShowHoldLabel] = useState(false);
   const [customer, setCustomer] = useState<Customer | undefined>();
   const [showCustomer, setShowCustomer] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -72,7 +77,10 @@ function CaissePage() {
   }, [products, query, categoryId]);
 
   const subtotal = cart.reduce((s, l) => s + l.unit_price * l.quantity * (1 - (l.discount_pct ?? 0) / 100), 0);
-  const discountAmt = Math.round((subtotal * discountPct) / 100);
+  const discountAmt = Math.max(0, Math.min(
+    Math.round(subtotal),
+    discountMode === "pct" ? Math.round((subtotal * discountPct) / 100) : Math.round(discountAmountInput),
+  ));
   const total = Math.round(subtotal - discountAmt);
   const itemsCount = cart.reduce((s, l) => s + l.quantity, 0);
 
@@ -92,23 +100,37 @@ function CaissePage() {
   const setLineDiscount = (id: string, pct: number) =>
     setCart((c) => c.map((l) => (l.product_id === id ? { ...l, discount_pct: Math.max(0, Math.min(100, pct)) } : l)));
   const removeLine = (id: string) => setCart((c) => c.filter((l) => l.product_id !== id));
-  const clearCart = () => { setCart([]); setDiscountPct(0); setCustomer(undefined); };
+  const clearCart = () => {
+    setCart([]); setDiscountMode("pct"); setDiscountPct(0); setDiscountAmountInput(0); setCustomer(undefined);
+  };
 
-  const holdCurrent = () => {
+  async function holdCurrent(label: string) {
     if (cart.length === 0) return;
-    setHolds((h) => [
-      { id: `H-${Date.now().toString(36).toUpperCase()}`, createdAt: new Date().toISOString(), lines: cart, discountPct, customer },
-      ...h,
-    ]);
+    await saveHold.mutateAsync({
+      label,
+      customer_id: customer?.id ?? null,
+      discount: discountAmt,
+      items: cart.map((l) => ({
+        product_id: l.product_id, name: l.name, quantity: l.quantity, unit_price: l.unit_price,
+        discount: Math.round(l.unit_price * l.quantity * ((l.discount_pct ?? 0) / 100)),
+      })),
+    });
     clearCart();
-  };
-  const resumeHold = (id: string) => {
-    const t = holds.find((h) => h.id === id);
-    if (!t) return;
-    setCart(t.lines); setDiscountPct(t.discountPct); setCustomer(t.customer);
-    setHolds((h) => h.filter((x) => x.id !== id));
+    setShowHoldLabel(false);
+  }
+
+  function resumeHold(h: HoldTicket) {
+    const lines: Line[] = h.sale_items.map((it) => ({
+      product_id: it.product_id ?? "", name: it.name, unit_price: Number(it.unit_price), quantity: it.quantity,
+      discount_pct: it.discount > 0 ? Math.round((Number(it.discount) / (it.quantity * Number(it.unit_price))) * 100) : undefined,
+    }));
+    setCart(lines);
+    setDiscountMode("amount");
+    setDiscountAmountInput(Number(h.discount));
+    setCustomer(h.customer_id && h.customers ? { id: h.customer_id, name: h.customers.name } as Customer : undefined);
+    deleteHold.mutate(h.id);
     setShowHolds(false);
-  };
+  }
 
   async function handleConfirmPayment(r: Receipt) {
     try {
@@ -205,7 +227,7 @@ function CaissePage() {
               </div>
             </IconBtn>
             <IconBtn label="Ajouter client" onClick={() => setShowCustomer(true)}><UserPlus className="h-4 w-4" /></IconBtn>
-            <IconBtn label="Mettre en attente" onClick={holdCurrent}><RotateCcw className="h-4 w-4" /></IconBtn>
+            <IconBtn label="Mettre en attente" onClick={() => cart.length > 0 && setShowHoldLabel(true)}><RotateCcw className="h-4 w-4" /></IconBtn>
             <IconBtn label="Vider" onClick={clearCart} tone="destructive"><Trash2 className="h-4 w-4" /></IconBtn>
           </div>
         </div>
@@ -263,13 +285,24 @@ function CaissePage() {
           <div className="space-y-1.5 text-sm">
             <Row label="Sous-total" value={formatXOF(Math.round(subtotal))} />
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-muted-foreground">
+              <div className="flex items-center gap-1.5 text-muted-foreground">
                 <Percent className="h-3.5 w-3.5" />
                 <span>Remise globale</span>
-                <input type="number" min={0} max={100} value={discountPct}
-                  onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                  className="tabular h-7 w-14 rounded-md border border-border bg-card px-2 text-right text-xs" />
-                <span className="text-xs">%</span>
+                <div className="flex rounded-md border border-border bg-card p-0.5">
+                  <button type="button" onClick={() => setDiscountMode("pct")}
+                    className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "pct" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>%</button>
+                  <button type="button" onClick={() => setDiscountMode("amount")}
+                    className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "amount" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>F</button>
+                </div>
+                {discountMode === "pct" ? (
+                  <input type="number" min={0} max={100} value={discountPct}
+                    onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                    className="tabular h-7 w-14 rounded-md border border-border bg-card px-2 text-right text-xs" />
+                ) : (
+                  <input type="number" min={0} value={discountAmountInput}
+                    onChange={(e) => setDiscountAmountInput(Math.max(0, Number(e.target.value) || 0))}
+                    className="tabular h-7 w-20 rounded-md border border-border bg-card px-2 text-right text-xs" />
+                )}
               </div>
               <span className="tabular font-medium">− {formatXOF(discountAmt)}</span>
             </div>
@@ -307,7 +340,10 @@ function CaissePage() {
         )}
         {showHolds && (
           <HoldsDialog holds={holds} onClose={() => setShowHolds(false)} onResume={resumeHold}
-            onRemove={(id) => setHolds((h) => h.filter((x) => x.id !== id))} />
+            onRemove={(id) => deleteHold.mutate(id)} />
+        )}
+        {showHoldLabel && (
+          <HoldLabelDialog onClose={() => setShowHoldLabel(false)} onConfirm={holdCurrent} pending={saveHold.isPending} />
         )}
         {showCustomer && (
           <CustomerDialog onClose={() => setShowCustomer(false)} onPick={(c) => { setCustomer(c); setShowCustomer(false); }} />
@@ -491,7 +527,7 @@ function Row2({ label, value, accent }: { label: string; value: string; accent?:
 }
 
 function HoldsDialog({ holds, onClose, onResume, onRemove }: {
-  holds: HoldTicket[]; onClose: () => void; onResume: (id: string) => void; onRemove: (id: string) => void;
+  holds: HoldTicket[]; onClose: () => void; onResume: (h: HoldTicket) => void; onRemove: (id: string) => void;
 }) {
   return (
     <DialogShell onClose={onClose} maxWidth="max-w-lg">
@@ -506,18 +542,18 @@ function HoldsDialog({ holds, onClose, onResume, onRemove }: {
         {holds.length === 0 ? (
           <div className="grid place-items-center py-12 text-sm text-muted-foreground">Aucun ticket en attente</div>
         ) : holds.map((h) => {
-          const t = h.lines.reduce((s, l) => s + l.unit_price * l.quantity * (1 - (l.discount_pct ?? 0) / 100), 0);
+          const itemsCount = h.sale_items.reduce((s, l) => s + l.quantity, 0);
           return (
             <div key={h.id} className="mb-2 flex items-center gap-3 rounded-xl border border-border p-3">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><Pause className="h-4 w-4" /></div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">{h.customer?.name ?? "Comptoir"} · {h.id}</div>
+                <div className="truncate text-sm font-semibold">{h.notes || h.customers?.name || "Comptoir"} · {h.reference}</div>
                 <div className="text-xs text-muted-foreground">
-                  {h.lines.length} article{h.lines.length > 1 ? "s" : ""} · {new Date(h.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                  {itemsCount} article{itemsCount > 1 ? "s" : ""} · {new Date(h.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                 </div>
               </div>
-              <div className="tabular text-sm font-bold">{formatXOF(Math.round(t))}</div>
-              <button onClick={() => onResume(h.id)} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:opacity-90">
+              <div className="tabular text-sm font-bold">{formatXOF(Number(h.total))}</div>
+              <button onClick={() => onResume(h)} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:opacity-90">
                 Reprendre
               </button>
               <button onClick={() => onRemove(h.id)} className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
@@ -526,6 +562,30 @@ function HoldsDialog({ holds, onClose, onResume, onRemove }: {
             </div>
           );
         })}
+      </div>
+    </DialogShell>
+  );
+}
+
+function HoldLabelDialog({ onClose, onConfirm, pending }: {
+  onClose: () => void; onConfirm: (label: string) => void; pending: boolean;
+}) {
+  const [label, setLabel] = useState("");
+  return (
+    <DialogShell onClose={onClose} maxWidth="max-w-sm">
+      <div className="p-5">
+        <div className="font-display text-lg font-bold">Mettre en attente</div>
+        <p className="mt-1 text-xs text-muted-foreground">Donnez un nom au ticket pour le retrouver facilement (optionnel).</p>
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex : Table 4, Client au téléphone…"
+          autoFocus onKeyDown={(e) => { if (e.key === "Enter") onConfirm(label); }}
+          className="mt-4 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary" />
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
+          <button onClick={() => onConfirm(label)} disabled={pending}
+            className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-50">
+            {pending && <Loader2 className="h-4 w-4 animate-spin" />} Mettre en attente
+          </button>
+        </div>
       </div>
     </DialogShell>
   );
