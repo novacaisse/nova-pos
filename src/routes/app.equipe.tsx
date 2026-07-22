@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Plus, Shield, UserCog, X, Trash2, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
-  useShopMembers, useInviteMember, useUpdateMemberRole, useRemoveMember, useMyRole,
+  useShopMembers, useCreateTeamMember, useUpdateMemberRole, useRemoveMember, useMyRole,
   type ShopMember,
 } from "@/lib/data/hooks";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -126,7 +126,7 @@ function EquipePage() {
         )}
       </div>
 
-      {inviting && <InviteModal onClose={() => setInviting(false)} />}
+      {inviting && <CreateMemberModal onClose={() => setInviting(false)} />}
     </div>
   );
 }
@@ -169,16 +169,25 @@ function MemberRow({ member, isOwner, isSelf, onRoleChange, onRemove }: {
   );
 }
 
-function InviteModal({ onClose }: { onClose: () => void }) {
-  const invite = useInviteMember();
+function CreateMemberModal({ onClose }: { onClose: () => void }) {
+  const create = useCreateTeamMember();
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
   const [role, setRole] = useState<AppRole>("cashier");
   const [error, setError] = useState<string | null>(null);
+
+  const inp = "w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
 
   const submit = async () => {
     setError(null);
     try {
-      await invite.mutateAsync({ email, role });
+      await create.mutateAsync({
+        full_name: fullName.trim(), email: email.trim(), password: password || undefined,
+        phone: phone.trim() || undefined, address: address.trim() || undefined, role,
+      });
       onClose();
     } catch (e: any) {
       setError(e?.message ?? "Erreur inconnue");
@@ -192,28 +201,46 @@ function InviteModal({ onClose }: { onClose: () => void }) {
           <div className="font-display text-lg font-bold">Ajouter un membre</div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
-        <div className="space-y-4 p-5">
+        <div className="max-h-[75vh] space-y-3 overflow-y-auto p-5">
           <p className="text-xs text-muted-foreground">
-            La personne doit déjà avoir un compte NovaCaisse (créé via <code>/rejoindre</code>). Saisissez son email pour l'ajouter à cette boutique.
+            Créez directement le compte de cette personne. Communiquez-lui ensuite l'email et le mot de passe pour
+            qu'elle se connecte — si un compte existe déjà avec cet email, il sera simplement rattaché à cette
+            boutique (aucun mot de passe requis dans ce cas).
           </p>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email</span>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom complet *</span>
+            <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={inp} />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Rôle</span>
-            <select value={role} onChange={(e) => setRole(e.target.value as AppRole)}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm">
-              {ALL_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-            </select>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email *</span>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inp} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Mot de passe (si nouveau compte)</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="6 caractères minimum" className={inp} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Téléphone</span>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inp} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Rôle</span>
+              <select value={role} onChange={(e) => setRole(e.target.value as AppRole)} className={inp}>
+                {ALL_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Adresse</span>
+            <input value={address} onChange={(e) => setAddress(e.target.value)} className={inp} />
           </label>
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
-          <div className="flex gap-2">
+          <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
-            <button onClick={submit} disabled={!email || invite.isPending}
+            <button onClick={submit} disabled={!fullName.trim() || !email.trim() || create.isPending}
               className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
-              {invite.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter
+              {create.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer
             </button>
           </div>
         </div>

@@ -41,7 +41,7 @@ create table if not exists public.shops (
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  full_name text, phone text, avatar_url text,
+  full_name text, phone text, avatar_url text, address text,
   created_at timestamptz not null default now()
 );
 
@@ -101,6 +101,9 @@ returns uuid language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.find_user_id_by_email(text) from public;
 grant execute on function public.find_user_id_by_email(text) to authenticated;
+-- create-team-member (Bloc 14, service role) rattache un compte existant
+-- via cette fonction.
+grant execute on function public.find_user_id_by_email(text) to service_role;
 
 -- Accès Super Admin — indépendant de shop_members (pas lié à une
 -- boutique). Aucun grant à "authenticated" sur cette table : gérée

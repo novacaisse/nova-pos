@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TarifsRouteImport } from './routes/tarifs'
 import { Route as SouscriptionRouteImport } from './routes/souscription'
-import { Route as RejoindreRouteImport } from './routes/rejoindre'
 import { Route as InscriptionRouteImport } from './routes/inscription'
 import { Route as ConnexionRouteImport } from './routes/connexion'
 import { Route as AppRouteImport } from './routes/app'
@@ -56,11 +55,6 @@ const TarifsRoute = TarifsRouteImport.update({
 const SouscriptionRoute = SouscriptionRouteImport.update({
   id: '/souscription',
   path: '/souscription',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RejoindreRoute = RejoindreRouteImport.update({
-  id: '/rejoindre',
-  path: '/rejoindre',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InscriptionRoute = InscriptionRouteImport.update({
@@ -247,7 +241,6 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/connexion': typeof ConnexionRoute
   '/inscription': typeof InscriptionRoute
-  '/rejoindre': typeof RejoindreRoute
   '/souscription': typeof SouscriptionRouteWithChildren
   '/tarifs': typeof TarifsRoute
   '/admin/abonnements': typeof AdminAbonnementsRoute
@@ -285,7 +278,6 @@ export interface FileRoutesByTo {
   '/admins': typeof AdminsRoute
   '/connexion': typeof ConnexionRoute
   '/inscription': typeof InscriptionRoute
-  '/rejoindre': typeof RejoindreRoute
   '/tarifs': typeof TarifsRoute
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
@@ -323,7 +315,6 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/connexion': typeof ConnexionRoute
   '/inscription': typeof InscriptionRoute
-  '/rejoindre': typeof RejoindreRoute
   '/souscription': typeof SouscriptionRouteWithChildren
   '/tarifs': typeof TarifsRoute
   '/admin/abonnements': typeof AdminAbonnementsRoute
@@ -365,7 +356,6 @@ export interface FileRouteTypes {
     | '/app'
     | '/connexion'
     | '/inscription'
-    | '/rejoindre'
     | '/souscription'
     | '/tarifs'
     | '/admin/abonnements'
@@ -403,7 +393,6 @@ export interface FileRouteTypes {
     | '/admins'
     | '/connexion'
     | '/inscription'
-    | '/rejoindre'
     | '/tarifs'
     | '/admin/abonnements'
     | '/admin/boutiques'
@@ -440,7 +429,6 @@ export interface FileRouteTypes {
     | '/app'
     | '/connexion'
     | '/inscription'
-    | '/rejoindre'
     | '/souscription'
     | '/tarifs'
     | '/admin/abonnements'
@@ -481,7 +469,6 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   ConnexionRoute: typeof ConnexionRoute
   InscriptionRoute: typeof InscriptionRoute
-  RejoindreRoute: typeof RejoindreRoute
   SouscriptionRoute: typeof SouscriptionRouteWithChildren
   TarifsRoute: typeof TarifsRoute
 }
@@ -500,13 +487,6 @@ declare module '@tanstack/react-router' {
       path: '/souscription'
       fullPath: '/souscription'
       preLoaderRoute: typeof SouscriptionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/rejoindre': {
-      id: '/rejoindre'
-      path: '/rejoindre'
-      fullPath: '/rejoindre'
-      preLoaderRoute: typeof RejoindreRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inscription': {
@@ -868,7 +848,6 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   ConnexionRoute: ConnexionRoute,
   InscriptionRoute: InscriptionRoute,
-  RejoindreRoute: RejoindreRoute,
   SouscriptionRoute: SouscriptionRouteWithChildren,
   TarifsRoute: TarifsRoute,
 }

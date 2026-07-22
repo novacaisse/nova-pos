@@ -898,7 +898,7 @@ export function newTicketRef(prefix = "T") {
 }
 
 // ============ PROFIL (utilisateur courant) ============
-export type Profile = { id: string; full_name: string | null; phone: string | null; avatar_url: string | null };
+export type Profile = { id: string; full_name: string | null; phone: string | null; avatar_url: string | null; address: string | null };
 
 export function useProfile() {
   const { user } = useAuth();
@@ -916,7 +916,7 @@ export function useProfile() {
 export function useUpdateProfile() {
   const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (patch: Partial<Pick<Profile, "full_name" | "phone">>) => {
+    mutationFn: async (patch: Partial<Pick<Profile, "full_name" | "phone" | "address">>) => {
       if (!user) throw new Error("Non authentifié");
       const { data, error } = await supabase.from("profiles").update(patch).eq("id", user.id).select().single();
       if (error) throw error;
@@ -974,19 +974,25 @@ export function useShopMembers() {
   });
 }
 
-export function useInviteMember() {
+// Remplace l'ancien flux "la personne crée son propre compte via
+// /rejoindre, puis le owner l'ajoute par email" : le owner crée directement
+// le compte (Edge Function create-team-member, service role) — email,
+// mot de passe, rôle, coordonnées. Si un compte existe déjà avec cet
+// email, la fonction le rattache à la boutique sans mot de passe à définir.
+export function useCreateTeamMember() {
   const shopId = useShopId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ email, role }: { email: string; role: AppRole }) => {
+    mutationFn: async (input: {
+      email: string; password?: string; full_name: string;
+      phone?: string; address?: string; role: AppRole;
+    }) => {
       if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const { data: userId, error: rpcErr } = await supabase.rpc("find_user_id_by_email", { _email: email.trim() });
-      if (rpcErr) throw rpcErr;
-      if (!userId) throw new Error("Aucun compte trouvé avec cet email. La personne doit d'abord créer un compte via /rejoindre.");
-      const { error } = await supabase.from("shop_members").insert({ shop_id: shopId, user_id: userId, role });
-      if (error) {
-        if ((error as any).code === "23505") throw new Error("Cette personne fait déjà partie de l'équipe.");
-        throw error;
-      }
+      const { data, error } = await supabase.functions.invoke("create-team-member", {
+        body: { shop_id: shopId, ...input },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { user_id: string };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
   });

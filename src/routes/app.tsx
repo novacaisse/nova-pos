@@ -48,11 +48,10 @@ function AppLayout() {
     );
   }
 
-  // Garde-fou : un utilisateur authentifié sans aucune boutique (ex. inscription
-  // interrompue avant la création de shops/shop_members, ou compte créé via
-  // /rejoindre en attente d'être ajouté à une équipe) ne doit jamais atterrir
-  // silencieusement sur des écrans vides/désactivés — un état clair vaut mieux
-  // qu'un silence déroutant.
+  // Garde-fou : un utilisateur authentifié sans aucune boutique (ex.
+  // inscription interrompue avant la création de shops/shop_members) ne
+  // doit jamais atterrir silencieusement sur des écrans vides/désactivés —
+  // un état clair vaut mieux qu'un silence déroutant.
   if (!shopLoading && shops.length === 0) {
     return <NoShopScreen onRetry={refresh} onSignOut={signOut} />;
   }
