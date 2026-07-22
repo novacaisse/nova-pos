@@ -508,3 +508,47 @@ avant exécution.
   `db/migrations/002_role_based_policies.sql` sont laissées telles quelles :
   les fichiers de migration passés ne sont jamais réécrits rétroactivement,
   seul `db/schema.sql` (référence canonique de l'état courant) est mis à jour.
+
+## 15. Blocs 11-15 — Ventes, Fournisseurs, Paramètres, Équipe (migrations 013-016)
+
+Cinq blocs codés d'affilée (voir l'historique de commits), migrations
+présentées pour relecture avant exécution, non exécutées à la rédaction
+de cette section.
+
+- **Migration 013** : corrige un vrai bug RLS du Bloc 8 — `sales_delete`
+  n'autorisait que owner/manager, alors que `useDeleteHoldTicket()` (reprise/
+  suppression d'un ticket en attente à la Caisse) fait un `delete` sur
+  `sales`. Un cashier ne pouvait donc jamais reprendre son propre ticket.
+  Corrigé en ajoutant une clause `or (status = 'draft' and cashier_id =
+  auth.uid() and has_role_in_shop(shop_id, 'cashier'))` — les ventes
+  finalisées restent strictement owner/manager.
+- **Migration 014** : `products.supplier_id` (FK nullable) + tables
+  `purchase_orders`/`purchase_order_items` avec RLS (même matrice que
+  `products` : owner/manager/stock écrivent, accountant lit). La réception
+  d'un bon de commande écrit dans `stock_movements` (type `in`) via le
+  client authentifié (pas de nouvelle fonction `security definer`) — les
+  policies existantes suffisent, RLS inchangée ailleurs.
+- **Migration 015** : nouvelle fonction `security definer`
+  `create_additional_shop()`, mirroir de `complete_signup()` pour un owner
+  qui possède déjà une boutique — fait respecter `plans.limits.shops`
+  côté serveur (jamais uniquement côté UI), même parade au problème de
+  poule-et-l'œuf que `is_shop_owner()` résolvait déjà pour `complete_signup()`.
+- **Migration 016** : `profiles.address` + `grant execute ... to
+  service_role` sur `find_user_id_by_email` (nécessaire pour la nouvelle
+  Edge Function ci-dessous, qui appelle cette fonction avec le client
+  service role plutôt que le client utilisateur).
+- **Nouvelle Edge Function `create-team-member`** (même schéma de
+  vérification que `admin-impersonate`/`create-subscription-payment`) :
+  JWT vérifié côté serveur, rôle `owner` de `shop_id` revérifié via le
+  client utilisateur (jamais fait confiance au `shop_id` envoyé par le
+  client), `plans.limits.users` vérifié côté serveur avant toute écriture,
+  écriture (création de compte + `shop_members`) uniquement via le client
+  service role. Remplace `/rejoindre` (supprimé, route orpheline sans lien
+  entrant) et `useInviteMember`.
+- **Bascules de permissions ciblées (Bloc 15)** : stockées dans
+  `shop_settings.data.permissions` (jsonb, aucune migration), avec valeurs
+  par défaut qui préservent le comportement actuel. Ce sont des
+  préférences UI/requête, pas une nouvelle frontière de sécurité — la RLS
+  par rôle (table par table, déjà en place) reste inchangée et reste la
+  seule vraie barrière. Décision confirmée en amont de ce bloc : pas de
+  refonte de la RLS ici.
