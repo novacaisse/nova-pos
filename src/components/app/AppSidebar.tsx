@@ -73,7 +73,6 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Produits", url: "/app/produits", icon: "Package" },
     { title: "Stock", url: "/app/stock", icon: "Warehouse" },
     { title: "Fournisseurs", url: "/app/fournisseurs", icon: "Truck" },
-    { title: "Promotions", url: "/app/promotions", icon: "Tag" },
   ],
   admin: [
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },

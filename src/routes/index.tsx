@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import {
-  Zap, ArrowRight, ScanBarcode, Warehouse, BarChart3, Users, Store, Tag,
+  Zap, ArrowRight, ScanBarcode, Warehouse, BarChart3, Users, Store,
   Sparkles, Truck, Wallet, Bell, Smartphone, Bot, Check, Star, Menu,
 } from "lucide-react";
 import { usePlans } from "@/lib/data/adminHooks";
@@ -22,7 +22,6 @@ const MODULES = [
   { icon: Warehouse, name: "Stock intelligent", desc: "Alertes de rupture, mouvements, inventaire multi-boutique." },
   { icon: BarChart3, name: "Rapports IA", desc: "Tableaux de bord et insights automatiques par période." },
   { icon: Store, name: "Multi-boutique", desc: "Gérez toutes vos boutiques depuis une seule interface." },
-  { icon: Tag, name: "Promotions & fidélité", desc: "Remises, offres BOGO et programme client par paliers." },
   { icon: Users, name: "Équipe & rôles", desc: "Permissions fines par utilisateur et journal d'activité." },
   { icon: Truck, name: "Fournisseurs", desc: "Bons de commande, réceptions, historique d'achats." },
   { icon: Wallet, name: "Dépenses", desc: "Suivi des charges par catégorie avec justificatifs." },

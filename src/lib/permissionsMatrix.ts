@@ -20,7 +20,6 @@ export const PERMISSIONS_MATRIX: PermRow[] = [
   { table: "quotes", label: "Devis", cells: { owner: "SIUD", manager: "SIUD", cashier: "SI", stock: "—", accountant: "S" } },
   { table: "quote_items", label: "Lignes de devis", cells: { owner: "SIUD", manager: "SIUD", cashier: "SI", stock: "—", accountant: "S" } },
   { table: "expenses", label: "Dépenses", cells: { owner: "SIUD", manager: "SIUD", cashier: "—", stock: "—", accountant: "SIUD" } },
-  { table: "promotions", label: "Promotions", cells: { owner: "SIUD", manager: "SIUD", cashier: "S", stock: "—", accountant: "S" } },
   { table: "notifications", label: "Notifications", cells: { owner: "SIUD", manager: "SIUD", cashier: "SIUD", stock: "SIUD", accountant: "SIUD" } },
   { table: "subscriptions", label: "Abonnement", cells: { owner: "SIUD", manager: "SIUD", cashier: "—", stock: "—", accountant: "S" } },
   { table: "shop_settings", label: "Paramètres boutique", cells: { owner: "SIUD", manager: "SIUD", cashier: "S", stock: "S", accountant: "S" } },

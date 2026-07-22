@@ -484,3 +484,27 @@ nouveaux écrans dans un navigateur. Vérifiés uniquement par compilation
 `routeTree.gen.ts` via `bun run build` (échoue ensuite en phase SSR sur la
 résolution de `framer-motion`, limitation connue du bac à sable, sans
 rapport avec ce changement).
+
+## 14. Migration 010 — suppression complète du module Promotions
+
+Retiré à la demande explicite de l'utilisateur (fonctionnalité non
+souhaitée). Suppression irréversible, migration présentée pour relecture
+avant exécution.
+
+- **Code supprimé** : `src/routes/app.promotions.tsx`, `src/lib/mock/promotions.ts`
+  (dernier consommateur de son propre contenu, `LOYALTY_TIERS`, disparaît
+  avec la route) ; section `PROMOTIONS` de `src/lib/data/hooks.ts`
+  (`usePromotions`/`useUpsertPromotion`/`useDeletePromotion`, type `Promotion`) ;
+  entrée `permissionsMatrix.ts` ; entrées de navigation dans `AppSidebar.tsx`
+  et `BottomNav.tsx` ; mention marketing "Promotions & fidélité" dans la
+  landing (`index.tsx`).
+- **DB** : `db/schema.sql` mis à jour (table `promotions`, son index, ses
+  grants, son `enable row level security` et ses 4 policies tous retirés).
+  `db/migrations/010_drop_promotions.sql` contient le `drop table` réel —
+  aucune autre table ne référence `promotions` par FK (seul
+  `promotions.product_id` pointait vers `products`, dans l'autre sens),
+  donc aucun impact ailleurs.
+- Les anciennes policies de `promotions` dans
+  `db/migrations/002_role_based_policies.sql` sont laissées telles quelles :
+  les fichiers de migration passés ne sont jamais réécrits rétroactivement,
+  seul `db/schema.sql` (référence canonique de l'état courant) est mis à jour.

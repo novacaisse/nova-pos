@@ -25,7 +25,6 @@ import { Route as AppVentesRouteImport } from './routes/app.ventes'
 import { Route as AppSupportRouteImport } from './routes/app.support'
 import { Route as AppStockRouteImport } from './routes/app.stock'
 import { Route as AppRapportsRouteImport } from './routes/app.rapports'
-import { Route as AppPromotionsRouteImport } from './routes/app.promotions'
 import { Route as AppProfilRouteImport } from './routes/app.profil'
 import { Route as AppProduitsRouteImport } from './routes/app.produits'
 import { Route as AppParametresRouteImport } from './routes/app.parametres'
@@ -122,11 +121,6 @@ const AppStockRoute = AppStockRouteImport.update({
 const AppRapportsRoute = AppRapportsRouteImport.update({
   id: '/rapports',
   path: '/rapports',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPromotionsRoute = AppPromotionsRouteImport.update({
-  id: '/promotions',
-  path: '/promotions',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProfilRoute = AppProfilRouteImport.update({
@@ -236,7 +230,6 @@ export interface FileRoutesByFullPath {
   '/app/parametres': typeof AppParametresRoute
   '/app/produits': typeof AppProduitsRoute
   '/app/profil': typeof AppProfilRoute
-  '/app/promotions': typeof AppPromotionsRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
@@ -269,7 +262,6 @@ export interface FileRoutesByTo {
   '/app/parametres': typeof AppParametresRoute
   '/app/produits': typeof AppProduitsRoute
   '/app/profil': typeof AppProfilRoute
-  '/app/promotions': typeof AppPromotionsRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
@@ -305,7 +297,6 @@ export interface FileRoutesById {
   '/app/parametres': typeof AppParametresRoute
   '/app/produits': typeof AppProduitsRoute
   '/app/profil': typeof AppProfilRoute
-  '/app/promotions': typeof AppPromotionsRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
@@ -342,7 +333,6 @@ export interface FileRouteTypes {
     | '/app/parametres'
     | '/app/produits'
     | '/app/profil'
-    | '/app/promotions'
     | '/app/rapports'
     | '/app/stock'
     | '/app/support'
@@ -375,7 +365,6 @@ export interface FileRouteTypes {
     | '/app/parametres'
     | '/app/produits'
     | '/app/profil'
-    | '/app/promotions'
     | '/app/rapports'
     | '/app/stock'
     | '/app/support'
@@ -410,7 +399,6 @@ export interface FileRouteTypes {
     | '/app/parametres'
     | '/app/produits'
     | '/app/profil'
-    | '/app/promotions'
     | '/app/rapports'
     | '/app/stock'
     | '/app/support'
@@ -544,13 +532,6 @@ declare module '@tanstack/react-router' {
       path: '/rapports'
       fullPath: '/app/rapports'
       preLoaderRoute: typeof AppRapportsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/promotions': {
-      id: '/app/promotions'
-      path: '/promotions'
-      fullPath: '/app/promotions'
-      preLoaderRoute: typeof AppPromotionsRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/profil': {
@@ -700,7 +681,6 @@ interface AppRouteChildren {
   AppParametresRoute: typeof AppParametresRoute
   AppProduitsRoute: typeof AppProduitsRoute
   AppProfilRoute: typeof AppProfilRoute
-  AppPromotionsRoute: typeof AppPromotionsRoute
   AppRapportsRoute: typeof AppRapportsRoute
   AppStockRoute: typeof AppStockRoute
   AppSupportRoute: typeof AppSupportRoute
@@ -720,7 +700,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppParametresRoute: AppParametresRoute,
   AppProduitsRoute: AppProduitsRoute,
   AppProfilRoute: AppProfilRoute,
-  AppPromotionsRoute: AppPromotionsRoute,
   AppRapportsRoute: AppRapportsRoute,
   AppStockRoute: AppStockRoute,
   AppSupportRoute: AppSupportRoute,

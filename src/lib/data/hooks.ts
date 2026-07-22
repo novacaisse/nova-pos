@@ -32,11 +32,6 @@ export type Expense = {
   amount: number; paid_at: string; method: string | null; notes: string | null;
   created_at: string;
 };
-export type Promotion = {
-  id: string; shop_id: string; name: string; kind: string;
-  value: number; product_id: string | null;
-  starts_at: string | null; ends_at: string | null; is_active: boolean;
-};
 export type StockMovement = {
   id: string; shop_id: string; product_id: string;
   type: "in" | "out" | "adjustment" | "transfer" | "sale" | "return";
@@ -268,43 +263,6 @@ export function useDeleteExpense() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["expenses", shopId] }),
-  });
-}
-
-// ============ PROMOTIONS ============
-export function usePromotions() {
-  const shopId = useShopId();
-  return useQuery({
-    queryKey: ["promotions", shopId],
-    enabled: !!shopId,
-    queryFn: async (): Promise<Promotion[]> => {
-      const { data, error } = await supabase.from("promotions")
-        .select("*").eq("shop_id", shopId!).order("created_at", { ascending: false });
-      if (error) throw error;
-      return data as Promotion[];
-    },
-  });
-}
-export function useUpsertPromotion() {
-  const shopId = useShopId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (p: Partial<Promotion> & { name: string; kind: string }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const { data, error } = await supabase.from("promotions")
-        .upsert({ ...p, shop_id: shopId }).select().single();
-      if (error) throw error; return data;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["promotions", shopId] }),
-  });
-}
-export function useDeletePromotion() {
-  const shopId = useShopId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("promotions").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["promotions", shopId] }),
   });
 }
 

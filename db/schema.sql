@@ -267,18 +267,6 @@ create table if not exists public.expenses (
 );
 create index if not exists idx_expenses_shop on public.expenses(shop_id);
 
-create table if not exists public.promotions (
-  id uuid primary key default gen_random_uuid(),
-  shop_id uuid not null references public.shops(id) on delete cascade,
-  name text not null, kind text not null,
-  value numeric(14,2) not null default 0,
-  product_id uuid references public.products(id) on delete cascade,
-  starts_at timestamptz, ends_at timestamptz,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now()
-);
-create index if not exists idx_promos_shop on public.promotions(shop_id);
-
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
   shop_id uuid not null references public.shops(id) on delete cascade,
@@ -476,7 +464,6 @@ grant select, insert, update, delete on public.payments        to authenticated;
 grant select, insert, update, delete on public.quotes          to authenticated;
 grant select, insert, update, delete on public.quote_items     to authenticated;
 grant select, insert, update, delete on public.expenses        to authenticated;
-grant select, insert, update, delete on public.promotions      to authenticated;
 grant select, insert, update, delete on public.notifications   to authenticated;
 grant select, insert, update, delete on public.subscriptions   to authenticated;
 grant select, insert, update, delete on public.subscription_payments to authenticated;
@@ -504,7 +491,6 @@ alter table public.payments        enable row level security;
 alter table public.quotes          enable row level security;
 alter table public.quote_items     enable row level security;
 alter table public.expenses        enable row level security;
-alter table public.promotions      enable row level security;
 alter table public.notifications   enable row level security;
 alter table public.subscriptions   enable row level security;
 alter table public.subscription_payments enable row level security;
@@ -763,21 +749,6 @@ drop policy if exists expenses_delete on public.expenses;
 create policy expenses_delete on public.expenses for delete to authenticated
   using (public.has_any_role_in_shop(shop_id, array['owner','manager','accountant']::public.app_role[]));
 
--- 13. promotions — lecture owner/manager/cashier/accountant, écriture owner/manager
-drop policy if exists promotions_select on public.promotions;
-create policy promotions_select on public.promotions for select to authenticated
-  using (public.has_any_role_in_shop(shop_id, array['owner','manager','cashier','accountant']::public.app_role[]));
-drop policy if exists promotions_write on public.promotions;
-create policy promotions_write on public.promotions for insert to authenticated
-  with check (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
-drop policy if exists promotions_update on public.promotions;
-create policy promotions_update on public.promotions for update to authenticated
-  using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
-drop policy if exists promotions_delete on public.promotions;
-create policy promotions_delete on public.promotions for delete to authenticated
-  using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
-
 -- 15. subscriptions — données de facturation : lecture owner/manager/
 --     accountant, écriture réservée à owner/manager
 drop policy if exists subscriptions_select on public.subscriptions;
@@ -967,11 +938,11 @@ create policy shop_logos_delete on storage.objects for delete to authenticated
   );
 
 -- =============== FIN ===============
--- Rappel: RLS activé sur les 26 tables (20 + super_admins, plans,
+-- Rappel: RLS activé sur les 25 tables (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages).
 -- Aucune policy USING (true) — seule "plans" a une lecture ouverte à
 -- "anon" (formules publiques), volontairement et limitée à is_active=true.
--- Permissions différenciées par app_role sur 15 des 16 tables métier
+-- Permissions différenciées par app_role sur 14 des 15 tables métier
 -- (notifications reste ouverte à tout membre ; stock_levels est en lecture
 -- seule pour tous — voir db/AUDIT-SECURITE.md pour la matrice complète).
 -- Super Admin (is_super_admin()) : accès étendu strictement limité à

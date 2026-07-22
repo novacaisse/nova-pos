@@ -41,7 +41,6 @@ export const MODULES = [
   { key: "depenses", label: "Dépenses", icon: "Wallet", path: "/app/depenses" },
   { key: "rapports", label: "Rapports", icon: "BarChart3", path: "/app/rapports" },
   { key: "equipe", label: "Équipe", icon: "UsersRound", path: "/app/equipe" },
-  { key: "promotions", label: "Promotions", icon: "Tag", path: "/app/promotions" },
   { key: "notifications", label: "Notifications", icon: "Bell", path: "/app/notifications" },
   { key: "parametres", label: "Paramètres", icon: "Settings", path: "/app/parametres" },
 ] as const;
