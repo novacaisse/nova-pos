@@ -18,6 +18,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminsRouteImport } from './routes/admins'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SouscriptionIndexRouteImport } from './routes/souscription.index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as SouscriptionConfirmationRouteImport } from './routes/souscription.confirmation'
@@ -41,6 +42,7 @@ import { Route as AdminParametresRouteImport } from './routes/admin.parametres'
 import { Route as AdminFacturationRouteImport } from './routes/admin.facturation'
 import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
 import { Route as AdminAbonnementsRouteImport } from './routes/admin.abonnements'
+import { Route as AppProduitsIndexRouteImport } from './routes/app.produits.index'
 import { Route as AppProduitsNouveauRouteImport } from './routes/app.produits.nouveau'
 import { Route as AppProduitsProductIdRouteImport } from './routes/app.produits.$productId'
 
@@ -88,6 +90,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const SouscriptionIndexRoute = SouscriptionIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SouscriptionRoute,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
@@ -205,6 +212,11 @@ const AdminAbonnementsRoute = AdminAbonnementsRouteImport.update({
   path: '/abonnements',
   getParentRoute: () => AdminRoute,
 } as any)
+const AppProduitsIndexRoute = AppProduitsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppProduitsRoute,
+} as any)
 const AppProduitsNouveauRoute = AppProduitsNouveauRouteImport.update({
   id: '/nouveau',
   path: '/nouveau',
@@ -249,8 +261,10 @@ export interface FileRoutesByFullPath {
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
+  '/souscription/': typeof SouscriptionIndexRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/produits/': typeof AppProduitsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -258,7 +272,6 @@ export interface FileRoutesByTo {
   '/connexion': typeof ConnexionRoute
   '/inscription': typeof InscriptionRoute
   '/rejoindre': typeof RejoindreRoute
-  '/souscription': typeof SouscriptionRouteWithChildren
   '/tarifs': typeof TarifsRoute
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
@@ -274,7 +287,6 @@ export interface FileRoutesByTo {
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/parametres': typeof AppParametresRoute
-  '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
@@ -283,8 +295,10 @@ export interface FileRoutesByTo {
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
+  '/souscription': typeof SouscriptionIndexRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/produits': typeof AppProduitsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -320,8 +334,10 @@ export interface FileRoutesById {
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
+  '/souscription/': typeof SouscriptionIndexRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/produits/': typeof AppProduitsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -358,8 +374,10 @@ export interface FileRouteTypes {
     | '/souscription/confirmation'
     | '/admin/'
     | '/app/'
+    | '/souscription/'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/produits/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -367,7 +385,6 @@ export interface FileRouteTypes {
     | '/connexion'
     | '/inscription'
     | '/rejoindre'
-    | '/souscription'
     | '/tarifs'
     | '/admin/abonnements'
     | '/admin/boutiques'
@@ -383,7 +400,6 @@ export interface FileRouteTypes {
     | '/app/fournisseurs'
     | '/app/notifications'
     | '/app/parametres'
-    | '/app/produits'
     | '/app/profil'
     | '/app/rapports'
     | '/app/stock'
@@ -392,8 +408,10 @@ export interface FileRouteTypes {
     | '/souscription/confirmation'
     | '/admin'
     | '/app'
+    | '/souscription'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/produits'
   id:
     | '__root__'
     | '/'
@@ -428,8 +446,10 @@ export interface FileRouteTypes {
     | '/souscription/confirmation'
     | '/admin/'
     | '/app/'
+    | '/souscription/'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/produits/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -508,6 +528,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/souscription/': {
+      id: '/souscription/'
+      path: '/'
+      fullPath: '/souscription/'
+      preLoaderRoute: typeof SouscriptionIndexRouteImport
+      parentRoute: typeof SouscriptionRoute
     }
     '/app/': {
       id: '/app/'
@@ -670,6 +697,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAbonnementsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/app/produits/': {
+      id: '/app/produits/'
+      path: '/'
+      fullPath: '/app/produits/'
+      preLoaderRoute: typeof AppProduitsIndexRouteImport
+      parentRoute: typeof AppProduitsRoute
+    }
     '/app/produits/nouveau': {
       id: '/app/produits/nouveau'
       path: '/nouveau'
@@ -710,11 +744,13 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 interface AppProduitsRouteChildren {
   AppProduitsProductIdRoute: typeof AppProduitsProductIdRoute
   AppProduitsNouveauRoute: typeof AppProduitsNouveauRoute
+  AppProduitsIndexRoute: typeof AppProduitsIndexRoute
 }
 
 const AppProduitsRouteChildren: AppProduitsRouteChildren = {
   AppProduitsProductIdRoute: AppProduitsProductIdRoute,
   AppProduitsNouveauRoute: AppProduitsNouveauRoute,
+  AppProduitsIndexRoute: AppProduitsIndexRoute,
 }
 
 const AppProduitsRouteWithChildren = AppProduitsRoute._addFileChildren(
@@ -763,10 +799,12 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface SouscriptionRouteChildren {
   SouscriptionConfirmationRoute: typeof SouscriptionConfirmationRoute
+  SouscriptionIndexRoute: typeof SouscriptionIndexRoute
 }
 
 const SouscriptionRouteChildren: SouscriptionRouteChildren = {
   SouscriptionConfirmationRoute: SouscriptionConfirmationRoute,
+  SouscriptionIndexRoute: SouscriptionIndexRoute,
 }
 
 const SouscriptionRouteWithChildren = SouscriptionRoute._addFileChildren(
