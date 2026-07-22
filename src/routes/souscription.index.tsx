@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Zap, Check, Loader2, Smartphone, ArrowRight, AlertTriangle } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "@/lib/data/invokeFn";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useShop } from "@/lib/auth/ShopProvider";
 import { useProfile } from "@/lib/data/hooks";
@@ -62,19 +62,15 @@ function SouscriptionPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const { data, error: fnError } = await supabase.functions.invoke("create-subscription-payment", {
-        body: {
-          shop_id: currentShop.id,
-          plan_id: plan.id,
-          period: period === "mensuel" ? "month" : "year",
-          phone: phone.trim(),
-          full_name: fullName.trim(),
-        },
+      const data = await invokeFn<{ url?: string }>("create-subscription-payment", {
+        shop_id: currentShop.id,
+        plan_id: plan.id,
+        period: period === "mensuel" ? "month" : "year",
+        phone: phone.trim(),
+        full_name: fullName.trim(),
       });
-      if (fnError) throw fnError;
-      const url = (data as { url?: string; error?: string } | null)?.url;
-      if (!url) throw new Error((data as { error?: string } | null)?.error ?? "Réponse invalide du serveur de paiement.");
-      window.location.href = url;
+      if (!data.url) throw new Error("Réponse invalide du serveur de paiement.");
+      window.location.href = data.url;
     } catch (e: any) {
       setError(e?.message ?? "Impossible de démarrer le paiement. Réessayez.");
       setSubmitting(false);

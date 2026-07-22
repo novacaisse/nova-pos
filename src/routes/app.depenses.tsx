@@ -128,7 +128,22 @@ function Overlay({ children, onClose, w = "max-w-md" }: { children: React.ReactN
 
 function EditDialog({ initial, categories, onClose, onSave }: { initial: Partial<Expense>; categories: string[]; onClose: () => void; onSave: (e: any) => Promise<void> }) {
   const [form, setForm] = useState<Partial<Expense>>(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const inp = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
+
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(form);
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur inconnue lors de l'enregistrement.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Overlay onClose={onClose}>
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -148,9 +163,10 @@ function EditDialog({ initial, categories, onClose, onSave }: { initial: Partial
           </select></label>
         </div>
         <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Notes</div><textarea rows={2} value={form.notes ?? ""} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full rounded-xl border border-border bg-background p-3 text-sm" /></label>
+        {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
         <div className="flex gap-2 pt-1">
           <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
-          <button disabled={!form.label || !form.amount || form.amount <= 0} onClick={() => onSave(form)} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+          <button disabled={!form.label || !form.amount || form.amount <= 0 || saving} onClick={submit} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
             <Save className="h-4 w-4" /> Enregistrer
           </button>
         </div>

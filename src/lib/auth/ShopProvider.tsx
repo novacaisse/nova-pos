@@ -18,6 +18,7 @@ type ShopCtx = {
   currentShop: Shop | null;
   setCurrentShopId: (id: string) => void;
   loading: boolean;
+  error: string | null;
   refresh: () => Promise<void>;
 };
 
@@ -30,19 +31,32 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const [currentId, setCurrentId] = useState<string | null>(
     typeof window !== "undefined" ? window.localStorage.getItem(LS_KEY) : null,
   );
-  const [loading, setLoading] = useState(false);
+  // Démarre à true : tant qu'on n'a pas encore tenté le premier fetch (ou
+  // que l'auth n'est pas encore résolue), `shops` est vide MAIS ça ne veut
+  // pas dire "pas de boutique" — un état initial à false créait une
+  // fenêtre où AppLayout affichait NoShopScreen avant même que le fetch
+  // ait démarré (bug remonté : écran "aucune boutique" qui traîne après
+  // actualisation, surtout sur connexion lente).
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user) {
       setShops([]);
+      setLoading(false);
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase
+    setError(null);
+    const { data, error: fetchErr } = await supabase
       .from("shops")
       .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at")
       .order("created_at", { ascending: true });
-    if (!error && data) setShops(data as Shop[]);
+    if (fetchErr) {
+      setError(fetchErr.message);
+    } else if (data) {
+      setShops(data as Shop[]);
+    }
     setLoading(false);
   }, [user]);
 
@@ -67,7 +81,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const currentShop = shops.find((s) => s.id === currentId) ?? null;
 
   return (
-    <Ctx.Provider value={{ shops, currentShop, setCurrentShopId, loading, refresh: load }}>
+    <Ctx.Provider value={{ shops, currentShop, setCurrentShopId, loading, error, refresh: load }}>
       {children}
     </Ctx.Provider>
   );

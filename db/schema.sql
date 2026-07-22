@@ -306,7 +306,10 @@ create table if not exists public.expenses (
   shop_id uuid not null references public.shops(id) on delete cascade,
   category text, label text not null, amount numeric(14,2) not null,
   paid_at date not null default current_date,
-  method public.payment_method, notes text,
+  -- text libre, pas l'enum payment_method des ventes : les moyens de
+  -- paiement d'une dépense (virement, chèque...) n'ont rien à voir avec
+  -- ceux d'une vente (migration 017).
+  method text, notes text,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );

@@ -1,9 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Zap, Loader2, CircleCheck, XCircle, Check } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { useSubscriptionPayment } from "@/lib/data/hooks";
+import { useSubscriptionPayment, useCheckSubscriptionPayment } from "@/lib/data/hooks";
 
 type ConfirmationSearch = { payment_id?: string };
 
@@ -17,13 +18,42 @@ export const Route = createFileRoute("/souscription/confirmation")({
 
 function ConfirmationPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { user, loading: authLoading } = useAuth();
   const { payment_id } = Route.useSearch();
   const { data: payment, isLoading, isError } = useSubscriptionPayment(payment_id ?? null);
+  const checkPayment = useCheckSubscriptionPayment();
+  const checkingRef = useRef(false);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/connexion" });
   }, [authLoading, user, navigate]);
+
+  // Vérification active auprès de MoneyFusion tant que le statut est
+  // "pending" — ne dépend plus uniquement du webhook (qui peut n'être
+  // envoyé qu'une fois, à l'initiation, jamais à la résolution). Un check
+  // immédiat au montage, puis toutes les 4s ; `checkingRef` évite les
+  // recouvrements si un check tarde à répondre.
+  useEffect(() => {
+    if (!payment_id || !payment || payment.status !== "pending") return;
+    let cancelled = false;
+    const runCheck = async () => {
+      if (checkingRef.current) return;
+      checkingRef.current = true;
+      try {
+        await checkPayment.mutateAsync(payment_id);
+        if (!cancelled) qc.invalidateQueries({ queryKey: ["subscription_payment", payment_id] });
+      } catch {
+        // Silencieux : useSubscriptionPayment continue de poller la DB en
+        // parallèle, et le webhook peut encore résoudre le paiement lui-même.
+      } finally {
+        checkingRef.current = false;
+      }
+    };
+    runCheck();
+    const interval = setInterval(runCheck, 4000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [payment_id, payment?.status]);
 
   let content: ReactNode;
 

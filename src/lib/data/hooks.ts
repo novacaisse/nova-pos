@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useShop } from "@/lib/auth/ShopProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import type { AppRole } from "@/lib/roles";
+import { invokeFn } from "@/lib/data/invokeFn";
 
 // ============ TYPES (Supabase shape) ============
 export type Category = { id: string; shop_id: string; name: string; color: string | null };
@@ -890,6 +891,20 @@ export function useSubscriptionPayment(paymentId: string | null) {
   });
 }
 
+// Vérification ACTIVE auprès de MoneyFusion (Edge Function
+// check-subscription-payment), plutôt que d'attendre passivement un
+// webhook qui n'est peut-être envoyé qu'une fois par MoneyFusion, jamais à
+// la résolution — corrige le paiement qui reste bloqué "en attente"
+// indéfiniment. Appelée en polling par la page de confirmation tant que le
+// statut est "pending" ; useSubscriptionPayment (lecture DB) reflète le
+// résultat dès que cette vérification écrit le nouveau statut.
+export function useCheckSubscriptionPayment() {
+  return useMutation({
+    mutationFn: async (paymentId: string) =>
+      invokeFn<{ status: string }>("check-subscription-payment", { payment_id: paymentId }),
+  });
+}
+
 // Helper — generate a short unique ticket ref.
 export function newTicketRef(prefix = "T") {
   const d = new Date();
@@ -987,12 +1002,7 @@ export function useCreateTeamMember() {
       phone?: string; address?: string; role: AppRole;
     }) => {
       if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const { data, error } = await supabase.functions.invoke("create-team-member", {
-        body: { shop_id: shopId, ...input },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data as { user_id: string };
+      return invokeFn<{ user_id: string }>("create-team-member", { shop_id: shopId, ...input });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
   });

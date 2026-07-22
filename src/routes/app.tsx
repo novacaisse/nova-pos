@@ -25,7 +25,7 @@ function AppLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user, loading, signOut } = useAuth();
-  const { shops, currentShop, loading: shopLoading, refresh } = useShop();
+  const { shops, currentShop, loading: shopLoading, error: shopError, refresh } = useShop();
 
   // Auth guard côté client (SPA)
   useEffect(() => {
@@ -53,7 +53,7 @@ function AppLayout() {
   // doit jamais atterrir silencieusement sur des écrans vides/désactivés —
   // un état clair vaut mieux qu'un silence déroutant.
   if (!shopLoading && shops.length === 0) {
-    return <NoShopScreen onRetry={refresh} onSignOut={signOut} />;
+    return <NoShopScreen onRetry={refresh} onSignOut={signOut} error={shopError} />;
   }
 
   return (
@@ -96,7 +96,7 @@ function AppLayout() {
   );
 }
 
-function NoShopScreen({ onRetry, onSignOut }: { onRetry: () => Promise<void>; onSignOut: () => Promise<void> }) {
+function NoShopScreen({ onRetry, onSignOut, error }: { onRetry: () => Promise<void>; onSignOut: () => Promise<void>; error: string | null }) {
   const navigate = useNavigate();
   const [retrying, setRetrying] = useState(false);
 
@@ -118,12 +118,19 @@ function NoShopScreen({ onRetry, onSignOut }: { onRetry: () => Promise<void>; on
           <Store className="h-7 w-7" />
         </div>
         <h1 className="mt-4 font-display text-xl font-bold">Aucune boutique associée à votre compte</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Deux cas possibles : si vous venez de créer votre compte pour <b>rejoindre une équipe existante</b>,
-          c'est normal — communiquez votre email au propriétaire ou gérant de la boutique, il doit vous ajouter
-          depuis l'écran Équipe. Si vous venez de <b>créer votre propre boutique</b> et vous attendiez à la
-          retrouver ici, quelque chose s'est mal passé pendant l'inscription.
-        </p>
+        {error ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            La récupération de vos boutiques a échoué ({error}) — ce n'est probablement pas lié à votre compte,
+            réessayez ci-dessous.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Deux cas possibles : si vous venez de créer votre compte pour <b>rejoindre une équipe existante</b>,
+            c'est normal — communiquez votre email au propriétaire ou gérant de la boutique, il doit vous ajouter
+            depuis l'écran Équipe. Si vous venez de <b>créer votre propre boutique</b> et vous attendiez à la
+            retrouver ici, quelque chose s'est mal passé pendant l'inscription.
+          </p>
+        )}
 
         <div className="mt-6 flex flex-col items-center gap-2">
           <button onClick={retry} disabled={retrying}

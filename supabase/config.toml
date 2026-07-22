@@ -1,0 +1,27 @@
+# Réglages des Edge Functions, versionnés pour ne plus dépendre d'une case
+# à cocher invisible dans le Dashboard Supabase (voir bug "paiement
+# MoneyFusion bloqué en attente indéfiniment" — moneyfusion-webhook est un
+# endpoint public appelé par MoneyFusion, qui n'envoie aucun header
+# Authorization Supabase ; avec la vérification JWT activée par défaut,
+# Supabase rejette l'appel en 401 avant même que notre code ne s'exécute).
+#
+# IMPORTANT : ce fichier ne s'applique qu'aux futurs déploiements via
+# `supabase functions deploy`. Il ne change rien rétroactivement à une
+# fonction déjà déployée — le réglage doit aussi être vérifié/corrigé
+# manuellement dans le Dashboard (Edge Functions → <nom> → Enforce JWT
+# Verification) pour prendre effet immédiatement.
+
+[functions.admin-impersonate]
+verify_jwt = true
+
+[functions.create-subscription-payment]
+verify_jwt = true
+
+[functions.create-team-member]
+verify_jwt = true
+
+[functions.check-subscription-payment]
+verify_jwt = true
+
+[functions.moneyfusion-webhook]
+verify_jwt = false

@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { invokeFn } from "@/lib/data/invokeFn";
 
 export function useIsSuperAdmin() {
   const { user, loading } = useAuth();
@@ -150,11 +151,8 @@ export function useDeleteShop() {
 // reconnecter (limite acceptée, pas de multi-session dans ce navigateur).
 export function useImpersonate() {
   return useMutation({
-    mutationFn: async (input: { target_user_id: string; shop_id?: string }) => {
-      const { data, error } = await supabase.functions.invoke("admin-impersonate", { body: input });
-      if (error) throw error;
-      return data as { action_link: string };
-    },
+    mutationFn: async (input: { target_user_id: string; shop_id?: string }) =>
+      invokeFn<{ action_link: string }>("admin-impersonate", input),
   });
 }
 
