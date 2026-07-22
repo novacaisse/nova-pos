@@ -1,22 +1,27 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Bell, Check, Megaphone, CreditCard, Sparkles, Lightbulb, X } from "lucide-react";
+import {
+  Bell, Check, X, TrendingUp, AlertTriangle, UserPlus, FileClock, Clock,
+} from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { NOTIFICATIONS, type DigitorizonNotification, type DigitorizonNotifKind } from "@/lib/mock/notifications";
+import { useAppNotifications, type NotificationItem, type NotificationKind } from "@/lib/data/useAppNotifications";
 import { cn } from "@/lib/utils";
 
-const ICONS: Record<DigitorizonNotifKind, React.ComponentType<{ className?: string }>> = {
-  announce: Megaphone,
-  billing: CreditCard,
-  update: Sparkles,
-  tip: Lightbulb,
+const ICONS: Record<NotificationKind, React.ComponentType<{ className?: string }>> = {
+  big_sale: TrendingUp, stock_low: AlertTriangle, stock_out: AlertTriangle,
+  new_member: UserPlus, quote_expiring: FileClock, trial_expiring: Clock,
 };
-
-const KIND_LABEL: Record<DigitorizonNotifKind, string> = {
-  announce: "Annonce",
-  billing: "Facturation",
-  update: "Nouveauté",
-  tip: "Astuce",
+const KIND_LABEL: Record<NotificationKind, string> = {
+  big_sale: "Vente", stock_low: "Stock", stock_out: "Stock",
+  new_member: "Équipe", quote_expiring: "Devis", trial_expiring: "Abonnement",
+};
+const KIND_CTA: Record<NotificationKind, { href: string; label: string }> = {
+  big_sale: { href: "/app/ventes", label: "Voir les ventes" },
+  stock_low: { href: "/app/stock", label: "Voir le stock" },
+  stock_out: { href: "/app/stock", label: "Voir le stock" },
+  new_member: { href: "/app/equipe", label: "Voir l'équipe" },
+  quote_expiring: { href: "/app/devis", label: "Voir le devis" },
+  trial_expiring: { href: "/app/abonnement", label: "Souscrire" },
 };
 
 function timeAgo(iso: string) {
@@ -31,20 +36,8 @@ function timeAgo(iso: string) {
 }
 
 export function NotificationsBell() {
-  const [items, setItems] = useState<DigitorizonNotification[]>(NOTIFICATIONS);
   const [open, setOpen] = useState(false);
-
-  const unread = useMemo(() => items.filter((n) => !n.read).length, [items]);
-
-  function markAllRead() {
-    setItems((xs) => xs.map((n) => ({ ...n, read: true })));
-  }
-  function markRead(id: string) {
-    setItems((xs) => xs.map((n) => (n.id === id ? { ...n, read: true } : n)));
-  }
-  function dismiss(id: string) {
-    setItems((xs) => xs.filter((n) => n.id !== id));
-  }
+  const { items, unread, markOneRead, dismiss, markAllAsRead } = useAppNotifications();
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -65,11 +58,11 @@ export function NotificationsBell() {
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <div className="font-display text-sm font-bold">Notifications</div>
-            <div className="text-[11px] text-muted-foreground">Envoyées par Digitorizon</div>
+            <div className="text-[11px] text-muted-foreground">Événements de votre boutique</div>
           </div>
           {unread > 0 && (
             <button
-              onClick={markAllRead}
+              onClick={markAllAsRead}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10"
             >
               <Check className="h-3 w-3" /> Tout marquer lu
@@ -84,8 +77,9 @@ export function NotificationsBell() {
             </div>
           ) : (
             <ul className="divide-y divide-border">
-              {items.map((n) => {
+              {items.map((n: NotificationItem) => {
                 const Icon = ICONS[n.kind];
+                const cta = KIND_CTA[n.kind];
                 return (
                   <li
                     key={n.id}
@@ -108,23 +102,20 @@ export function NotificationsBell() {
                       <p className="mt-0.5 text-xs text-muted-foreground">{n.body}</p>
                       <div className="mt-1.5 flex items-center gap-3">
                         <span className="text-[11px] text-muted-foreground">{timeAgo(n.created_at)}</span>
-                        {n.cta_href && n.cta_label && (
+                        {cta && (
                           <Link
-                            to={n.cta_href as never}
-                            onClick={() => {
-                              markRead(n.id);
-                              setOpen(false);
-                            }}
+                            to={cta.href as never}
+                            onClick={() => { markOneRead(n); setOpen(false); }}
                             className="text-[11px] font-semibold text-primary hover:underline"
                           >
-                            {n.cta_label} →
+                            {cta.label} →
                           </Link>
                         )}
                       </div>
                     </div>
                     <button
                       aria-label="Ignorer"
-                      onClick={() => dismiss(n.id)}
+                      onClick={() => dismiss(n)}
                       className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100"
                     >
                       <X className="h-3.5 w-3.5" />

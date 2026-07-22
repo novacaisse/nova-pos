@@ -1,40 +1,63 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Bell, AlertTriangle, PackageCheck, Users, Sparkles } from "lucide-react";
+import { Bell, TrendingUp, AlertTriangle, UserPlus, FileClock, Clock } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
+import { useAppNotifications, type NotificationKind } from "@/lib/data/useAppNotifications";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/notifications")({
   component: NotificationsPage,
 });
 
-type Notif = { id: string; icon: typeof Bell; color: string; title: string; body: string; at: string; read: boolean };
+const ICONS: Record<NotificationKind, typeof Bell> = {
+  big_sale: TrendingUp, stock_low: AlertTriangle, stock_out: AlertTriangle,
+  new_member: UserPlus, quote_expiring: FileClock, trial_expiring: Clock,
+};
+const ICON_COLOR: Record<NotificationKind, string> = {
+  big_sale: "text-success bg-success/15",
+  stock_low: "text-warning-foreground bg-warning/20",
+  stock_out: "text-destructive bg-destructive/15",
+  new_member: "text-accent-foreground bg-accent/25",
+  quote_expiring: "text-primary bg-primary/15",
+  trial_expiring: "text-primary bg-primary/15",
+};
 
-const NOTIFS: Notif[] = [
-  { id: "n1", icon: AlertTriangle, color: "text-destructive bg-destructive/15", title: "Stock critique", body: "Papier toilette x4 — 15 unités restantes", at: "Il y a 12 min", read: false },
-  { id: "n2", icon: PackageCheck, color: "text-success bg-success/15", title: "Commande reçue", body: "BC-2026-041 · GrossMart Import (22 articles)", at: "Il y a 1 h", read: false },
-  { id: "n3", icon: Sparkles, color: "text-primary bg-primary/15", title: "Insight IA", body: "Ta marge du mois est en baisse de 2 pts. Voir l'analyse.", at: "Il y a 3 h", read: false },
-  { id: "n4", icon: Users, color: "text-accent-foreground bg-accent/25", title: "Nouveau client", body: "Restaurant Sika a atteint le palier Or", at: "Hier", read: true },
-  { id: "n5", icon: Bell, color: "text-muted-foreground bg-muted", title: "Rappel abonnement", body: "Prochain prélèvement le 01/08/2026", at: "Il y a 2 j", read: true },
-];
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "à l'instant";
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `il y a ${h} h`;
+  const d = Math.floor(h / 24);
+  return `il y a ${d} j`;
+}
 
 function NotificationsPage() {
-  const unread = NOTIFS.filter((n) => !n.read).length;
+  const { items, unread, markOneRead, markAllAsRead } = useAppNotifications();
+
   return (
     <div>
       <PageHeader
         title="Notifications"
         subtitle={`${unread} non lue${unread > 1 ? "s" : ""}`}
         actions={
-          <button className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">Tout marquer lu</button>
+          <button onClick={markAllAsRead} disabled={unread === 0}
+            className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">
+            Tout marquer lu
+          </button>
         }
       />
       <div className="p-5 sm:p-8">
         <div className="space-y-2 rounded-2xl border border-border bg-card p-2">
-          {NOTIFS.map((n) => {
-            const Icon = n.icon;
+          {items.length === 0 && (
+            <div className="p-8 text-center text-sm text-muted-foreground">Aucune notification pour l'instant.</div>
+          )}
+          {items.map((n) => {
+            const Icon = ICONS[n.kind];
             return (
-              <div key={n.id} className={cn("flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-muted/50", !n.read && "bg-primary/5")}>
-                <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", n.color)}>
+              <button key={n.id} onClick={() => markOneRead(n)}
+                className={cn("flex w-full items-start gap-3 rounded-xl p-3 text-left transition-colors hover:bg-muted/50", !n.read && "bg-primary/5")}>
+                <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", ICON_COLOR[n.kind])}>
                   <Icon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -44,8 +67,8 @@ function NotificationsPage() {
                   </div>
                   <div className="text-sm text-muted-foreground">{n.body}</div>
                 </div>
-                <div className="text-xs text-muted-foreground">{n.at}</div>
-              </div>
+                <div className="shrink-0 text-xs text-muted-foreground">{timeAgo(n.created_at)}</div>
+              </button>
             );
           })}
         </div>

@@ -726,6 +726,14 @@ export type TicketConfig = {
   showFiscal?: boolean; showCashier?: boolean; showQr?: boolean;
   thanks?: string;
 };
+// Comportement par défaut tant que la boutique n'a jamais enregistré sa
+// config de ticket (shop_settings.data.ticket vide) — même valeurs pour
+// l'aperçu (Paramètres) et le reçu réel (Caisse), une seule source de vérité.
+export const DEFAULT_TICKET_CONFIG: TicketConfig = {
+  showLogo: true, showAddress: true, showPhone: true,
+  showFiscal: true, showCashier: true, showQr: false,
+  thanks: "Merci pour votre achat !",
+};
 export type ShopSettingsData = {
   phone?: string; email?: string; address?: string;
   rccm?: string; ifu?: string; facebook?: string; instagram?: string;
@@ -808,5 +816,67 @@ export function useUploadShopLogo() {
       await updateShop.mutateAsync({ logo_url: url });
       return url;
     },
+  });
+}
+
+// ============ NOTIFICATIONS ============
+// Événements réels insérés par des triggers Postgres (migration 011) :
+// vente importante, stock bas/rupture, nouveau membre. Table déjà en
+// place depuis le schéma initial (RLS ouverte à tout membre de la
+// boutique — voir permissionsMatrix.ts), seule l'écriture était morte.
+export type AppNotification = {
+  id: string; shop_id: string; user_id: string | null;
+  title: string; body: string | null; kind: string | null;
+  read_at: string | null; created_at: string;
+};
+
+export function useNotifications(limit = 50) {
+  const shopId = useShopId();
+  return useQuery({
+    queryKey: ["notifications", shopId, limit],
+    enabled: !!shopId,
+    queryFn: async (): Promise<AppNotification[]> => {
+      const { data, error } = await supabase.from("notifications")
+        .select("*").eq("shop_id", shopId!).order("created_at", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data ?? []) as AppNotification[];
+    },
+  });
+}
+
+export function useMarkNotificationRead() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("notifications")
+        .update({ read_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", shopId] }),
+  });
+}
+
+export function useMarkAllNotificationsRead() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const { error } = await supabase.from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("shop_id", shopId).is("read_at", null);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", shopId] }),
+  });
+}
+
+export function useDismissNotification() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("notifications").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", shopId] }),
   });
 }

@@ -903,6 +903,94 @@ create trigger trg_stock_mov
   after insert on public.stock_movements
   for each row execute function public.apply_stock_movement();
 
+-- Notifications réelles (migration 011) — vente importante, stock bas /
+-- rupture, nouveau membre. Les événements "temps qui passe" (devis bientôt
+-- expiré, essai qui expire) ne sont pas déclenchables par un trigger et
+-- sont calculés côté client — voir la migration pour le détail.
+create or replace function public.notify_big_sale()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_avg numeric;
+  v_count int;
+begin
+  if new.status = 'cancelled' then
+    return new;
+  end if;
+
+  select count(*), avg(total) into v_count, v_avg
+  from (
+    select total from public.sales
+    where shop_id = new.shop_id and status <> 'cancelled' and id <> new.id
+    order by created_at desc limit 30
+  ) recent;
+
+  if v_count >= 5 and v_avg > 0 and new.total >= 2 * v_avg then
+    insert into public.notifications (shop_id, title, body, kind)
+    values (
+      new.shop_id, 'Vente importante',
+      'Une vente de ' || round(new.total)::text || ' FCFA vient d''être enregistrée (réf. ' || new.reference || ').',
+      'big_sale'
+    );
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_notify_big_sale on public.sales;
+create trigger trg_notify_big_sale
+  after insert on public.sales
+  for each row execute function public.notify_big_sale();
+
+create or replace function public.notify_stock_level()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_name text;
+  v_threshold integer;
+begin
+  select name, low_stock_threshold into v_name, v_threshold
+  from public.products where id = new.product_id;
+  if v_name is null then
+    return new;
+  end if;
+
+  if new.quantity <= 0 and (tg_op = 'INSERT' or old.quantity > 0) then
+    insert into public.notifications (shop_id, title, body, kind)
+    values (new.shop_id, 'Rupture de stock', v_name || ' est en rupture de stock.', 'stock_out');
+  elsif new.quantity <= v_threshold and (tg_op = 'INSERT' or old.quantity > v_threshold) then
+    insert into public.notifications (shop_id, title, body, kind)
+    values (new.shop_id, 'Stock bas', v_name || ' passe sous le seuil d''alerte (' || new.quantity || ').', 'stock_low');
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_notify_stock_level on public.stock_levels;
+create trigger trg_notify_stock_level
+  after insert or update of quantity on public.stock_levels
+  for each row execute function public.notify_stock_level();
+
+create or replace function public.notify_new_member()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_name text;
+begin
+  if new.role = 'owner' then
+    return new;
+  end if;
+
+  select full_name into v_name from public.profiles where id = new.user_id;
+  insert into public.notifications (shop_id, title, body, kind)
+  values (
+    new.shop_id, 'Nouveau membre',
+    coalesce(v_name, 'Un nouveau membre') || ' a rejoint l''équipe (' || new.role || ').',
+    'new_member'
+  );
+  return new;
+end $$;
+
+drop trigger if exists trg_notify_new_member on public.shop_members;
+create trigger trg_notify_new_member
+  after insert on public.shop_members
+  for each row execute function public.notify_new_member();
+
 -- =============== STORAGE ===============
 -- Bucket pour le logo boutique : public en lecture (affiché sur tickets et
 -- reçus), écriture restreinte à owner/manager de la boutique propriétaire
