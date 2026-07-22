@@ -552,3 +552,35 @@ de cette section.
   par rôle (table par table, déjà en place) reste inchangée et reste la
   seule vraie barrière. Décision confirmée en amont de ce bloc : pas de
   refonte de la RLS ici.
+
+## 16. Bloc 16 — 4 bugs bloquants corrigés (migration 017)
+
+- **Erreurs d'Edge Function enfin lisibles** : `supabase.functions.invoke()`
+  ne remonte jamais le corps JSON d'une réponse non-2xx dans
+  `error.message` — un rejet `403 {"error":"Accès réservé au Super Admin."}`
+  apparaissait côté client comme un texte générique inexploitable. Nouveau
+  helper `src/lib/data/invokeFn.ts` (lit `error.context`), appliqué partout
+  où `.functions.invoke()` était utilisé (`admin-impersonate`,
+  `create-team-member`, `create-subscription-payment`). Sécurité inchangée
+  — c'est uniquement la lisibilité de l'échec côté client qui change,
+  aucune vérification serveur n'est modifiée.
+- **`supabase/config.toml` ajouté**, versionnant explicitement la
+  vérification JWT par Edge Function : `false` uniquement pour
+  `moneyfusion-webhook` (endpoint public appelé par MoneyFusion, sans
+  session Supabase — la valeur par défaut, activée, le rejetait en 401
+  avant l'exécution de notre code) ; `true` pour les 4 autres, qui exigent
+  toutes une session utilisateur authentifiée. Ce fichier ne s'applique
+  qu'aux futurs déploiements CLI ; le réglage Dashboard existant doit être
+  vérifié/corrigé manuellement pour un effet immédiat.
+- **Nouvelle Edge Function `check-subscription-payment`** : vérification
+  active du statut MoneyFusion (au lieu de dépendre uniquement d'un
+  webhook qui peut n'être envoyé qu'une fois, à l'initiation). RLS
+  (`has_shop_access`) via le client utilisateur avant toute lecture du
+  paiement — un `payment_id` arbitraire ne renvoie rien s'il n'appartient
+  pas à une boutique de l'appelant. Logique de vérification/mise à jour
+  extraite dans `supabase/functions/_shared/moneyfusion.ts`, partagée avec
+  `moneyfusion-webhook` pour ne jamais diverger entre les deux chemins.
+- **Migration 017** : `expenses.method` converti de l'enum `payment_method`
+  vers `text` libre — aucun changement RLS, uniquement un changement de
+  type de colonne (les dépenses n'ont pas à partager l'enum des paiements
+  de vente).
