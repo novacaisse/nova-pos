@@ -287,7 +287,8 @@ create table if not exists public.subscription_payments (
   status public.subscription_payment_status not null default 'pending',
   provider text default 'moneyfusion', provider_ref text,
   paid_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
 );
 create index if not exists idx_sub_payments_shop on public.subscription_payments(shop_id);
 create index if not exists idx_sub_payments_subscription on public.subscription_payments(subscription_id);

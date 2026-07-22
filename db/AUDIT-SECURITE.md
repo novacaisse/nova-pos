@@ -364,3 +364,36 @@ un écran vide), pas une couche de protection supplémentaire.
    (onglet « Bons de commande ») — les fiches fournisseurs elles-mêmes sont
    connectées, mais pas les bons de commande. Hors périmètre des 6 tâches
    initiales (signalé par l'utilisateur, pas de table dédiée à ce jour).
+
+## 12. Migration 007 + Edge Functions MoneyFusion (à exécuter/déployer)
+
+**Fichier** : `db/migrations/007_subscription_payments_metadata.sql` — ajoute
+`subscription_payments.metadata` (jsonb) : la documentation MoneyFusion ne
+confirme pas que `personal_Info` est bien renvoyé tel quel dans les
+événements webhook, donc `create-subscription-payment` stocke lui-même
+`{plan_id, period}` ici plutôt que de dépendre de ce comportement non
+vérifié côté MoneyFusion.
+
+**Edge Functions** (`supabase/functions/`, à déployer via le Dashboard —
+« Via Editor », aucun accès CLI disponible dans cette session) :
+- `create-subscription-payment` : vérifie server-side que l'appelant est
+  owner/manager de la boutique (ne fait jamais confiance à `shop_id` envoyé
+  par le client), crée la ligne `subscription_payments` (pending), appelle
+  MoneyFusion via le proxy à IP fixe (VPS + Squid, remplace QuotaGuard —
+  raison : coût), renvoie l'URL d'encaissement.
+- `moneyfusion-webhook` : endpoint public. **Aucun mécanisme de signature
+  documenté par MoneyFusion** pour vérifier l'authenticité d'un appel — le
+  webhook ne sert donc que de déclencheur, jamais de source de vérité ; la
+  fonction reappelle elle-même l'endpoint de vérification MoneyFusion
+  (`GET paiementNotif/{token}`, via le même proxy) et ne marque un paiement
+  "payé" que sur la base de cette vérification authoritative. Met aussi à
+  jour `shops.plan` en plus de `subscriptions.status`/`current_period_end`
+  (au-delà de la demande initiale) : sans ça, le garde-fou d'essai expiré
+  (`app.tsx`, basé sur `shops.plan`/`trial_ends_at`) pourrait continuer à
+  bloquer un client qui vient de payer.
+- Point non vérifiable dans cette session : l'appel `fetch` proxié via
+  `Deno.createHttpClient({ proxy: ... })` n'a pas pu être testé en direct
+  (aucun accès de déploiement ici) — à valider une fois déployé.
+
+Secrets Edge Function nécessaires (jamais commités, transmis uniquement via
+le Dashboard Supabase) : `PAYMENT_PROXY_URL`, `MONEYFUSION_API_URL`, `APP_URL`.
