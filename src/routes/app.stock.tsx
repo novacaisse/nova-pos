@@ -6,7 +6,7 @@ import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
   useProducts, useUpsertProduct,
   useStockMovements, useCreateStockMovement, useMyRole,
-  formatXOF, type ProductWithStock,
+  useFormatMoney, type ProductWithStock,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +24,7 @@ const KIND_META: Record<LocalKind, { label: string; icon: typeof ArrowDownCircle
 };
 
 function StockPage() {
+  const formatXOF = useFormatMoney();
   const { data: products = [], isLoading } = useProducts();
   const { data: moves = [] } = useStockMovements(200);
   const createMove = useCreateStockMovement();

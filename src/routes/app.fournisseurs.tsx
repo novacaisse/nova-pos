@@ -10,7 +10,7 @@ import {
   useSuppliers, useUpsertSupplier, useDeleteSupplier, useMyRole, useProducts,
   usePurchaseOrders, useUpsertPurchaseOrder, useDeletePurchaseOrder,
   useSendPurchaseOrder, useCancelPurchaseOrder, useReceivePurchaseOrder,
-  formatXOF, type Supplier, type PurchaseOrderWithItems, type PurchaseOrderStatus, type ProductWithStock,
+  useFormatMoney, type Supplier, type PurchaseOrderWithItems, type PurchaseOrderStatus, type ProductWithStock,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +29,7 @@ const STATUS_COLOR: Record<PurchaseOrderStatus, string> = {
 };
 
 function FournisseursPage() {
+  const formatXOF = useFormatMoney();
   const [tab, setTab] = useState<"suppliers" | "orders">("suppliers");
   const [edit, setEdit] = useState<Partial<Supplier> | null>(null);
   const [del, setDel] = useState<Supplier | null>(null);
@@ -271,6 +272,7 @@ function ConfirmDialog({ title, onClose, onConfirm }: { title: string; onClose: 
 function SupplierDetailModal({ supplier, products, orders, onClose }: {
   supplier: Supplier; products: ProductWithStock[]; orders: PurchaseOrderWithItems[]; onClose: () => void;
 }) {
+  const formatXOF = useFormatMoney();
   const linkedProducts = products.filter((p) => p.supplier_id === supplier.id);
   const supplierOrders = orders.filter((o) => o.supplier_id === supplier.id);
   const stockValue = linkedProducts.reduce((s, p) => s + Number(p.cost) * p.stock, 0);
@@ -354,6 +356,7 @@ type POLine = { product_id: string | null; name: string; quantity: number; unit_
 function PurchaseOrderForm({ suppliers, products, onClose }: {
   suppliers: Supplier[]; products: ProductWithStock[]; onClose: () => void;
 }) {
+  const formatXOF = useFormatMoney();
   const upsert = useUpsertPurchaseOrder();
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? "");
   const [expectedAt, setExpectedAt] = useState("");
@@ -477,6 +480,7 @@ function PurchaseOrderForm({ suppliers, products, onClose }: {
 function PurchaseOrderDetailModal({ order, canManage, onClose }: {
   order: PurchaseOrderWithItems; canManage: boolean; onClose: () => void;
 }) {
+  const formatXOF = useFormatMoney();
   const send = useSendPurchaseOrder();
   const cancel = useCancelPurchaseOrder();
   const receive = useReceivePurchaseOrder();

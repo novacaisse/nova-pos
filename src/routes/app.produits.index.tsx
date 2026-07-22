@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   useProducts, useDeleteProduct,
   useCategories, useUpsertCategory, useDeleteCategory, useMyRole, useTeamPermissions,
-  formatXOF, type ProductWithStock, type Category,
+  useFormatMoney, type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +19,7 @@ export const Route = createFileRoute("/app/produits/")({
 });
 
 function ProduitsPage() {
+  const formatXOF = useFormatMoney();
   const { q } = Route.useSearch();
   const { data: products = [], isLoading } = useProducts();
   const { data: cats = [] } = useCategories();

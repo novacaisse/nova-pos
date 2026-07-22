@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Save, Trash2, Image as ImageIcon, Wand2, Loader2, X } from "lucide-react";
 import {
   useUpsertProduct, useDeleteProduct, useUploadProductImage, useSuppliers,
-  formatXOF, type ProductWithStock, type Category,
+  type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
 import { generateSku, generateBarcode } from "@/lib/generateProductCodes";
 import { cn } from "@/lib/utils";

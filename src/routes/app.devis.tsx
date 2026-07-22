@@ -6,7 +6,7 @@ import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import {
   useQuotes, useUpsertQuote, useDeleteQuote, useMarkQuoteConverted,
-  useCreateSale, useCustomers, useProducts, useMyRole, formatXOF,
+  useCreateSale, useCustomers, useProducts, useMyRole, useFormatMoney,
   type QuoteWithItems, type QuoteStatus,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ const QUOTE_STATUS_LABEL: Record<QuoteStatus, string> = {
 };
 
 function DevisPage() {
+  const formatXOF = useFormatMoney();
   const [period, setPeriod] = useState<Period>("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -168,6 +169,7 @@ function QuoteEditor({ initial, onClose, onSave }: {
   onClose: () => void;
   onSave: (input: Parameters<ReturnType<typeof useUpsertQuote>["mutateAsync"]>[0]) => void;
 }) {
+  const formatXOF = useFormatMoney();
   const { data: customers = [] } = useCustomers();
   const { data: products = [] } = useProducts();
   const [customerId, setCustomerId] = useState<string | null>(initial?.customer_id ?? null);
@@ -281,6 +283,7 @@ function QuoteEditor({ initial, onClose, onSave }: {
 // validée) : on ne fabrique pas silencieusement une vente "payée comptant"
 // sans savoir ce qui s'est réellement passé au comptoir.
 function ConvertDialog({ quote, onClose }: { quote: QuoteWithItems; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
   const createSale = useCreateSale();
   const markConverted = useMarkQuoteConverted();
   const [method, setMethod] = useState<"cash" | "mobile_money" | "card" | "credit">("cash");

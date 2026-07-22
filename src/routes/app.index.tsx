@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useSales, useProducts, useCustomers, useExpenses, formatXOF, isRevenueSale } from "@/lib/data/hooks";
+import { useSales, useProducts, useCustomers, useExpenses, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/")({
@@ -15,6 +15,7 @@ export const Route = createFileRoute("/app/")({
 });
 
 function DashboardPage() {
+  const formatXOF = useFormatMoney();
   const [period, setPeriod] = useState<Period>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");

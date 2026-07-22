@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Sparkles, CreditCard, Loader2, Clock } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useShop } from "@/lib/auth/ShopProvider";
-import { useSubscription, useSubscriptionPayments, formatXOF } from "@/lib/data/hooks";
+import { useSubscription, useSubscriptionPayments, formatMoney } from "@/lib/data/hooks";
 import { getTrialInfo } from "@/lib/trial";
 import { usePlans } from "@/lib/data/adminHooks";
 import { cn } from "@/lib/utils";
@@ -38,7 +38,7 @@ function AbonnementPage() {
                 <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Formule actuelle</div>
                 <div className="mt-1 flex items-baseline gap-2">
                   <span className="font-display text-3xl font-bold">{currentPlan?.name ?? "Essai gratuit"}</span>
-                  {currentPlan && <span className="tabular text-sm text-muted-foreground">{formatXOF(currentPlan.price_month)} / mois</span>}
+                  {currentPlan && <span className="tabular text-sm text-muted-foreground">{formatMoney(currentPlan.price_month, currentPlan.currency)} / mois</span>}
                 </div>
                 <div className="mt-2 flex items-center gap-2 text-xs">
                   {trial.onTrial ? (
@@ -93,7 +93,7 @@ function AbonnementPage() {
                   )}
                   <div className="font-display text-xl font-bold">{p.name}</div>
                   <div className="tabular mt-1 font-display text-3xl font-bold">
-                    {formatXOF(p.price_month)}<span className="text-sm text-muted-foreground"> /mois</span>
+                    {formatMoney(p.price_month, p.currency)}<span className="text-sm text-muted-foreground"> /mois</span>
                   </div>
                   <ul className="mt-4 flex-1 space-y-2 text-sm">
                     {p.features.map((f) => (
@@ -147,7 +147,7 @@ function AbonnementPage() {
                           (p.status === "failed" || p.status === "refunded") && "bg-destructive/15 text-destructive",
                         )}>{PAYMENT_STATUS_LABEL[p.status] ?? p.status}</span>
                       </td>
-                      <td className="tabular px-4 py-3 text-right font-bold">{formatXOF(p.amount)}</td>
+                      <td className="tabular px-4 py-3 text-right font-bold">{formatMoney(p.amount, p.currency)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -9,7 +9,7 @@ import { useShop } from "@/lib/auth/ShopProvider";
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
   useCreateAdditionalShop, useTransferStock, useProducts,
-  DEFAULT_TICKET_CONFIG, formatXOF, type TicketConfig, type TaxRate, type ProductWithStock,
+  DEFAULT_TICKET_CONFIG, useFormatMoney, type TicketConfig, type TaxRate, type ProductWithStock,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
@@ -426,6 +426,7 @@ type TransferShop = { id: string; name: string };
 function TransferPanel({ shops, currentShopId, currentShopName, canManage }: {
   shops: TransferShop[]; currentShopId: string; currentShopName: string; canManage: boolean;
 }) {
+  const formatXOF = useFormatMoney();
   const { data: products = [] } = useProducts();
   const transfer = useTransferStock();
   const otherShops = shops.filter((s) => s.id !== currentShopId);

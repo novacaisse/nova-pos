@@ -55,8 +55,43 @@ export type SaleItem = {
 };
 
 // ============ HELPERS ============
+// Formatage monétaire par devise (Paramètres > Devise, shops.currency) —
+// avant, chaque montant affiché dans l'app était formaté en F (XOF) en dur,
+// quelle que soit la devise réellement configurée pour la boutique.
+type CurrencyMeta = { symbol: string; decimals: number; position: "before" | "after" };
+const CURRENCY_META: Record<string, CurrencyMeta> = {
+  XOF: { symbol: "F", decimals: 0, position: "after" },
+  XAF: { symbol: "F", decimals: 0, position: "after" },
+  EUR: { symbol: "€", decimals: 2, position: "after" },
+  USD: { symbol: "$", decimals: 2, position: "before" },
+  GHS: { symbol: "₵", decimals: 2, position: "before" },
+  NGN: { symbol: "₦", decimals: 2, position: "before" },
+};
+
+export function formatMoney(n: number, currency?: string | null): string {
+  const meta = CURRENCY_META[currency ?? "XOF"] ?? CURRENCY_META.XOF;
+  const num = new Intl.NumberFormat("fr-FR", {
+    minimumFractionDigits: meta.decimals, maximumFractionDigits: meta.decimals,
+  }).format(n);
+  return meta.position === "before" ? `${meta.symbol} ${num}` : `${num} ${meta.symbol}`;
+}
+
+// Historique : formatage XOF fixe, conservé pour les écrans sans contexte
+// de boutique unique (cross-boutiques côté Super Admin, pages publiques
+// avant inscription). Dans une page qui a une boutique courante, préférer
+// useFormatMoney() ci-dessous.
 export function formatXOF(n: number): string {
-  return new Intl.NumberFormat("fr-FR").format(Math.round(n)) + " F";
+  return formatMoney(n, "XOF");
+}
+
+// Lie formatMoney() à la devise de la boutique active — à utiliser dans
+// tout composant qui affiche des montants au sein de l'app boutique. Le nom
+// local peut rester `formatXOF` à l'appel (const formatXOF = useFormatMoney())
+// pour ne pas avoir à renommer chaque site d'appel existant.
+export function useFormatMoney() {
+  const { currentShop } = useShop();
+  const currency = currentShop?.currency;
+  return (n: number) => formatMoney(n, currency);
 }
 
 // Une vente compte-t-elle dans le CA affiché (Dashboard, Ventes,

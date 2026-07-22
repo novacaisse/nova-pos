@@ -5,9 +5,8 @@ import { Zap, Check, Loader2, Smartphone, ArrowRight, AlertTriangle } from "luci
 import { invokeFn } from "@/lib/data/invokeFn";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useShop } from "@/lib/auth/ShopProvider";
-import { useProfile } from "@/lib/data/hooks";
+import { useProfile, formatMoney } from "@/lib/data/hooks";
 import { usePlans } from "@/lib/data/adminHooks";
-import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
 type SouscriptionSearch = { plan?: string };
@@ -123,7 +122,7 @@ function SouscriptionPage() {
                         className={cn("rounded-2xl border p-4 text-left transition-all",
                           planId === p.id ? "border-primary bg-primary/5 shadow-elegant" : "border-border hover:bg-muted")}>
                         <div className="font-display font-bold">{p.name}</div>
-                        <div className="tabular text-xs text-muted-foreground">{formatXOF(p.price_month)} / mois</div>
+                        <div className="tabular text-xs text-muted-foreground">{formatMoney(p.price_month, p.currency)} / mois</div>
                       </button>
                     ))}
                   </div>
@@ -145,11 +144,11 @@ function SouscriptionPage() {
                 <div className="mt-6 rounded-2xl bg-muted/60 p-5">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{plan.name} · {period}</span>
-                    <span className="tabular font-semibold">{formatXOF(total)}</span>
+                    <span className="tabular font-semibold">{formatMoney(total, plan.currency)}</span>
                   </div>
                   <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3 font-display text-lg font-bold">
                     <span>Total à payer</span>
-                    <span className="tabular text-primary">{formatXOF(total)}</span>
+                    <span className="tabular text-primary">{formatMoney(total, plan.currency)}</span>
                   </div>
                 </div>
 
@@ -190,7 +189,7 @@ function SouscriptionPage() {
                 <div className="mt-5 rounded-2xl bg-muted/60 p-4 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Montant</span>
-                    <span className="tabular font-display font-bold text-primary">{formatXOF(total)}</span>
+                    <span className="tabular font-display font-bold text-primary">{formatMoney(total, plan.currency)}</span>
                   </div>
                 </div>
 
@@ -203,7 +202,7 @@ function SouscriptionPage() {
                 <button onClick={launchPayment} disabled={submitting || !phone.trim() || !fullName.trim()}
                   className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary to-primary-glow font-display font-bold text-primary-foreground shadow-elegant hover:opacity-90 disabled:opacity-50">
                   {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  {submitting ? "Redirection…" : `Payer ${formatXOF(total)}`}
+                  {submitting ? "Redirection…" : `Payer ${formatMoney(total, plan.currency)}`}
                 </button>
                 <button onClick={() => setStep("recap")} disabled={submitting} className="mt-2 w-full text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
                   Modifier la formule

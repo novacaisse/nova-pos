@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Zap, ArrowRight, Check, Sparkles, Loader2 } from "lucide-react";
 import { usePlans } from "@/lib/data/adminHooks";
-import { formatXOF } from "@/lib/mock/catalog";
+import { formatMoney } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/tarifs")({
@@ -82,7 +82,7 @@ function TarifsPage() {
                 )}
                 <div className="font-display text-xl font-bold">{plan.name}</div>
                 <div className="mt-3 flex items-baseline gap-1.5">
-                  <span className="tabular font-display text-4xl font-black">{formatXOF(amount)}</span>
+                  <span className="tabular font-display text-4xl font-black">{formatMoney(amount, plan.currency)}</span>
                   <span className="text-xs text-muted-foreground">{suffix}</span>
                 </div>
                 <ul className="mt-5 space-y-2 text-sm">

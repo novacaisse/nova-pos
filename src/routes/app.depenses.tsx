@@ -5,7 +5,7 @@ import { Plus, Wallet, Trash2, Edit3, Save, X, Settings2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
   useExpenses, useUpsertExpense, useDeleteExpense, useShopSettings, useUpdateShopSettings,
-  formatXOF, type Expense,
+  useFormatMoney, type Expense,
 } from "@/lib/data/hooks";
 import { DEFAULT_EXPENSE_CATEGORIES } from "@/lib/mock/expenses";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ export const Route = createFileRoute("/app/depenses")({
 });
 
 function DepensesPage() {
+  const formatXOF = useFormatMoney();
   const { data: items = [], isLoading } = useExpenses();
   const { data: settings } = useShopSettings();
   const updateSettings = useUpdateShopSettings();

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { usePlans } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
+import { formatMoney } from "@/lib/data/hooks";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -297,7 +298,7 @@ function PricingPreview() {
               {p.is_recommended && <span className="mb-2 inline-block rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase text-primary-foreground">Populaire</span>}
               <div className="font-display text-xl font-bold">{p.name}</div>
               <div className="mt-2 flex items-baseline gap-1">
-                <span className="tabular font-display text-3xl font-black">{formatXOF(p.price_month)}</span>
+                <span className="tabular font-display text-3xl font-black">{formatMoney(p.price_month, p.currency)}</span>
                 <span className="text-xs text-muted-foreground">/ mois</span>
               </div>
               <ul className="mt-4 space-y-1.5 text-sm">

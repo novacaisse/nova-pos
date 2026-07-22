@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   useCategories, useProducts, useCustomers, useUpsertCustomer,
-  useCreateSale, useShopSettings, useProfile, DEFAULT_TICKET_CONFIG, formatXOF, newTicketRef,
+  useCreateSale, useShopSettings, useProfile, DEFAULT_TICKET_CONFIG, useFormatMoney, newTicketRef,
   useHoldTickets, useSaveHoldTicket, useDeleteHoldTicket, useMyRole, useTeamPermissions,
   type HoldTicket, type ProductWithStock, type Customer,
 } from "@/lib/data/hooks";
@@ -42,6 +42,7 @@ type Receipt = {
 };
 
 function CaissePage() {
+  const formatXOF = useFormatMoney();
   const { currentShop } = useShop();
   const navigate = useNavigate();
   const { holdId } = Route.useSearch();
@@ -401,6 +402,7 @@ function CategoryPill({ label, active, onClick, count }: { label: string; active
 }
 
 function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () => void }) {
+  const formatXOF = useFormatMoney();
   const low = product.stock <= product.low_stock_threshold;
   return (
     <motion.button whileTap={{ scale: 0.96 }} onClick={onAdd}
@@ -472,6 +474,7 @@ function PaymentDialog({
   lines: Line[]; subtotal: number; discountAmt: number;
   onClose: () => void; onConfirm: (r: Receipt) => void; pending: boolean;
 }) {
+  const formatXOF = useFormatMoney();
   const [type, setType] = useState<PaymentType>("total");
   const [received, setReceived] = useState<string>(String(total));
   const rec = Number(received) || 0;
@@ -560,6 +563,7 @@ function Row2({ label, value, accent }: { label: string; value: string; accent?:
 function HoldsDialog({ holds, onClose, onResume, onRemove }: {
   holds: HoldTicket[]; onClose: () => void; onResume: (h: HoldTicket) => void; onRemove: (id: string) => void;
 }) {
+  const formatXOF = useFormatMoney();
   return (
     <DialogShell onClose={onClose} maxWidth="max-w-lg">
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -710,6 +714,7 @@ const RECEIPT_PAY_LABEL: Record<PaymentMethod, string> = {
 };
 
 function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
   const { currentShop } = useShop();
   const { data: settings } = useShopSettings();
   const { data: profile } = useProfile();

@@ -5,7 +5,7 @@ import { Search, Plus, Phone, Mail, MapPin, X, Star, CreditCard, Edit3, Trash2, 
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
   useCustomers, useUpsertCustomer, useDeleteCustomer, useCustomerSales, useMyRole,
-  formatXOF, type Customer,
+  useFormatMoney, type Customer,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,7 @@ export const Route = createFileRoute("/app/clients")({
 });
 
 function ClientsPage() {
+  const formatXOF = useFormatMoney();
   const { q } = Route.useSearch();
   const [query, setQuery] = useState(q ?? "");
   const [selected, setSelected] = useState<Customer | null>(null);
@@ -140,6 +141,7 @@ const PAY_METHOD_LABEL: Record<string, string> = {
 };
 
 function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
   const { data: sales = [], isLoading } = useCustomerSales(customer.id);
 
   return (

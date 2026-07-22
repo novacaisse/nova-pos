@@ -12,7 +12,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import {
   useSales, useMyRole, useCancelSale, useAddSalePayment, useTeamPermissions,
   useShopSettings, useProfile, useProducts, DEFAULT_TICKET_CONFIG, isRevenueSale,
-  formatXOF, type Sale, type SaleItem,
+  useFormatMoney, type Sale, type SaleItem,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ const PAY_ICON: Record<Sale["payment_method"], typeof Banknote> = {
 };
 
 function VentesPage() {
+  const formatXOF = useFormatMoney();
   const { q } = Route.useSearch();
   // Un lien de recherche global doit pouvoir retrouver une vente même hors
   // de la période par défaut : on part large ("Cette année") dans ce cas.
@@ -188,6 +189,7 @@ const SALE_STATUS_LABEL: Record<Sale["status"], string> = {
 };
 
 function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
   const { currentShop } = useShop();
   const { data: settings } = useShopSettings();
   const { data: profile } = useProfile();
@@ -356,6 +358,7 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
 }
 
 function PaymentDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
   const due = Math.max(0, Number(sale.total) - Number(sale.paid));
   const [amount, setAmount] = useState(due);
   const [method, setMethod] = useState<Sale["payment_method"]>("cash");

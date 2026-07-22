@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Search, Package, Users, Receipt } from "lucide-react";
 import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover";
-import { useProducts, useCustomers, useSales, formatXOF } from "@/lib/data/hooks";
+import { useProducts, useCustomers, useSales, useFormatMoney } from "@/lib/data/hooks";
 
 export function GlobalSearch() {
+  const formatXOF = useFormatMoney();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
 

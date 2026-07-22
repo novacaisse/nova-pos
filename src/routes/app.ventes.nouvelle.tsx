@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
-  useProducts, useCustomers, useCreateSale, useMyRole, useTeamPermissions, formatXOF, newTicketRef,
+  useProducts, useCustomers, useCreateSale, useMyRole, useTeamPermissions, useFormatMoney, newTicketRef,
   type ProductWithStock, type Customer, type Sale,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ const PAY_ICON: Record<Sale["payment_method"], typeof Banknote> = {
 };
 
 function NouvelleVentePage() {
+  const formatXOF = useFormatMoney();
   const navigate = useNavigate();
   const { data: products = [] } = useProducts();
   const { data: customers = [] } = useCustomers();

@@ -7,7 +7,7 @@ import {
   startOfYear, endOfYear, subMonths, subYears,
 } from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useSales, useProducts, useSuppliers, formatXOF, isRevenueSale } from "@/lib/data/hooks";
+import { useSales, useProducts, useSuppliers, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/rapports")({
@@ -79,6 +79,7 @@ function periodRange(period: PeriodId, from: string, to: string): { from: string
 }
 
 function RapportsPage() {
+  const formatXOF = useFormatMoney();
   const [period, setPeriod] = useState<PeriodId>("month");
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
   const [report, setReport] = useState<ReportId>("sales");
