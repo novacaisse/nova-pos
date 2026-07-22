@@ -59,6 +59,15 @@ export function formatXOF(n: number): string {
   return new Intl.NumberFormat("fr-FR").format(Math.round(n)) + " F";
 }
 
+// Une vente compte-t-elle dans le CA affiché (Dashboard, Ventes,
+// Rapports) ? Exclut les brouillons (jamais finalisés, jamais du vrai CA)
+// et les ventes annulées/remboursées (le stock a été réintégré, l'argent
+// rendu ou jamais encaissé) — sans ce filtre, ces ventes gonflaient le CA
+// affiché partout (bug remonté : "le CA doit être réduit après annulation").
+export function isRevenueSale(s: { status: Sale["status"] }): boolean {
+  return s.status === "completed" || s.status === "partially_refunded";
+}
+
 function useShopId() {
   const { currentShop } = useShop();
   return currentShop?.id ?? null;

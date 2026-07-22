@@ -11,7 +11,7 @@ import { useShop } from "@/lib/auth/ShopProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import {
   useSales, useMyRole, useCancelSale, useAddSalePayment, useTeamPermissions,
-  useShopSettings, useProfile, DEFAULT_TICKET_CONFIG,
+  useShopSettings, useProfile, useProducts, DEFAULT_TICKET_CONFIG, isRevenueSale,
   formatXOF, type Sale, type SaleItem,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -68,8 +68,12 @@ function VentesPage() {
     return true;
   }), [sales, query, payFilter]);
 
-  const totalRevenue = filtered.reduce((s, x) => s + Number(x.total || 0), 0);
-  const avg = filtered.length ? Math.round(totalRevenue / filtered.length) : 0;
+  // Le CA affiché exclut les brouillons/annulées/remboursées — la liste
+  // elle-même continue de toutes les montrer (avec leur statut), seul le
+  // total ne doit pas les compter comme du vrai chiffre d'affaires.
+  const revenueRows = filtered.filter(isRevenueSale);
+  const totalRevenue = revenueRows.reduce((s, x) => s + Number(x.total || 0), 0);
+  const avg = revenueRows.length ? Math.round(totalRevenue / revenueRows.length) : 0;
 
   return (
     <div>
@@ -187,6 +191,7 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
   const { currentShop } = useShop();
   const { data: settings } = useShopSettings();
   const { data: profile } = useProfile();
+  const { data: products = [] } = useProducts();
   const { data: myRole } = useMyRole();
   const { user } = useAuth();
   const cancelSale = useCancelSale();
@@ -237,12 +242,18 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
             <Info label="Statut" value={SALE_STATUS_LABEL[sale.status]} />
           </div>
           <div className="rounded-xl border border-border">
-            {sale.sale_items.map((l, i) => (
-              <div key={l.id ?? i} className={cn("flex items-center justify-between px-3 py-2 text-sm", i > 0 && "border-t border-border/60")}>
-                <div><div className="font-medium">{l.name}</div><div className="text-xs text-muted-foreground">{l.quantity} × {formatXOF(Number(l.unit_price))}</div></div>
-                <div className="tabular font-semibold">{formatXOF(Number(l.total))}</div>
-              </div>
-            ))}
+            {sale.sale_items.map((l, i) => {
+              const image = l.product_id ? products.find((p) => p.id === l.product_id)?.image_url : null;
+              return (
+                <div key={l.id ?? i} className={cn("flex items-center gap-3 px-3 py-2 text-sm", i > 0 && "border-t border-border/60")}>
+                  <div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-sm">
+                    {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : "📦"}
+                  </div>
+                  <div className="min-w-0 flex-1"><div className="truncate font-medium">{l.name}</div><div className="text-xs text-muted-foreground">{l.quantity} × {formatXOF(Number(l.unit_price))}</div></div>
+                  <div className="tabular shrink-0 font-semibold">{formatXOF(Number(l.total))}</div>
+                </div>
+              );
+            })}
             {sale.sale_items.length === 0 && <div className="px-3 py-4 text-center text-xs text-muted-foreground">Aucune ligne.</div>}
           </div>
           {Number(sale.discount) > 0 && (

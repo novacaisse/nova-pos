@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Package } from "lucide-react";
+import { Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Package, ChevronDown, Check } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   useProducts, useDeleteProduct,
   useCategories, useUpsertCategory, useDeleteCategory, useMyRole, useTeamPermissions,
@@ -55,18 +56,13 @@ function ProduitsPage() {
 
       <div className="space-y-4 p-5 sm:p-8">
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-3">
-          <div className="relative min-w-0 flex-1">
+          <div className="relative w-full min-w-0 sm:w-56">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nom, SKU, code-barres…"
               className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
           </div>
-          <div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-border bg-background p-1">
-            <button onClick={() => setCat("all")} className={cn("shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium", cat === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>Tous</button>
-            {cats.map((c) => (
-              <button key={c.id} onClick={() => setCat(c.id)} className={cn("shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium", cat === c.id ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>{c.name}</button>
-            ))}
-          </div>
-          <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+          <CategoryFilter cats={cats} value={cat} onChange={setCat} />
+          <div className="ml-auto flex items-center gap-0.5 rounded-lg border border-border p-0.5">
             <button onClick={() => setView("list")} className={cn("grid h-8 w-8 place-items-center rounded-md", view === "list" && "bg-muted")}><List className="h-4 w-4" /></button>
             <button onClick={() => setView("grid")} className={cn("grid h-8 w-8 place-items-center rounded-md", view === "grid" && "bg-muted")}><LayoutGrid className="h-4 w-4" /></button>
           </div>
@@ -221,5 +217,41 @@ function ConfirmDialog({ title, onClose, onConfirm }: { title: string; onClose: 
         </div>
       </div>
     </Overlay>
+  );
+}
+
+// Remplace la rangée de boutons de catégories (qui poussait la recherche à
+// devenir trop étroite/longue visuellement) par un menu déroulant en icône
+// — même pattern que PeriodSelector (Popover + bouton icône + liste).
+function CategoryFilter({ cats, value, onChange }: { cats: Category[]; value: "all" | string; onChange: (v: "all" | string) => void }) {
+  const [open, setOpen] = useState(false);
+  const label = value === "all" ? "Toutes catégories" : cats.find((c) => c.id === value)?.name ?? "Toutes catégories";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">
+          <TagIcon className="h-4 w-4 text-muted-foreground" />
+          <span className="max-w-[10rem] truncate">{label}</span>
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={8} className="w-56 p-1.5">
+        <div className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
+          <button onClick={() => { onChange("all"); setOpen(false); }}
+            className={cn("flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors",
+              value === "all" ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted")}>
+            Toutes catégories {value === "all" && <Check className="h-3.5 w-3.5" />}
+          </button>
+          {cats.map((c) => (
+            <button key={c.id} onClick={() => { onChange(c.id); setOpen(false); }}
+              className={cn("flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors",
+                value === c.id ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted")}>
+              {c.name} {value === c.id && <Check className="h-3.5 w-3.5" />}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

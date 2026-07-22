@@ -243,15 +243,21 @@ function QuoteEditor({ initial, onClose, onSave }: {
           <div className="rounded-xl border border-border">
             {lines.length === 0 ? (
               <div className="p-6 text-center text-sm text-muted-foreground">Aucun article</div>
-            ) : lines.map((l, i) => (
-              <div key={i} className={cn("flex items-center gap-2 p-3", i > 0 && "border-t border-border/60")}>
-                <div className="min-w-0 flex-1"><div className="text-sm font-semibold">{l.name}</div>
-                  <div className="text-xs text-muted-foreground">{l.quantity} × {formatXOF(l.unit_price)}</div></div>
-                <div className="tabular text-sm font-bold">{formatXOF(l.quantity * l.unit_price)}</div>
-                <button onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10">
-                  <X className="h-4 w-4" /></button>
-              </div>
-            ))}
+            ) : lines.map((l, i) => {
+              const image = l.product_id ? products.find((p) => p.id === l.product_id)?.image_url : null;
+              return (
+                <div key={i} className={cn("flex items-center gap-3 p-3", i > 0 && "border-t border-border/60")}>
+                  <div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-sm">
+                    {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : "📦"}
+                  </div>
+                  <div className="min-w-0 flex-1"><div className="text-sm font-semibold">{l.name}</div>
+                    <div className="text-xs text-muted-foreground">{l.quantity} × {formatXOF(l.unit_price)}</div></div>
+                  <div className="tabular text-sm font-bold">{formatXOF(l.quantity * l.unit_price)}</div>
+                  <button onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10">
+                    <X className="h-4 w-4" /></button>
+                </div>
+              );
+            })}
           </div>
 
           <div className="flex items-center justify-between rounded-xl bg-muted p-3">
@@ -295,9 +301,11 @@ function ConvertDialog({ quote, onClose }: { quote: QuoteWithItems; onClose: () 
           product_id: it.product_id, name: it.name,
           quantity: it.quantity, unit_price: it.unit_price,
         })),
-        payment_method: method,
+        // "partially_refunded" désigne un remboursement partiel, pas un
+        // solde restant à encaisser — une conversion sous-payée est une
+        // vente à crédit normale (même convention que Nouvelle vente).
+        payment_method: due > 0 ? "credit" : method,
         paid: paidNum,
-        status: due > 0 ? "partially_refunded" : "completed",
         notes: `Converti depuis devis ${quote.reference}`,
       });
       await markConverted.mutateAsync({ quoteId: quote.id, saleId: sale.id });

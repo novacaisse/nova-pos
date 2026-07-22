@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useSales, useProducts, useCustomers, useExpenses, formatXOF } from "@/lib/data/hooks";
+import { useSales, useProducts, useCustomers, useExpenses, formatXOF, isRevenueSale } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/")({
@@ -32,11 +32,11 @@ function DashboardPage() {
 
   const inRange = sales.filter((s) => {
     const t = new Date(s.created_at).getTime();
-    return t >= from.getTime() && t <= to.getTime() && s.status !== "cancelled";
+    return t >= from.getTime() && t <= to.getTime() && isRevenueSale(s);
   });
   const inPrev = sales.filter((s) => {
     const t = new Date(s.created_at).getTime();
-    return t >= prevRange.from.getTime() && t <= prevRange.to.getTime() && s.status !== "cancelled";
+    return t >= prevRange.from.getTime() && t <= prevRange.to.getTime() && isRevenueSale(s);
   });
 
   const revenue = inRange.reduce((s, x) => s + Number(x.total || 0), 0);

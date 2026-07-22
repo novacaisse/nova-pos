@@ -7,7 +7,7 @@ import {
   startOfYear, endOfYear, subMonths, subYears,
 } from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useSales, useProducts, useSuppliers, formatXOF } from "@/lib/data/hooks";
+import { useSales, useProducts, useSuppliers, formatXOF, isRevenueSale } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/rapports")({
@@ -90,7 +90,12 @@ function RapportsPage() {
   const range = periodRange(period, from, to);
   // Limite de sécurité côté requête : au-delà de ce volume sur la période
   // choisie, ce rapport sous-estimera le total (pas de pagination ici).
-  const { data: sales = [], isLoading } = useSales({ from: range.from, to: range.to, limit: 2000 });
+  const { data: allSales = [], isLoading } = useSales({ from: range.from, to: range.to, limit: 2000 });
+  // Tous les calculs de ce rapport (CA, marge, top produits/clients/
+  // fournisseurs, heures de pointe) ne doivent compter que les ventes
+  // réellement encaissées — pas les brouillons ni les ventes annulées/
+  // remboursées, qui gonflaient auparavant le CA affiché.
+  const sales = useMemo(() => allSales.filter(isRevenueSale), [allSales]);
   const { data: products = [] } = useProducts();
   const { data: suppliers = [] } = useSuppliers();
 

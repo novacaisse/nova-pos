@@ -31,6 +31,7 @@ type Line = {
   unit_price: number;
   quantity: number;
   discount_pct?: number;
+  image_url?: string | null;
 };
 
 type Receipt = {
@@ -114,7 +115,7 @@ function CaissePage() {
         copy[idx] = { ...copy[idx], quantity: copy[idx].quantity + 1 };
         return copy;
       }
-      return [...c, { product_id: p.id, name: p.name, unit_price: Number(p.price), quantity: 1 }];
+      return [...c, { product_id: p.id, name: p.name, unit_price: Number(p.price), quantity: 1, image_url: p.image_url }];
     });
   }
   const updateQty = (id: string, delta: number) =>
@@ -145,6 +146,7 @@ function CaissePage() {
     const lines: Line[] = h.sale_items.map((it) => ({
       product_id: it.product_id ?? "", name: it.name, unit_price: Number(it.unit_price), quantity: it.quantity,
       discount_pct: it.discount > 0 ? Math.round((Number(it.discount) / (it.quantity * Number(it.unit_price))) * 100) : undefined,
+      image_url: products.find((p) => p.id === it.product_id)?.image_url,
     }));
     setCart(lines);
     setDiscountMode("amount");
@@ -274,6 +276,9 @@ function CaissePage() {
                       transition={{ duration: 0.15 }}
                       className="group rounded-xl border border-transparent px-2.5 py-2 hover:border-border hover:bg-muted/40">
                       <div className="flex items-center gap-3">
+                        <div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-sm">
+                          {l.image_url ? <img src={l.image_url} alt="" className="h-full w-full object-cover" /> : "📦"}
+                        </div>
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-semibold">{l.name}</div>
                           <div className="tabular text-xs text-muted-foreground">{formatXOF(l.unit_price)} × {l.quantity}{dp ? ` · -${dp}%` : ""}</div>
