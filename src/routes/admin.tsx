@@ -1,8 +1,11 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { Shield, ArrowUpRight } from "lucide-react";
+import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { Shield, ArrowUpRight, Loader2 } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { ThemeToggle } from "@/components/app/ThemeToggle";
+import { useAuth } from "@/lib/auth/AuthProvider";
+import { useIsSuperAdmin } from "@/lib/data/adminHooks";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "Super Admin — NovaCaisse" }] }),
@@ -10,6 +13,24 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminLayout() {
+  const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+  const { data: isSuperAdmin, isLoading: adminLoading } = useIsSuperAdmin();
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) { navigate({ to: "/connexion" }); return; }
+    if (!adminLoading && !isSuperAdmin) navigate({ to: "/app" });
+  }, [authLoading, adminLoading, user, isSuperAdmin, navigate]);
+
+  if (authLoading || adminLoading || !user || !isSuperAdmin) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
     <SidebarProvider defaultOpen>
       <div className="flex min-h-screen w-full bg-background">

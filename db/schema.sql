@@ -104,6 +104,18 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (select 1 from public.super_admins where user_id = auth.uid());
 $$;
 
+-- Lookup email pour l'écran Boutiques (Super Admin) — auth.users n'est
+-- jamais exposé au client ; ne renvoie une ligne que si l'appelant est
+-- super admin (vérifié dans la fonction, pas seulement via les grants).
+create or replace function public.admin_get_user_emails(_user_ids uuid[])
+returns table(user_id uuid, email text)
+language sql stable security definer set search_path = public as $$
+  select id, email from auth.users
+  where id = any(_user_ids) and public.is_super_admin();
+$$;
+revoke all on function public.admin_get_user_emails(uuid[]) from public;
+grant execute on function public.admin_get_user_emails(uuid[]) to authenticated;
+
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   shop_id uuid not null references public.shops(id) on delete cascade,
