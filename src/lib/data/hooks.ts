@@ -420,6 +420,63 @@ export function useCreateSale() {
   });
 }
 
+// Annuler une vente déjà finalisée : remet le stock des lignes liées à un
+// vrai produit (mouvement 'return', symétrique du 'sale' créé par
+// useCreateSale) puis passe le statut à 'cancelled'. Reçu à imprimer,
+// paiements déjà encaissés : pas de remboursement automatique, c'est un
+// geste manuel (caisse/mobile money) laissé à l'utilisateur, comme pour
+// un remboursement classique.
+export function useCancelSale() {
+  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sale: Sale & { sale_items: SaleItem[] }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const stockRows = sale.sale_items
+        .filter((it) => it.product_id)
+        .map((it) => ({
+          shop_id: shopId, product_id: it.product_id!,
+          type: "return" as const, quantity: it.quantity,
+          reason: `Annulation vente ${sale.reference}`, reference: sale.reference,
+          created_by: user?.id,
+        }));
+      if (stockRows.length) {
+        const { error: e1 } = await supabase.from("stock_movements").insert(stockRows);
+        if (e1) throw e1;
+      }
+      const { error: e2 } = await supabase.from("sales").update({ status: "cancelled" }).eq("id", sale.id);
+      if (e2) throw e2;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sales", shopId] });
+      qc.invalidateQueries({ queryKey: ["products", shopId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+    },
+  });
+}
+
+// Paiement complémentaire sur une vente à crédit (paid < total) : ajoute
+// une ligne payments et met à jour sales.paid/change_due. Ne touche ni au
+// stock ni aux lignes de la vente.
+export function useAddSalePayment() {
+  const shopId = useShopId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sale, amount, method }: { sale: Sale; amount: number; method: Sale["payment_method"] }) => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (amount <= 0) throw new Error("Le montant doit être positif.");
+      const { error: e1 } = await supabase.from("payments").insert({
+        shop_id: shopId, sale_id: sale.id,
+        method: method === "mixed" ? "cash" : method, amount,
+      });
+      if (e1) throw e1;
+      const paid = Number(sale.paid) + amount;
+      const change_due = Math.max(0, paid - Number(sale.total));
+      const { error: e2 } = await supabase.from("sales").update({ paid, change_due }).eq("id", sale.id);
+      if (e2) throw e2;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sales", shopId] }),
+  });
+}
+
 // ============ TICKETS EN ATTENTE (Caisse) ============
 // Persistés comme de vraies lignes `sales` (status: 'draft', déjà prévu
 // dans l'enum sale_status) au lieu d'un state React perdu au reload. Le

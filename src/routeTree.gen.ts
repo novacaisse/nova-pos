@@ -42,7 +42,9 @@ import { Route as AdminParametresRouteImport } from './routes/admin.parametres'
 import { Route as AdminFacturationRouteImport } from './routes/admin.facturation'
 import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
 import { Route as AdminAbonnementsRouteImport } from './routes/admin.abonnements'
+import { Route as AppVentesIndexRouteImport } from './routes/app.ventes.index'
 import { Route as AppProduitsIndexRouteImport } from './routes/app.produits.index'
+import { Route as AppVentesNouvelleRouteImport } from './routes/app.ventes.nouvelle'
 import { Route as AppProduitsNouveauRouteImport } from './routes/app.produits.nouveau'
 import { Route as AppProduitsProductIdRouteImport } from './routes/app.produits.$productId'
 
@@ -212,10 +214,20 @@ const AdminAbonnementsRoute = AdminAbonnementsRouteImport.update({
   path: '/abonnements',
   getParentRoute: () => AdminRoute,
 } as any)
+const AppVentesIndexRoute = AppVentesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppVentesRoute,
+} as any)
 const AppProduitsIndexRoute = AppProduitsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppProduitsRoute,
+} as any)
+const AppVentesNouvelleRoute = AppVentesNouvelleRouteImport.update({
+  id: '/nouvelle',
+  path: '/nouvelle',
+  getParentRoute: () => AppVentesRoute,
 } as any)
 const AppProduitsNouveauRoute = AppProduitsNouveauRouteImport.update({
   id: '/nouveau',
@@ -257,14 +269,16 @@ export interface FileRoutesByFullPath {
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
-  '/app/ventes': typeof AppVentesRoute
+  '/app/ventes': typeof AppVentesRouteWithChildren
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
   '/app/produits/': typeof AppProduitsIndexRoute
+  '/app/ventes/': typeof AppVentesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -291,14 +305,15 @@ export interface FileRoutesByTo {
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
-  '/app/ventes': typeof AppVentesRoute
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/souscription': typeof SouscriptionIndexRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
   '/app/produits': typeof AppProduitsIndexRoute
+  '/app/ventes': typeof AppVentesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -330,14 +345,16 @@ export interface FileRoutesById {
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
-  '/app/ventes': typeof AppVentesRoute
+  '/app/ventes': typeof AppVentesRouteWithChildren
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
   '/app/produits/': typeof AppProduitsIndexRoute
+  '/app/ventes/': typeof AppVentesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -377,7 +394,9 @@ export interface FileRouteTypes {
     | '/souscription/'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/ventes/nouvelle'
     | '/app/produits/'
+    | '/app/ventes/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -404,14 +423,15 @@ export interface FileRouteTypes {
     | '/app/rapports'
     | '/app/stock'
     | '/app/support'
-    | '/app/ventes'
     | '/souscription/confirmation'
     | '/admin'
     | '/app'
     | '/souscription'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/ventes/nouvelle'
     | '/app/produits'
+    | '/app/ventes'
   id:
     | '__root__'
     | '/'
@@ -449,7 +469,9 @@ export interface FileRouteTypes {
     | '/souscription/'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/ventes/nouvelle'
     | '/app/produits/'
+    | '/app/ventes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -697,12 +719,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAbonnementsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/app/ventes/': {
+      id: '/app/ventes/'
+      path: '/'
+      fullPath: '/app/ventes/'
+      preLoaderRoute: typeof AppVentesIndexRouteImport
+      parentRoute: typeof AppVentesRoute
+    }
     '/app/produits/': {
       id: '/app/produits/'
       path: '/'
       fullPath: '/app/produits/'
       preLoaderRoute: typeof AppProduitsIndexRouteImport
       parentRoute: typeof AppProduitsRoute
+    }
+    '/app/ventes/nouvelle': {
+      id: '/app/ventes/nouvelle'
+      path: '/nouvelle'
+      fullPath: '/app/ventes/nouvelle'
+      preLoaderRoute: typeof AppVentesNouvelleRouteImport
+      parentRoute: typeof AppVentesRoute
     }
     '/app/produits/nouveau': {
       id: '/app/produits/nouveau'
@@ -757,6 +793,20 @@ const AppProduitsRouteWithChildren = AppProduitsRoute._addFileChildren(
   AppProduitsRouteChildren,
 )
 
+interface AppVentesRouteChildren {
+  AppVentesNouvelleRoute: typeof AppVentesNouvelleRoute
+  AppVentesIndexRoute: typeof AppVentesIndexRoute
+}
+
+const AppVentesRouteChildren: AppVentesRouteChildren = {
+  AppVentesNouvelleRoute: AppVentesNouvelleRoute,
+  AppVentesIndexRoute: AppVentesIndexRoute,
+}
+
+const AppVentesRouteWithChildren = AppVentesRoute._addFileChildren(
+  AppVentesRouteChildren,
+)
+
 interface AppRouteChildren {
   AppAbonnementRoute: typeof AppAbonnementRoute
   AppCaisseRoute: typeof AppCaisseRoute
@@ -772,7 +822,7 @@ interface AppRouteChildren {
   AppRapportsRoute: typeof AppRapportsRoute
   AppStockRoute: typeof AppStockRoute
   AppSupportRoute: typeof AppSupportRoute
-  AppVentesRoute: typeof AppVentesRoute
+  AppVentesRoute: typeof AppVentesRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
 }
 
@@ -791,7 +841,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppRapportsRoute: AppRapportsRoute,
   AppStockRoute: AppStockRoute,
   AppSupportRoute: AppSupportRoute,
-  AppVentesRoute: AppVentesRoute,
+  AppVentesRoute: AppVentesRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
 }
 

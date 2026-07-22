@@ -669,9 +669,15 @@ drop policy if exists sales_update on public.sales;
 create policy sales_update on public.sales for update to authenticated
   using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]))
   with check (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+-- delete : owner/manager toujours, + un cashier sur SES PROPRES ventes
+-- encore 'draft' (nécessaire pour reprendre/jeter un ticket en attente
+-- depuis la Caisse — migration 013, corrige un bug du Bloc 8).
 drop policy if exists sales_delete on public.sales;
 create policy sales_delete on public.sales for delete to authenticated
-  using (public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[]));
+  using (
+    public.has_any_role_in_shop(shop_id, array['owner','manager']::public.app_role[])
+    or (status = 'draft' and cashier_id = auth.uid() and public.has_role_in_shop(shop_id, 'cashier'))
+  );
 
 -- 8. sale_items — même matrice que sales
 drop policy if exists sale_items_select on public.sale_items;

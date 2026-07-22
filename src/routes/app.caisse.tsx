@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -15,6 +15,9 @@ import {
 import { useShop } from "@/lib/auth/ShopProvider";
 
 export const Route = createFileRoute("/app/caisse")({
+  validateSearch: (search: Record<string, unknown>): { holdId?: string } => ({
+    holdId: typeof search.holdId === "string" ? search.holdId : undefined,
+  }),
   component: CaissePage,
 });
 
@@ -39,12 +42,26 @@ type Receipt = {
 
 function CaissePage() {
   const { currentShop } = useShop();
+  const navigate = useNavigate();
+  const { holdId } = Route.useSearch();
   const { data: products = [], isLoading: loadingProducts } = useProducts();
   const { data: categories = [] } = useCategories();
   const createSale = useCreateSale();
   const { data: holds = [] } = useHoldTickets();
   const saveHold = useSaveHoldTicket();
   const deleteHold = useDeleteHoldTicket();
+
+  // Entrée directe depuis Ventes ("Modifier" sur un brouillon) : ?holdId=
+  // reprend ce ticket précis puis nettoie l'URL pour ne pas re-déclencher
+  // la reprise à chaque re-render.
+  useEffect(() => {
+    if (!holdId) return;
+    const match = holds.find((h) => h.id === holdId);
+    if (match) {
+      resumeHold(match);
+      navigate({ to: "/app/caisse", replace: true });
+    }
+  }, [holdId, holds]);
 
   const [query, setQuery] = useState("");
   const [categoryId, setCategoryId] = useState<string | "all">("all");
