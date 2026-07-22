@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Phone, Mail, MapPin, X, Star, CreditCard, Edit3, Trash2, Save } from "lucide-react";
+import { Search, Plus, Phone, Mail, MapPin, X, Star, CreditCard, Edit3, Trash2, Save, Receipt, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
-  useCustomers, useUpsertCustomer, useDeleteCustomer, useMyRole,
+  useCustomers, useUpsertCustomer, useDeleteCustomer, useCustomerSales, useMyRole,
   formatXOF, type Customer,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -104,39 +104,7 @@ function ClientsPage() {
 
       <AnimatePresence>
         {selected && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm"
-            onClick={() => setSelected(null)}>
-            <motion.div initial={{ scale: 0.96 }} animate={{ scale: 1 }} exit={{ scale: 0.96 }} onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-card shadow-elegant">
-              <div className="flex items-center justify-between border-b border-border bg-gradient-to-br from-primary to-primary-glow px-5 py-4 text-primary-foreground">
-                <div className="flex items-center gap-3">
-                  <div className="grid h-11 w-11 place-items-center rounded-full bg-white/20 text-sm font-bold">
-                    {selected.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <div className="font-display text-lg font-bold">{selected.name}</div>
-                    <div className="text-xs opacity-80">{selected.address ?? "—"}</div>
-                  </div>
-                </div>
-                <button onClick={() => setSelected(null)} className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/15"><X className="h-4 w-4" /></button>
-              </div>
-              <div className="space-y-4 p-5">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {selected.phone && <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-2"><Phone className="h-4 w-4 text-muted-foreground" /> {selected.phone}</div>}
-                  {selected.email && <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-2"><Mail className="h-4 w-4 text-muted-foreground" /> {selected.email}</div>}
-                  {selected.address && <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-2 sm:col-span-2"><MapPin className="h-4 w-4 text-muted-foreground" /> {selected.address}</div>}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-border p-3 text-center"><div className="text-[10px] uppercase text-muted-foreground">Points</div><div className="tabular font-display text-lg font-bold text-accent-foreground">{selected.loyalty_points}</div></div>
-                  <div className="rounded-xl border border-border p-3 text-center"><div className="text-[10px] uppercase text-muted-foreground">Crédit</div><div className={cn("tabular font-display text-lg font-bold", Number(selected.credit_balance) > 0 ? "text-destructive" : "")}>{formatXOF(Number(selected.credit_balance))}</div></div>
-                </div>
-                {selected.notes && (
-                  <div className="rounded-xl bg-muted/50 p-3 text-sm">{selected.notes}</div>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
+          <CustomerDetailModal customer={selected} onClose={() => setSelected(null)} />
         )}
         {edit && (
           <CustomerDialog initial={edit} onClose={() => setEdit(null)}
@@ -160,6 +128,119 @@ function Overlay({ children, onClose, w = "max-w-lg" }: { children: React.ReactN
         {children}
       </motion.div>
     </motion.div>
+  );
+}
+
+const SALE_STATUS_LABEL: Record<string, string> = {
+  completed: "Payée", draft: "En attente", refunded: "Remboursée",
+  partially_refunded: "Remb. partielle", cancelled: "Annulée",
+};
+const PAY_METHOD_LABEL: Record<string, string> = {
+  cash: "Espèces", mobile_money: "Mobile Money", card: "Carte", credit: "Crédit", mixed: "Mixte",
+};
+
+function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const { data: sales = [], isLoading } = useCustomerSales(customer.id);
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-primary to-primary-glow text-sm font-bold text-primary-foreground">
+            {customer.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+          </div>
+          <div>
+            <div className="font-display text-lg font-bold leading-tight">{customer.name}</div>
+            {customer.address && <div className="text-xs text-muted-foreground">{customer.address}</div>}
+          </div>
+        </div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+
+      <div className="max-h-[75vh] overflow-y-auto p-5">
+        {(customer.phone || customer.email || customer.address) && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {customer.phone && (
+              <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm">
+                <Phone className="h-4 w-4 text-muted-foreground" /> {customer.phone}
+              </div>
+            )}
+            {customer.email && (
+              <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm">
+                <Mail className="h-4 w-4 text-muted-foreground" /> {customer.email}
+              </div>
+            )}
+            {customer.address && (
+              <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm sm:col-span-2">
+                <MapPin className="h-4 w-4 text-muted-foreground" /> {customer.address}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-border bg-card p-3 text-center">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Points fidélité</div>
+            <div className="tabular mt-1 text-lg font-bold text-accent-foreground">{customer.loyalty_points}</div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-3 text-center">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Crédit dû</div>
+            <div className={cn("tabular mt-1 text-lg font-bold", Number(customer.credit_balance) > 0 ? "text-destructive" : "text-muted-foreground")}>
+              {formatXOF(Number(customer.credit_balance))}
+            </div>
+          </div>
+        </div>
+
+        {customer.notes && (
+          <div className="mt-4 rounded-xl border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+            {customer.notes}
+          </div>
+        )}
+
+        <div className="mt-5">
+          <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <Receipt className="h-3.5 w-3.5" /> Historique d'achats
+          </div>
+          {isLoading ? (
+            <div className="grid place-items-center rounded-xl border border-border bg-card p-6">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            </div>
+          ) : sales.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-card p-5 text-center text-sm text-muted-foreground">
+              Aucun achat pour l'instant.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sales.map((s) => (
+                <div key={s.id} className="rounded-xl border border-border bg-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="font-mono text-xs font-semibold">{s.reference}</div>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                      s.status === "completed" && "bg-success/15 text-success",
+                      s.status === "refunded" && "bg-destructive/15 text-destructive",
+                      s.status === "partially_refunded" && "bg-warning/20 text-warning-foreground",
+                      (s.status === "draft" || s.status === "cancelled") && "bg-muted text-muted-foreground",
+                    )}>{SALE_STATUS_LABEL[s.status] ?? s.status}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      {new Date(s.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {" · "}{PAY_METHOD_LABEL[s.payment_method] ?? s.payment_method}
+                    </span>
+                    <span className="tabular font-bold text-foreground">{formatXOF(Number(s.total))}</span>
+                  </div>
+                  {Number(s.paid) < Number(s.total) && (
+                    <div className="mt-1 text-[11px] font-semibold text-destructive">
+                      Payé {formatXOF(Number(s.paid))} / {formatXOF(Number(s.total))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Overlay>
   );
 }
 

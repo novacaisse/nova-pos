@@ -191,6 +191,25 @@ export function useDeleteCustomer() {
   });
 }
 
+// Historique d'activité d'un client (fiche détail) — un `Sale` porte déjà
+// son propre paid/total/payment_method, ce qui couvre "achats + paiement"
+// pour l'essentiel des cas ; les paiements complémentaires multiples sur
+// une même vente (table `payments`, cf. Bloc 11) ne sont pas détaillés
+// séparément ici, simplification assumée pour cette fiche.
+export function useCustomerSales(customerId: string | null) {
+  return useQuery({
+    queryKey: ["customer_sales", customerId],
+    enabled: !!customerId,
+    queryFn: async (): Promise<(Sale & { sale_items: SaleItem[] })[]> => {
+      const { data, error } = await supabase.from("sales")
+        .select("*, sale_items(*)").eq("customer_id", customerId!)
+        .order("created_at", { ascending: false }).limit(100);
+      if (error) throw error;
+      return (data ?? []) as (Sale & { sale_items: SaleItem[] })[];
+    },
+  });
+}
+
 // ============ SUPPLIERS ============
 export function useSuppliers() {
   const shopId = useShopId();
