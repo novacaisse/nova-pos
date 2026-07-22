@@ -419,15 +419,19 @@ export type QuoteItem = {
 };
 export type QuoteWithItems = Quote & { quote_items: QuoteItem[]; customers: { name: string } | null };
 
-export function useQuotes(limit = 200) {
+export function useQuotes(opts: number | { limit?: number; from?: string; to?: string } = 200) {
+  const { limit = 200, from, to } = typeof opts === "number" ? { limit: opts } : opts;
   const shopId = useShopId();
   return useQuery({
-    queryKey: ["quotes", shopId, limit],
+    queryKey: ["quotes", shopId, limit, from, to],
     enabled: !!shopId,
     queryFn: async (): Promise<QuoteWithItems[]> => {
-      const { data, error } = await supabase.from("quotes")
+      let q = supabase.from("quotes")
         .select("*, quote_items(*), customers(name)")
-        .eq("shop_id", shopId!).order("created_at", { ascending: false }).limit(limit);
+        .eq("shop_id", shopId!);
+      if (from) q = q.gte("created_at", from);
+      if (to) q = q.lte("created_at", to);
+      const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []) as QuoteWithItems[];
     },

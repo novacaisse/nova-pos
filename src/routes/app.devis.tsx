@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, FileText, Search, X, Send, ArrowRightLeft, Trash2, Edit3, CheckCircle2, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import {
   useQuotes, useUpsertQuote, useDeleteQuote, useMarkQuoteConverted,
   useCreateSale, useCustomers, useProducts, useMyRole, formatXOF,
@@ -20,7 +21,12 @@ const QUOTE_STATUS_LABEL: Record<QuoteStatus, string> = {
 };
 
 function DevisPage() {
-  const { data: quotes = [], isLoading } = useQuotes();
+  const [period, setPeriod] = useState<Period>("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const { from, to } = periodRange(period, customFrom, customTo);
+
+  const { data: quotes = [], isLoading } = useQuotes({ from: from.toISOString(), to: to.toISOString(), limit: 1000 });
   const { data: myRole } = useMyRole();
   const upsert = useUpsertQuote();
   const remove = useDeleteQuote();
@@ -46,10 +52,15 @@ function DevisPage() {
     <div>
       <PageHeader title="Devis" subtitle={`${quotes.length} devis · conversion en vente en un clic`}
         actions={
-          <button onClick={() => setCreating(true)}
-            className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
-            <Plus className="h-4 w-4" /> Nouveau devis
-          </button>
+          <>
+            <PeriodSelector period={period} onChange={setPeriod}
+              customFrom={customFrom} customTo={customTo}
+              onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} />
+            <button onClick={() => setCreating(true)}
+              className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
+              <Plus className="h-4 w-4" /> Nouveau devis
+            </button>
+          </>
         }
       />
       <div className="space-y-4 p-5 sm:p-8">

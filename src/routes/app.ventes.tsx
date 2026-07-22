@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, Filter, Download, Receipt, X, Wallet, Banknote, Smartphone, CreditCard } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import { useSales, formatXOF, type Sale } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
@@ -18,7 +19,12 @@ const PAY_ICON: Record<Sale["payment_method"], typeof Banknote> = {
 };
 
 function VentesPage() {
-  const { data: sales = [], isLoading } = useSales(300);
+  const [period, setPeriod] = useState<Period>("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const { from, to } = periodRange(period, customFrom, customTo);
+
+  const { data: sales = [], isLoading } = useSales({ from: from.toISOString(), to: to.toISOString(), limit: 1000 });
   const [query, setQuery] = useState("");
   const [payFilter, setPayFilter] = useState<"all" | Sale["payment_method"]>("all");
   const [selected, setSelected] = useState<any | null>(null);
@@ -38,7 +44,14 @@ function VentesPage() {
   return (
     <div>
       <PageHeader title="Ventes" subtitle={`${filtered.length} transaction${filtered.length > 1 ? "s" : ""}`}
-        actions={<button className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Download className="h-4 w-4" /> Exporter</button>}
+        actions={
+          <>
+            <PeriodSelector period={period} onChange={setPeriod}
+              customFrom={customFrom} customTo={customTo}
+              onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} />
+            <button className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Download className="h-4 w-4" /> Exporter</button>
+          </>
+        }
       />
 
       <div className="space-y-4 p-5 sm:p-8">

@@ -3,47 +3,16 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp, Wallet, ShoppingBag, Receipt, AlertTriangle,
-  Package, Users, Calendar, ArrowRight, Banknote, Boxes,
+  Package, Users, ArrowRight, Banknote, Boxes,
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import { useSales, useProducts, useCustomers, useExpenses, formatXOF } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
 });
-
-type Period = "today" | "yesterday" | "week" | "last_week" | "month" | "last_month" | "year" | "custom";
-
-const PERIOD_LABEL: Record<Period, string> = {
-  today: "Aujourd'hui", yesterday: "Hier", week: "Cette semaine", last_week: "Semaine dernière",
-  month: "Ce mois", last_month: "Mois dernier", year: "Cette année", custom: "Personnalisé",
-};
-
-function periodRange(period: Period, customFrom?: string, customTo?: string): { from: Date; to: Date } {
-  const now = new Date();
-  const start = new Date(now); start.setHours(0, 0, 0, 0);
-  const end = new Date(now); end.setHours(23, 59, 59, 999);
-  const d = (base: Date, days: number) => { const x = new Date(base); x.setDate(x.getDate() + days); return x; };
-  switch (period) {
-    case "today": return { from: start, to: end };
-    case "yesterday": return { from: d(start, -1), to: d(end, -1) };
-    case "week": { const from = d(start, -((start.getDay() + 6) % 7)); return { from, to: end }; }
-    case "last_week": { const from = d(start, -((start.getDay() + 6) % 7) - 7); return { from, to: d(from, 6) }; }
-    case "month": return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: end };
-    case "last_month": {
-      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-      return { from, to };
-    }
-    case "year": return { from: new Date(now.getFullYear(), 0, 1), to: end };
-    case "custom": {
-      const from = customFrom ? new Date(customFrom) : start;
-      const to = customTo ? new Date(customTo + "T23:59:59") : end;
-      return { from, to };
-    }
-  }
-}
 
 function DashboardPage() {
   const [period, setPeriod] = useState<Period>("today");
@@ -142,37 +111,13 @@ function DashboardPage() {
     <div>
       <PageHeader title="Tableau de bord" subtitle={customers.length ? `${customers.length} clients · ${products.length} produits` : "Vue d'ensemble de votre boutique"}
         actions={
-          <div className="flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 sm:w-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {(Object.keys(PERIOD_LABEL) as Period[]).filter((p) => p !== "custom").map((p) => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={cn("shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                  period === p ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-                {PERIOD_LABEL[p]}
-              </button>
-            ))}
-            <button onClick={() => setPeriod("custom")}
-              className={cn("flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium",
-                period === "custom" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-              <Calendar className="h-3.5 w-3.5" /> Personnalisé
-            </button>
-          </div>
+          <PeriodSelector period={period} onChange={setPeriod}
+            customFrom={customFrom} customTo={customTo}
+            onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} />
         }
       />
 
       <div className="space-y-6 p-5 sm:p-8">
-        {period === "custom" && (
-          <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Du</label>
-              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="rounded-lg border border-border bg-background px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Au</label>
-              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="rounded-lg border border-border bg-background px-3 py-2 text-sm" />
-            </div>
-          </div>
-        )}
-
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <StatCard label="Chiffre d'affaires" value={formatXOF(revenue)} icon={<Wallet className="h-5 w-5" />}
             trend={{ value: `${diff >= 0 ? "+" : ""}${diff}% vs période précédente`, positive: diff >= 0 }} accent="primary" />
