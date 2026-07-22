@@ -78,6 +78,7 @@ function AppLayout() {
               <div className="ml-auto flex items-center gap-2">
                 <ThemeToggle />
                 <NotificationsBell />
+                <AiBubble />
                 <UserMenu />
               </div>
             </header>
@@ -88,7 +89,6 @@ function AppLayout() {
           </main>
         </div>
 
-        <AiBubble />
         <div className="pos-hide-in-fullscreen contents">
           <BottomNav />
         </div>

@@ -131,16 +131,16 @@ function DashboardPage() {
     <div>
       <PageHeader title="Tableau de bord" subtitle={customers.length ? `${customers.length} clients · ${products.length} produits` : "Vue d'ensemble de votre boutique"}
         actions={
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-card p-1">
+          <div className="flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 sm:w-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(Object.keys(PERIOD_LABEL) as Period[]).filter((p) => p !== "custom").map((p) => (
               <button key={p} onClick={() => setPeriod(p)}
-                className={cn("rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                className={cn("shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
                   period === p ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
                 {PERIOD_LABEL[p]}
               </button>
             ))}
             <button onClick={() => setPeriod("custom")}
-              className={cn("flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium",
+              className={cn("flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium",
                 period === "custom" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
               <Calendar className="h-3.5 w-3.5" /> Personnalisé
             </button>
