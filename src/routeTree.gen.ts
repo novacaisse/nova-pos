@@ -15,6 +15,7 @@ import { Route as RejoindreRouteImport } from './routes/rejoindre'
 import { Route as InscriptionRouteImport } from './routes/inscription'
 import { Route as ConnexionRouteImport } from './routes/connexion'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as AdminsRouteImport } from './routes/admins'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
@@ -70,6 +71,11 @@ const ConnexionRoute = ConnexionRouteImport.update({
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminsRoute = AdminsRouteImport.update({
+  id: '/admins',
+  path: '/admins',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -207,6 +213,7 @@ const AdminAbonnementsRoute = AdminAbonnementsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/admins': typeof AdminsRoute
   '/app': typeof AppRouteWithChildren
   '/connexion': typeof ConnexionRoute
   '/inscription': typeof InscriptionRoute
@@ -240,6 +247,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admins': typeof AdminsRoute
   '/connexion': typeof ConnexionRoute
   '/inscription': typeof InscriptionRoute
   '/rejoindre': typeof RejoindreRoute
@@ -274,6 +282,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/admins': typeof AdminsRoute
   '/app': typeof AppRouteWithChildren
   '/connexion': typeof ConnexionRoute
   '/inscription': typeof InscriptionRoute
@@ -310,6 +319,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/admins'
     | '/app'
     | '/connexion'
     | '/inscription'
@@ -343,6 +353,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admins'
     | '/connexion'
     | '/inscription'
     | '/rejoindre'
@@ -376,6 +387,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/admins'
     | '/app'
     | '/connexion'
     | '/inscription'
@@ -411,6 +423,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
+  AdminsRoute: typeof AdminsRoute
   AppRoute: typeof AppRouteWithChildren
   ConnexionRoute: typeof ConnexionRoute
   InscriptionRoute: typeof InscriptionRoute
@@ -461,6 +474,13 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admins': {
+      id: '/admins'
+      path: '/admins'
+      fullPath: '/admins'
+      preLoaderRoute: typeof AdminsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -725,6 +745,7 @@ const SouscriptionRouteWithChildren = SouscriptionRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
+  AdminsRoute: AdminsRoute,
   AppRoute: AppRouteWithChildren,
   ConnexionRoute: ConnexionRoute,
   InscriptionRoute: InscriptionRoute,

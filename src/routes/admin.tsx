@@ -19,7 +19,7 @@ function AdminLayout() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user) { navigate({ to: "/connexion" }); return; }
+    if (!user) { navigate({ to: "/admins" }); return; }
     if (!adminLoading && !isSuperAdmin) navigate({ to: "/app" });
   }, [authLoading, adminLoading, user, isSuperAdmin, navigate]);
 
