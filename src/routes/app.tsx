@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect } from "react";
-import { Search, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Search, Loader2, Store, RotateCw, Mail, LogOut } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ShopSelector } from "@/components/app/ShopSelector";
@@ -22,8 +23,8 @@ export const Route = createFileRoute("/app")({
 function AppLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { user, loading } = useAuth();
-  const { currentShop, loading: shopLoading } = useShop();
+  const { user, loading, signOut } = useAuth();
+  const { shops, currentShop, loading: shopLoading, refresh } = useShop();
 
   // Auth guard côté client (SPA)
   useEffect(() => {
@@ -46,6 +47,14 @@ function AppLayout() {
     );
   }
 
+  // Garde-fou : un utilisateur authentifié sans aucune boutique (ex. inscription
+  // interrompue avant la création de shops/shop_members, ou compte créé via
+  // /rejoindre en attente d'être ajouté à une équipe) ne doit jamais atterrir
+  // silencieusement sur des écrans vides/désactivés — un état clair vaut mieux
+  // qu'un silence déroutant.
+  if (!shopLoading && shops.length === 0) {
+    return <NoShopScreen onRetry={refresh} onSignOut={signOut} />;
+  }
 
   return (
     <SidebarProvider defaultOpen>
@@ -86,5 +95,51 @@ function AppLayout() {
         <PwaInstallBanner />
       </div>
     </SidebarProvider>
+  );
+}
+
+function NoShopScreen({ onRetry, onSignOut }: { onRetry: () => Promise<void>; onSignOut: () => Promise<void> }) {
+  const navigate = useNavigate();
+  const [retrying, setRetrying] = useState(false);
+
+  const retry = async () => {
+    setRetrying(true);
+    await onRetry();
+    setRetrying(false);
+  };
+
+  const logout = async () => {
+    await onSignOut();
+    navigate({ to: "/connexion" });
+  };
+
+  return (
+    <div className="grid min-h-screen place-items-center bg-background px-5">
+      <div className="max-w-md text-center">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
+          <Store className="h-7 w-7" />
+        </div>
+        <h1 className="mt-4 font-display text-xl font-bold">Aucune boutique associée à votre compte</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Deux cas possibles : si vous venez de créer votre compte pour <b>rejoindre une équipe existante</b>,
+          c'est normal — communiquez votre email au propriétaire ou gérant de la boutique, il doit vous ajouter
+          depuis l'écran Équipe. Si vous venez de <b>créer votre propre boutique</b> et vous attendiez à la
+          retrouver ici, quelque chose s'est mal passé pendant l'inscription.
+        </p>
+
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <button onClick={retry} disabled={retrying}
+            className="flex h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground shadow-elegant hover:opacity-90 disabled:opacity-60">
+            <RotateCw className={cn("h-4 w-4", retrying && "animate-spin")} /> Réessayer
+          </button>
+          <a href="mailto:contact@novacaisse.bj" className="flex h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl border border-border text-sm font-semibold hover:bg-muted">
+            <Mail className="h-4 w-4" /> Contacter le support
+          </a>
+          <button onClick={logout} className="flex h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl text-sm font-semibold text-muted-foreground hover:text-foreground">
+            <LogOut className="h-4 w-4" /> Se déconnecter
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
