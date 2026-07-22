@@ -1,10 +1,11 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Search, Loader2, Store, RotateCw, Mail, LogOut } from "lucide-react";
+import { Loader2, Store, RotateCw, Mail, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ShopSelector } from "@/components/app/ShopSelector";
+import { GlobalSearch } from "@/components/app/GlobalSearch";
 import { AiBubble } from "@/components/app/AiBubble";
 import { ThemeToggle } from "@/components/app/ThemeToggle";
 import { NotificationsBell } from "@/components/app/NotificationsBell";
@@ -70,10 +71,8 @@ function AppLayout() {
             <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-background/80 px-3 backdrop-blur-md sm:px-5">
               <SidebarTrigger className="hidden h-10 w-10 rounded-xl md:inline-flex" />
               <div className="hidden sm:block"><ShopSelector /></div>
-              <div className="relative ml-2 hidden max-w-md flex-1 md:block">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input placeholder="Rechercher produit, client, ticket…"
-                  className="w-full rounded-xl border border-border bg-muted/50 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-background" />
+              <div className="ml-2 hidden max-w-md flex-1 md:block">
+                <GlobalSearch />
               </div>
               <div className="ml-auto flex items-center gap-2">
                 <ThemeToggle />

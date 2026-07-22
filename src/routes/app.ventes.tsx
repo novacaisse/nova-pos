@@ -8,6 +8,9 @@ import { useSales, formatXOF, type Sale } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/ventes")({
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+  }),
   component: VentesPage,
 });
 
@@ -19,13 +22,16 @@ const PAY_ICON: Record<Sale["payment_method"], typeof Banknote> = {
 };
 
 function VentesPage() {
-  const [period, setPeriod] = useState<Period>("month");
+  const { q } = Route.useSearch();
+  // Un lien de recherche global doit pouvoir retrouver une vente même hors
+  // de la période par défaut : on part large ("Cette année") dans ce cas.
+  const [period, setPeriod] = useState<Period>(q ? "year" : "month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const { from, to } = periodRange(period, customFrom, customTo);
 
   const { data: sales = [], isLoading } = useSales({ from: from.toISOString(), to: to.toISOString(), limit: 1000 });
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(q ?? "");
   const [payFilter, setPayFilter] = useState<"all" | Sale["payment_method"]>("all");
   const [selected, setSelected] = useState<any | null>(null);
 

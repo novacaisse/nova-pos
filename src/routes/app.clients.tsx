@@ -10,11 +10,15 @@ import {
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/clients")({
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+  }),
   component: ClientsPage,
 });
 
 function ClientsPage() {
-  const [query, setQuery] = useState("");
+  const { q } = Route.useSearch();
+  const [query, setQuery] = useState(q ?? "");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [edit, setEdit] = useState<Partial<Customer> | null>(null);
   const [del, setDel] = useState<Customer | null>(null);

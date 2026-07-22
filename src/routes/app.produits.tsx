@@ -11,10 +11,14 @@ import {
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/produits")({
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+  }),
   component: ProduitsPage,
 });
 
 function ProduitsPage() {
+  const { q } = Route.useSearch();
   const { data: products = [], isLoading } = useProducts();
   const { data: cats = [] } = useCategories();
   const upsert = useUpsertProduct();
@@ -22,7 +26,7 @@ function ProduitsPage() {
   const { data: myRole } = useMyRole();
   const canManage = myRole === "owner" || myRole === "manager" || myRole === "stock"; // cashier/accountant : lecture seule
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(q ?? "");
   const [cat, setCat] = useState<"all" | string>("all");
   const [view, setView] = useState<"grid" | "list">("list");
   const [edit, setEdit] = useState<Partial<ProductWithStock> | null>(null);
