@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Plus, Truck, Phone, Mail, FileText, PackageCheck, Edit3, Trash2, X, Save } from "lucide-react";
+import { Plus, Truck, Phone, Mail, FileText, PackageCheck, Edit3, Trash2, X, Save, Search } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useSuppliers, useUpsertSupplier, useDeleteSupplier, useMyRole, formatXOF, type Supplier } from "@/lib/data/hooks";
 import { PURCHASE_ORDERS, type PurchaseOrder } from "@/lib/mock/suppliers";
@@ -23,6 +23,7 @@ function FournisseursPage() {
   const [tab, setTab] = useState<"suppliers" | "orders">("suppliers");
   const [edit, setEdit] = useState<Partial<Supplier> | null>(null);
   const [del, setDel] = useState<Supplier | null>(null);
+  const [query, setQuery] = useState("");
   const { data: suppliers = [], isLoading } = useSuppliers();
   const upsert = useUpsertSupplier();
   const remove = useDeleteSupplier();
@@ -30,6 +31,15 @@ function FournisseursPage() {
   const canManage = myRole === "owner" || myRole === "manager"; // stock/accountant : lecture seule
 
   const pending = PURCHASE_ORDERS.filter((p) => p.status === "envoyée" || p.status === "partielle").length;
+
+  const filteredSuppliers = suppliers.filter((s) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return s.name.toLowerCase().includes(q)
+      || (s.contact ?? "").toLowerCase().includes(q)
+      || (s.phone ?? "").toLowerCase().includes(q)
+      || (s.email ?? "").toLowerCase().includes(q);
+  });
 
   return (
     <div>
@@ -72,8 +82,17 @@ function FournisseursPage() {
               )}
             </div>
           ) : (
+            <>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un fournisseur (nom, contact, téléphone, email)…"
+                className="w-full rounded-xl border border-border bg-card py-2.5 pl-9 pr-3 text-sm outline-none focus:border-primary" />
+            </div>
+            {filteredSuppliers.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">Aucun fournisseur ne correspond.</div>
+            ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {suppliers.map((s) => (
+              {filteredSuppliers.map((s) => (
                 <div key={s.id} className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-elegant">
                   <div className="flex items-start gap-3">
                     <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground">
@@ -98,6 +117,8 @@ function FournisseursPage() {
                 </div>
               ))}
             </div>
+            )}
+            </>
           )
         ) : (
           <div className="overflow-hidden rounded-2xl border border-border bg-card">

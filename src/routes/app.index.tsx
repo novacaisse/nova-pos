@@ -3,10 +3,10 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp, Wallet, ShoppingBag, Receipt, AlertTriangle,
-  Package, Users, Calendar, ArrowRight,
+  Package, Users, Calendar, ArrowRight, Banknote, Boxes,
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useSales, useProducts, useCustomers, formatXOF } from "@/lib/data/hooks";
+import { useSales, useProducts, useCustomers, useExpenses, formatXOF } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/")({
@@ -53,6 +53,7 @@ function DashboardPage() {
   const { data: sales = [] } = useSales(500);
   const { data: products = [] } = useProducts();
   const { data: customers = [] } = useCustomers();
+  const { data: expenses = [] } = useExpenses();
 
   const { from, to } = periodRange(period, customFrom, customTo);
   const prevRange = useMemo(() => {
@@ -113,6 +114,16 @@ function DashboardPage() {
 
   const lowStock = products.filter((p) => p.stock <= p.low_stock_threshold).sort((a, b) => a.stock - b.stock).slice(0, 6);
 
+  const expensesInRange = expenses.filter((e) => {
+    const t = new Date(e.paid_at).getTime();
+    return t >= from.getTime() && t <= to.getTime();
+  });
+  const expensesTotal = expensesInRange.reduce((s, e) => s + Number(e.amount || 0), 0);
+
+  // Valeur du stock : snapshot de l'inventaire actuel (pas limité à la
+  // période sélectionnée), même calcul que Stock (quantité × coût/prix).
+  const stockValue = products.reduce((s, p) => s + p.stock * Number(p.cost || p.price || 0), 0);
+
   const chartData = useMemo(() => {
     const points = 12;
     const span = to.getTime() - from.getTime();
@@ -162,12 +173,14 @@ function DashboardPage() {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <StatCard label="Chiffre d'affaires" value={formatXOF(revenue)} icon={<Wallet className="h-5 w-5" />}
             trend={{ value: `${diff >= 0 ? "+" : ""}${diff}% vs période précédente`, positive: diff >= 0 }} accent="primary" />
           <StatCard label="Bénéfice estimé" value={formatXOF(Math.round(profit))} hint="Basé sur coût produit" icon={<TrendingUp className="h-5 w-5" />} accent="success" />
           <StatCard label="Panier moyen" value={formatXOF(avg)} icon={<ShoppingBag className="h-5 w-5" />} accent="accent" />
           <StatCard label="Nombre de ventes" value={String(count)} icon={<Receipt className="h-5 w-5" />} />
+          <StatCard label="Dépenses" value={formatXOF(expensesTotal)} hint={`${expensesInRange.length} sur la période`} icon={<Banknote className="h-5 w-5" />} accent="destructive" />
+          <StatCard label="Valeur du stock" value={formatXOF(Math.round(stockValue))} hint="Inventaire actuel" icon={<Boxes className="h-5 w-5" />} accent="accent" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">

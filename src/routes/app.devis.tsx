@@ -186,6 +186,7 @@ function QuoteEditor({ initial, onClose, onSave }: {
     setSaving(true);
     await onSave({
       id: initial?.id,
+      reference: initial?.reference,
       customer_id: customerId,
       valid_until: validUntil,
       status: initial?.status,

@@ -34,6 +34,7 @@ function StockPage() {
   const canManage = myRole === "owner" || myRole === "manager" || myRole === "stock";
 
   const [query, setQuery] = useState("");
+  const [productQuery, setProductQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "in" | "out" | "adjustment" | "transfer" | "sale" | "return">("all");
   const [tab, setTab] = useState<"moves" | "products">("moves");
   const [showAdjust, setShowAdjust] = useState(false);
@@ -49,6 +50,15 @@ function StockPage() {
   }), [moves, typeFilter, query]);
 
   const outOfStock = products.filter((p) => p.stock < p.low_stock_threshold).sort((a, b) => a.stock - b.stock);
+
+  const filteredProducts = useMemo(() => {
+    const s = productQuery.trim().toLowerCase();
+    if (!s) return products;
+    return products.filter((p) =>
+      p.name.toLowerCase().includes(s)
+      || (p.sku ?? "").toLowerCase().includes(s)
+      || (p.barcode ?? "").toLowerCase().includes(s));
+  }, [products, productQuery]);
 
   return (
     <div>
@@ -141,9 +151,17 @@ function StockPage() {
                 </div>
               </>
             ) : (
-              <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+              <div className="space-y-3">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input value={productQuery} onChange={(e) => setProductQuery(e.target.value)} placeholder="Rechercher un produit (nom, SKU, code-barres)…"
+                    className="w-full rounded-xl border border-border bg-card py-2.5 pl-9 pr-3 text-sm outline-none focus:border-primary" />
+                </div>
+                <div className="overflow-x-auto rounded-2xl border border-border bg-card">
                 {products.length === 0 ? (
                   <div className="p-8 text-center text-sm text-muted-foreground">Ajoutez d'abord des produits.</div>
+                ) : filteredProducts.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">Aucun produit ne correspond.</div>
                 ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40">
@@ -154,7 +172,7 @@ function StockPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {products.map((p) => {
+                    {filteredProducts.map((p) => {
                       const low = p.stock < p.low_stock_threshold;
                       return (
                         <tr key={p.id} className="border-t border-border/60 hover:bg-muted/40">
@@ -179,6 +197,7 @@ function StockPage() {
                   </tbody>
                 </table>
                 )}
+                </div>
               </div>
             )}
           </div>
@@ -247,12 +266,12 @@ function AdjustDialog({ products, onClose, onSave }: { products: ProductWithStoc
   const newStock = Math.max(0, p.stock + delta);
 
   const submit = async () => {
-    if (!qty || !reason.trim()) return;
+    if (!qty) return;
     await onSave({
       product_id: p.id,
       type: KIND_META[kind].dbType,
       quantity: Math.abs(qty),
-      reason: `${KIND_META[kind].label} — ${reason}`,
+      reason: reason.trim() ? `${KIND_META[kind].label} — ${reason.trim()}` : KIND_META[kind].label,
     });
   };
 
@@ -279,7 +298,7 @@ function AdjustDialog({ products, onClose, onSave }: { products: ProductWithStoc
         <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Quantité</div>
           <input type="number" value={qty} onChange={(e) => setQty(Number(e.target.value) || 0)} className={inp} />
         </label>
-        <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Motif</div>
+        <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Motif (optionnel)</div>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ex : Inventaire mensuel" className={inp} />
         </label>
         <div className="rounded-xl bg-muted p-3 text-xs">
@@ -287,7 +306,7 @@ function AdjustDialog({ products, onClose, onSave }: { products: ProductWithStoc
         </div>
         <div className="flex gap-2">
           <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
-          <button onClick={submit} disabled={!qty || !reason.trim()} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+          <button onClick={submit} disabled={!qty} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
             <Save className="h-4 w-4" /> Enregistrer
           </button>
         </div>

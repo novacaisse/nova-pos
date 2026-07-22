@@ -27,7 +27,7 @@ function ConnexionPage() {
       setError(error);
       return;
     }
-    navigate({ to: "/app/caisse" });
+    navigate({ to: "/app" });
   };
 
   return (

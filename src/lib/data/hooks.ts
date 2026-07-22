@@ -768,6 +768,7 @@ export type ShopSettingsData = {
   phone?: string; email?: string; address?: string;
   rccm?: string; ifu?: string; facebook?: string; instagram?: string;
   ticket?: TicketConfig;
+  expense_categories?: string[];
 };
 export type ShopSettings = {
   shop_id: string;

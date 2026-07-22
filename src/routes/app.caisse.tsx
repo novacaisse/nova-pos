@@ -353,7 +353,9 @@ function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () 
         <div className="truncate text-sm font-semibold">{product.name}</div>
         <div className="mt-0.5 flex items-center justify-between">
           <span className="tabular text-sm font-bold text-primary">{formatXOF(Number(product.price))}</span>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{product.sku ?? ""}</span>
+          <span className={cn("tabular text-[10px] font-bold uppercase tracking-wider", low ? "text-warning" : "text-muted-foreground")}>
+            Stock {product.stock}
+          </span>
         </div>
       </div>
     </motion.button>
