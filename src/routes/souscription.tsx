@@ -1,46 +1,105 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, Check, Loader2, Smartphone, ArrowRight, CircleCheck } from "lucide-react";
-import { PLANS, type Plan } from "@/lib/mock/subscription";
+import { Zap, Check, Loader2, Smartphone, ArrowRight, AlertTriangle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth/AuthProvider";
+import { useShop } from "@/lib/auth/ShopProvider";
+import { useProfile } from "@/lib/data/hooks";
+import { usePlans } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
+type SouscriptionSearch = { plan?: string };
+
 export const Route = createFileRoute("/souscription")({
   head: () => ({ meta: [{ title: "Souscription — NovaCaisse" }] }),
+  validateSearch: (search: Record<string, unknown>): SouscriptionSearch => ({
+    plan: typeof search.plan === "string" ? search.plan : undefined,
+  }),
   component: SouscriptionPage,
 });
 
-type Period = "mensuel" | "annuel" | "lifetime";
-type Op = "Orange Money" | "MTN MoMo" | "Moov Money" | "Wave";
-type Step = "recap" | "paiement" | "confirmation" | "succes";
-
-const OPERATORS: { key: Op; color: string }[] = [
-  { key: "Orange Money", color: "#FF7900" },
-  { key: "MTN MoMo", color: "#FFCC00" },
-  { key: "Moov Money", color: "#0068B3" },
-  { key: "Wave", color: "#1DC8F6" },
-];
+type Period = "mensuel" | "annuel";
+type Step = "recap" | "paiement";
 
 function SouscriptionPage() {
   const navigate = useNavigate();
+  const { plan: planFromUrl } = Route.useSearch();
+  const { user, loading: authLoading } = useAuth();
+  const { currentShop, loading: shopLoading } = useShop();
+  const { data: profile } = useProfile();
+  const { data: plans = [], isLoading: plansLoading } = usePlans();
+
   const [step, setStep] = useState<Step>("recap");
-  const [planId, setPlanId] = useState<Plan["id"]>("pro");
+  const [planId, setPlanId] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>("annuel");
-  const [operator, setOperator] = useState<Op>("Orange Money");
-  const [phone, setPhone] = useState("+229 ");
+  const [phone, setPhone] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const plan = PLANS.find((p) => p.id === planId)!;
-  const total =
-    period === "mensuel" ? plan.price_month :
-    period === "annuel" ? Math.round(plan.price_month * 12 * 0.8) :
-    plan.price_month * 24;
+  useEffect(() => {
+    if (!authLoading && !user) navigate({ to: "/connexion" });
+  }, [authLoading, user, navigate]);
 
-  const launchPayment = () => {
-    setStep("confirmation");
-    setTimeout(() => setStep("succes"), 2400);
-    setTimeout(() => navigate({ to: "/app/caisse" }), 4400);
+  useEffect(() => {
+    if (profile?.full_name) setFullName(profile.full_name);
+    if (profile?.phone) setPhone(profile.phone);
+  }, [profile]);
+
+  useEffect(() => {
+    if (planId || plans.length === 0) return;
+    const preselected = planFromUrl && plans.find((p) => p.id === planFromUrl);
+    setPlanId(preselected ? preselected.id : (plans.find((p) => p.is_recommended) ?? plans[0]).id);
+  }, [plans, planFromUrl, planId]);
+
+  const plan = useMemo(() => plans.find((p) => p.id === planId) ?? null, [plans, planId]);
+  const total = plan ? (period === "mensuel" ? plan.price_month : plan.price_year) : 0;
+
+  const launchPayment = async () => {
+    if (!currentShop || !plan || !phone.trim() || !fullName.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke("create-subscription-payment", {
+        body: {
+          shop_id: currentShop.id,
+          plan_id: plan.id,
+          period: period === "mensuel" ? "month" : "year",
+          phone: phone.trim(),
+          full_name: fullName.trim(),
+        },
+      });
+      if (fnError) throw fnError;
+      const url = (data as { url?: string; error?: string } | null)?.url;
+      if (!url) throw new Error((data as { error?: string } | null)?.error ?? "Réponse invalide du serveur de paiement.");
+      window.location.href = url;
+    } catch (e: any) {
+      setError(e?.message ?? "Impossible de démarrer le paiement. Réessayez.");
+      setSubmitting(false);
+    }
   };
+
+  if (authLoading || shopLoading || plansLoading || !plan) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!currentShop) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background px-5 text-center">
+        <div>
+          <AlertTriangle className="mx-auto h-10 w-10 text-destructive" />
+          <p className="mt-3 text-sm text-muted-foreground">Aucune boutique associée à votre compte.</p>
+          <Link to="/app" className="mt-4 inline-block text-sm font-semibold text-primary hover:underline">Retour à l'application</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -58,12 +117,12 @@ function SouscriptionPage() {
               <motion.div key="recap" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
                 className="rounded-3xl border border-border bg-card p-7 shadow-elegant">
                 <h1 className="font-display text-2xl font-black">Récapitulatif</h1>
-                <p className="mt-1 text-sm text-muted-foreground">Confirmez votre formule et la périodicité.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Confirmez votre formule et la périodicité pour {currentShop.name}.</p>
 
                 <div className="mt-5">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Formule</div>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    {PLANS.map((p) => (
+                    {plans.map((p) => (
                       <button key={p.id} onClick={() => setPlanId(p.id)}
                         className={cn("rounded-2xl border p-4 text-left transition-all",
                           planId === p.id ? "border-primary bg-primary/5 shadow-elegant" : "border-border hover:bg-muted")}>
@@ -76,13 +135,12 @@ function SouscriptionPage() {
 
                 <div className="mt-5">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Périodicité</div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {(["mensuel", "annuel", "lifetime"] as const).map((p) => (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(["mensuel", "annuel"] as const).map((p) => (
                       <button key={p} onClick={() => setPeriod(p)}
                         className={cn("rounded-xl border p-3 text-sm font-semibold capitalize transition-colors",
                           period === p ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted")}>
                         {p}
-                        {p === "annuel" && <span className="ml-1 text-[10px] opacity-80">-20%</span>}
                       </button>
                     ))}
                   </div>
@@ -114,28 +172,21 @@ function SouscriptionPage() {
                   Paiement sécurisé via MoneyFusion
                 </div>
                 <h1 className="font-display text-2xl font-black">Payer par Mobile Money</h1>
-
-                <div className="mt-5">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Opérateur</div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {OPERATORS.map((o) => (
-                      <button key={o.key} onClick={() => setOperator(o.key)}
-                        className={cn("flex flex-col items-center gap-2 rounded-2xl border p-3 transition-all",
-                          operator === o.key ? "border-primary bg-primary/5 shadow-elegant" : "border-border hover:bg-muted")}>
-                        <div className="grid h-10 w-10 place-items-center rounded-xl text-xs font-bold text-white" style={{ backgroundColor: o.color }}>
-                          {o.key.split(" ")[0].slice(0, 3).toUpperCase()}
-                        </div>
-                        <span className="text-[11px] font-semibold text-center leading-tight">{o.key}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Vous choisirez votre opérateur (Orange Money, MTN MoMo, Moov Money…) sur la page sécurisée MoneyFusion suivante.
+                </p>
 
                 <label className="mt-5 block">
-                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Numéro de téléphone</span>
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom complet</span>
+                  <input value={fullName} onChange={(e) => setFullName(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
+                </label>
+
+                <label className="mt-4 block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Numéro de téléphone Mobile Money</span>
                   <div className="relative">
                     <Smartphone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input value={phone} onChange={(e) => setPhone(e.target.value)}
+                    <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+229 XX XX XX XX"
                       className="w-full rounded-xl border border-border bg-background py-2.5 pl-9 pr-3 text-sm outline-none focus:border-primary" />
                   </div>
                 </label>
@@ -147,38 +198,20 @@ function SouscriptionPage() {
                   </div>
                 </div>
 
-                <button onClick={launchPayment}
-                  className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary to-primary-glow font-display font-bold text-primary-foreground shadow-elegant hover:opacity-90">
-                  Payer {formatXOF(total)}
+                {error && (
+                  <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
+                  </div>
+                )}
+
+                <button onClick={launchPayment} disabled={submitting || !phone.trim() || !fullName.trim()}
+                  className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary to-primary-glow font-display font-bold text-primary-foreground shadow-elegant hover:opacity-90 disabled:opacity-50">
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  {submitting ? "Redirection…" : `Payer ${formatXOF(total)}`}
                 </button>
-                <button onClick={() => setStep("recap")} className="mt-2 w-full text-xs text-muted-foreground hover:text-foreground">Modifier la formule</button>
-              </motion.div>
-            )}
-
-            {step === "confirmation" && (
-              <motion.div key="conf" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="rounded-3xl border border-border bg-card p-10 text-center shadow-elegant">
-                <Loader2 className="mx-auto h-14 w-14 animate-spin text-primary" />
-                <h2 className="mt-5 font-display text-xl font-bold">En attente de confirmation…</h2>
-                <p className="mt-2 text-sm text-muted-foreground">Validez la transaction sur votre téléphone {operator}.</p>
-                <div className="mx-auto mt-6 max-w-sm rounded-xl bg-muted/60 p-4 text-xs text-muted-foreground">
-                  <div className="tabular">Réf : MF-{Math.random().toString(36).slice(2, 8).toUpperCase()}</div>
-                </div>
-              </motion.div>
-            )}
-
-            {step === "succes" && (
-              <motion.div key="ok" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                className="rounded-3xl border border-border bg-card p-10 text-center shadow-elegant">
-                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", damping: 12 }}
-                  className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-success/15 text-success">
-                  <CircleCheck className="h-12 w-12" />
-                </motion.div>
-                <h2 className="mt-5 font-display text-2xl font-black">Paiement confirmé !</h2>
-                <p className="mt-2 text-sm text-muted-foreground">Bienvenue chez NovaCaisse. Votre boutique est prête.</p>
-                <div className="mt-6 flex items-center justify-center gap-1 text-xs text-muted-foreground">
-                  <Check className="h-3.5 w-3.5" /> Redirection vers votre caisse…
-                </div>
+                <button onClick={() => setStep("recap")} disabled={submitting} className="mt-2 w-full text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
+                  Modifier la formule
+                </button>
               </motion.div>
             )}
           </AnimatePresence>

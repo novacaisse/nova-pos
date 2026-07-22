@@ -613,6 +613,24 @@ export function useSubscriptionPayments(limit = 50) {
   });
 }
 
+// Suivi d'un paiement précis (page /souscription/confirmation, retour MoneyFusion).
+// La RLS (has_shop_access) fait déjà office de contrôle d'accès : un id qui
+// n'appartient pas à une boutique de l'utilisateur ne renverra simplement rien.
+// Poll tant que le webhook n'a pas encore tranché (statut "pending").
+export function useSubscriptionPayment(paymentId: string | null) {
+  return useQuery({
+    queryKey: ["subscription_payment", paymentId],
+    enabled: !!paymentId,
+    refetchInterval: (query) => (query.state.data?.status === "pending" ? 3000 : false),
+    queryFn: async (): Promise<SubscriptionPayment | null> => {
+      const { data, error } = await supabase.from("subscription_payments")
+        .select("*").eq("id", paymentId!).maybeSingle();
+      if (error) throw error;
+      return data as SubscriptionPayment | null;
+    },
+  });
+}
+
 // Helper — generate a short unique ticket ref.
 export function newTicketRef(prefix = "T") {
   const d = new Date();

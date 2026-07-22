@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Sparkles, CreditCard, Loader2, Clock } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useShop } from "@/lib/auth/ShopProvider";
@@ -76,7 +76,7 @@ function AbonnementPage() {
         <div>
           <h2 className="mb-1 font-display text-lg font-bold">Changer de formule</h2>
           <p className="mb-3 text-xs text-muted-foreground">
-            Le paiement en ligne (MoneyFusion) arrive bientôt — le changement de formule n'est pas encore disponible.
+            Paiement sécurisé par Mobile Money via MoneyFusion.
           </p>
           <div className="grid gap-3 md:grid-cols-3">
             {plans.map((p) => {
@@ -100,12 +100,16 @@ function AbonnementPage() {
                       <li key={f} className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /> {f}</li>
                     ))}
                   </ul>
-                  <button disabled title="Bientôt disponible" className={cn(
-                    "mt-5 cursor-not-allowed rounded-xl py-2.5 text-sm font-semibold opacity-60",
-                    isCurrent ? "bg-muted text-muted-foreground" : "bg-primary text-primary-foreground",
-                  )}>
-                    {isCurrent ? "Formule actuelle" : "Passer à " + p.name}
-                  </button>
+                  {isCurrent ? (
+                    <button disabled className="mt-5 cursor-not-allowed rounded-xl bg-muted py-2.5 text-sm font-semibold text-muted-foreground opacity-60">
+                      Formule actuelle
+                    </button>
+                  ) : (
+                    <Link to="/souscription" search={{ plan: p.id }}
+                      className="mt-5 flex items-center justify-center rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90">
+                      Passer à {p.name}
+                    </Link>
+                  )}
                 </div>
               );
             })}
