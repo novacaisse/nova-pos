@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { useShop } from "@/lib/auth/ShopProvider";
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
-  type TicketConfig,
+  DEFAULT_TICKET_CONFIG, type TicketConfig,
 } from "@/lib/data/hooks";
 import { SHOPS as MOCK_TRANSFER_SHOPS } from "@/lib/mock/session";
 import { PRODUCTS, formatXOF } from "@/lib/mock/catalog";
@@ -14,12 +14,6 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/parametres")({
   component: ParametresPage,
 });
-
-const DEFAULT_TICKET: TicketConfig = {
-  showLogo: true, showAddress: true, showPhone: true,
-  showFiscal: true, showCashier: true, showQr: false,
-  thanks: "Merci pour votre achat !",
-};
 
 function ParametresPage() {
   const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer">("shop");
@@ -35,7 +29,7 @@ function ParametresPage() {
   const [shopExtra, setShopExtra] = useState({
     phone: "", email: "", address: "", rccm: "", ifu: "", facebook: "", instagram: "",
   });
-  const [ticket, setTicket] = useState<TicketConfig>(DEFAULT_TICKET);
+  const [ticket, setTicket] = useState<TicketConfig>(DEFAULT_TICKET_CONFIG);
   const [footer, setFooter] = useState("");
   const [logoUploading, setLogoUploading] = useState(false);
 

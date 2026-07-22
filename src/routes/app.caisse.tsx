@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   useCategories, useProducts, useCustomers, useUpsertCustomer,
-  useCreateSale, formatXOF, newTicketRef,
+  useCreateSale, useShopSettings, useProfile, DEFAULT_TICKET_CONFIG, formatXOF, newTicketRef,
   type ProductWithStock, type Customer,
 } from "@/lib/data/hooks";
 import { useShop } from "@/lib/auth/ShopProvider";
@@ -614,11 +614,19 @@ function CustomerDialog({ onClose, onPick }: { onClose: () => void; onPick: (c: 
   );
 }
 
+const RECEIPT_PAY_LABEL: Record<PaymentMethod, string> = {
+  cash: "Espèces", mobile_money: "Mobile Money", card: "Carte",
+};
+
 function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => void }) {
   const { currentShop } = useShop();
+  const { data: settings } = useShopSettings();
+  const { data: profile } = useProfile();
   const ref = useRef<HTMLDivElement>(null);
   const shopName = currentShop?.name ?? "Boutique";
-  const thanks = "Merci pour votre achat !";
+  const ticket = { ...DEFAULT_TICKET_CONFIG, ...(settings?.data.ticket ?? {}) };
+  const extra = settings?.data ?? {};
+  const thanks = ticket.thanks || DEFAULT_TICKET_CONFIG.thanks;
 
   const print = () => {
     if (!ref.current) return;
@@ -644,12 +652,19 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
       </div>
       <div ref={ref} className="max-h-[60vh] overflow-y-auto bg-white p-5 text-black">
         <div className="center text-center">
+          {ticket.showLogo && currentShop?.logo_url && (
+            <img src={currentShop.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />
+          )}
           <div className="b text-base font-bold">{shopName}</div>
+          {ticket.showAddress && extra.address && <div className="text-xs">{extra.address}</div>}
+          {ticket.showPhone && extra.phone && <div className="text-xs">{extra.phone}</div>}
+          {ticket.showFiscal && extra.ifu && <div className="text-xs">IFU {extra.ifu}</div>}
         </div>
         <hr className="my-2 border-dashed" />
         <div className="row flex justify-between text-xs"><span>Ticket</span><span className="b font-bold">{receipt.ticket}</span></div>
         <div className="row flex justify-between text-xs"><span>Date</span><span>{receipt.at.toLocaleString("fr-FR")}</span></div>
         {receipt.customer && <div className="row flex justify-between text-xs"><span>Client</span><span>{receipt.customer.name}</span></div>}
+        {ticket.showCashier && profile?.full_name && <div className="row flex justify-between text-xs"><span>Caissier</span><span>{profile.full_name}</span></div>}
         <hr className="my-2 border-dashed" />
         {receipt.lines.map((l) => (
           <div key={l.product_id} className="mb-1 text-xs">
@@ -661,10 +676,12 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
         <div className="row flex justify-between text-xs"><span>Sous-total</span><span>{formatXOF(Math.round(receipt.subtotal))}</span></div>
         {receipt.discountAmt > 0 && <div className="row flex justify-between text-xs"><span>Remise</span><span>-{formatXOF(receipt.discountAmt)}</span></div>}
         <div className="row flex justify-between text-sm b font-bold"><span>TOTAL</span><span>{formatXOF(receipt.total)}</span></div>
+        <div className="row flex justify-between text-xs"><span>Mode de paiement</span><span>{RECEIPT_PAY_LABEL[receipt.method]}</span></div>
         <div className="row flex justify-between text-xs"><span>Payé ({receipt.type})</span><span>{formatXOF(receipt.paidNow)}</span></div>
         {receipt.due > 0 && <div className="row flex justify-between text-xs" style={{ color: "#b91c1c" }}><span>Solde dû</span><span>{formatXOF(receipt.due)}</span></div>}
         <hr className="my-2 border-dashed" />
         <div className="center mt-2 text-center text-xs italic">{thanks}</div>
+        {settings?.receipt_footer && <div className="center text-center text-[10px] text-gray-600">{settings.receipt_footer}</div>}
       </div>
       <div className="flex gap-2 border-t border-border p-3">
         <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Fermer</button>
