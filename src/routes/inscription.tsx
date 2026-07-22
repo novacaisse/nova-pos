@@ -40,10 +40,6 @@ function InscriptionPage() {
 
   const valid = form.shop && form.city && form.phone && form.name && form.email && form.password.length >= 6;
 
-  const slugify = (s: string) =>
-    s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "boutique";
-
   const submit = async () => {
     if (!valid || loading) return;
     setError(null);
@@ -53,7 +49,9 @@ function InscriptionPage() {
     const { error: signErr } = await signUp(form.email.trim(), form.password, form.name);
     if (signErr) { setError(signErr); setLoading(false); return; }
 
-    // 2. Attendre une session (sinon les policies RLS refusent l'insert)
+    // 2. Attendre une session (nécessaire à complete_signup, qui s'appuie
+    // sur auth.uid() — ne devrait plus jamais se produire, confirmation
+    // email désactivée sur ce projet, mais on garde le filet de sécurité).
     const { data: sessData } = await supabase.auth.getSession();
     if (!sessData.session) {
       setError("Compte créé. Vérifiez votre email pour confirmer, puis connectez-vous.");
@@ -61,54 +59,42 @@ function InscriptionPage() {
       setTimeout(() => navigate({ to: "/connexion" }), 2000);
       return;
     }
-    const userId = sessData.session.user.id;
 
-    // 3. Créer la boutique
-    const slug = `${slugify(form.shop)}-${Math.random().toString(36).slice(2, 6)}`;
-    const trialEnds = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: shop, error: shopErr } = await supabase.from("shops").insert({
-      name: form.shop, slug, owner_id: userId,
-      country: form.country, currency: "XOF",
-      plan: "trial", trial_ends_at: trialEnds,
-    }).select().single();
-    if (shopErr || !shop) {
-      setError(shopErr?.message ?? "Impossible de créer la boutique.");
+    // 3. Boutique + appartenance owner + abonnement d'essai + coordonnées,
+    // en une seule transaction atomique côté serveur (migration 009) — soit
+    // tout réussit, soit rien n'est créé, plus de séquence pouvant
+    // s'interrompre à mi-chemin.
+    const { data: shop, error: rpcErr } = await supabase.rpc("complete_signup", {
+      p_shop_name: form.shop,
+      p_country: form.country,
+      p_currency: "XOF",
+      p_shop_phone: form.phone,
+      p_address: form.address || `${form.city}, ${form.country}`,
+      p_owner_phone: form.ownerPhone || null,
+    });
+    if (rpcErr || !shop) {
+      setError(rpcErr?.message ?? "Impossible de créer la boutique.");
       setLoading(false); return;
     }
+    const shopId = (shop as { id: string }).id;
 
-    // 4. Créer l'appartenance owner
-    await supabase.from("shop_members").insert({
-      shop_id: shop.id, user_id: userId, role: "owner",
-    });
-
-    // 4bis. Ligne subscriptions correspondant à l'essai — cohérence des
-    // données dès le départ, avant l'arrivée de l'intégration MoneyFusion.
-    await supabase.from("subscriptions").insert({
-      shop_id: shop.id, plan: "trial", status: "trialing",
-      amount: 0, currency: "XOF", current_period_end: trialEnds,
-    });
-
-    // 5. Logo (Supabase Storage — bucket "shop-logos") + coordonnées de la
-    // boutique (shop_settings.data, pas de colonnes dédiées pour ces champs).
+    // 4. Logo (Supabase Storage — bucket "shop-logos"), au mieux : la
+    // boutique est déjà pleinement fonctionnelle sans logo si ça échoue.
     if (logoFile) {
-      const path = `${shop.id}/logo`;
+      const path = `${shopId}/logo`;
       const { error: upErr } = await supabase.storage.from("shop-logos")
         .upload(path, logoFile, { upsert: true, contentType: logoFile.type });
       if (!upErr) {
         const { data: pub } = supabase.storage.from("shop-logos").getPublicUrl(path);
-        await supabase.from("shops").update({ logo_url: pub.publicUrl }).eq("id", shop.id);
+        await supabase.from("shops").update({ logo_url: pub.publicUrl }).eq("id", shopId);
       }
     }
-    await supabase.from("shop_settings").upsert({
-      shop_id: shop.id,
-      data: { phone: form.phone, address: form.address || `${form.city}, ${form.country}` },
-    });
 
-    // 6. Préférences locales (UI uniquement)
+    // 5. Préférences locales (UI uniquement)
     if (typeof window !== "undefined") {
       localStorage.setItem("novacaisse.showPwaBanner", "1");
       localStorage.removeItem("novacaisse.pwaBannerDismissed");
-      localStorage.setItem("novacaisse.currentShopId", shop.id);
+      localStorage.setItem("novacaisse.currentShopId", shopId);
     }
     navigate({ to: "/app" });
   };
