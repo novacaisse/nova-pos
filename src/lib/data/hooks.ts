@@ -1031,11 +1031,13 @@ export const DEFAULT_TICKET_CONFIG: TicketConfig = {
   showFiscal: true, showCashier: true, showQr: false,
   thanks: "Merci pour votre achat !",
 };
+export type TaxRate = { id: string; name: string; rate: number; active: boolean };
 export type ShopSettingsData = {
   phone?: string; email?: string; address?: string;
   rccm?: string; ifu?: string; facebook?: string; instagram?: string;
   ticket?: TicketConfig;
   expense_categories?: string[];
+  tax_rates?: TaxRate[];
 };
 export type ShopSettings = {
   shop_id: string;
@@ -1083,7 +1085,7 @@ export function useUpdateShop() {
   const shopId = useShopId();
   const { refresh } = useShop();
   return useMutation({
-    mutationFn: async (patch: { name?: string; logo_url?: string | null }) => {
+    mutationFn: async (patch: { name?: string; logo_url?: string | null; currency?: string }) => {
       if (!shopId) throw new Error("Aucune boutique sélectionnée");
       const { data, error } = await supabase.from("shops")
         .update(patch).eq("id", shopId).select().single();
@@ -1091,6 +1093,83 @@ export function useUpdateShop() {
       return data;
     },
     onSuccess: () => refresh(),
+  });
+}
+
+// Ajout d'une boutique supplémentaire par un owner déjà existant (migration
+// 015) — respecte plans.limits.shops côté serveur (RPC security definer),
+// jamais uniquement côté UI.
+export function useCreateAdditionalShop() {
+  const { refresh, setCurrentShopId } = useShop();
+  return useMutation({
+    mutationFn: async (input: { name: string; country: string; currency: string }) => {
+      const { data, error } = await supabase.rpc("create_additional_shop", {
+        p_name: input.name, p_country: input.country, p_currency: input.currency,
+      });
+      if (error) throw error;
+      return data as { id: string };
+    },
+    onSuccess: async (shop) => {
+      await refresh();
+      setCurrentShopId(shop.id);
+    },
+  });
+}
+
+// Transfert de stock entre boutiques d'un même compte : les catalogues
+// produits sont indépendants par boutique (shop_id), donc on fait
+// correspondre les lignes par SKU (ou, à défaut, par nom exact) dans la
+// boutique de destination — pas de création automatique de produit côté
+// destination si aucune correspondance n'est trouvée, on le signale à
+// l'appelant plutôt que de deviner. Crée un mouvement 'transfer' (sortie)
+// dans la boutique source et un mouvement 'in' (entrée) dans la boutique
+// de destination, tous deux traçables via la même référence.
+export function useTransferStock() {
+  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      toShopId: string;
+      lines: { product_id: string; sku: string | null; name: string; quantity: number }[];
+    }): Promise<{ transferred: number; unmatched: string[] }> => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const linesToSend = input.lines.filter((l) => l.quantity > 0);
+      if (linesToSend.length === 0) throw new Error("Aucune quantité à transférer.");
+
+      const { data: destProducts, error: destErr } = await supabase.from("products")
+        .select("id, sku, name").eq("shop_id", input.toShopId) as {
+          data: { id: string; sku: string | null; name: string }[] | null; error: any;
+        };
+      if (destErr) throw destErr;
+
+      const bySku = new Map((destProducts ?? []).filter((p) => p.sku).map((p) => [p.sku!.toLowerCase(), p]));
+      const byName = new Map((destProducts ?? []).map((p) => [p.name.toLowerCase(), p]));
+
+      const reference = newTicketRef("TR");
+      const outRows: any[] = []; const inRows: any[] = []; const unmatched: string[] = [];
+      for (const l of linesToSend) {
+        const match = (l.sku && bySku.get(l.sku.toLowerCase())) ?? byName.get(l.name.toLowerCase());
+        if (!match) { unmatched.push(l.name); continue; }
+        outRows.push({
+          shop_id: shopId, product_id: l.product_id, type: "transfer", quantity: l.quantity,
+          reason: `Transfert sortant (${reference})`, reference, created_by: user?.id,
+        });
+        inRows.push({
+          shop_id: input.toShopId, product_id: match.id, type: "in", quantity: l.quantity,
+          reason: `Transfert entrant (${reference})`, reference, created_by: user?.id,
+        });
+      }
+      if (outRows.length) {
+        const { error: e1 } = await supabase.from("stock_movements").insert(outRows);
+        if (e1) throw e1;
+        const { error: e2 } = await supabase.from("stock_movements").insert(inRows);
+        if (e2) throw e2;
+      }
+      return { transferred: outRows.length, unmatched };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products", shopId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+    },
   });
 }
 

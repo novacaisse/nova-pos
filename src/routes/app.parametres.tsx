@@ -1,15 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { Store, Coins, Receipt, ArrowLeftRight, Save, Plus, Image as ImageIcon, FileText, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Store, Coins, Receipt, ArrowLeftRight, Save, Plus, Image as ImageIcon, FileText, Loader2,
+  X, Trash2, Search, Check,
+} from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useShop } from "@/lib/auth/ShopProvider";
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
-  DEFAULT_TICKET_CONFIG, type TicketConfig,
+  useCreateAdditionalShop, useTransferStock, useProducts,
+  DEFAULT_TICKET_CONFIG, formatXOF, type TicketConfig, type TaxRate, type ProductWithStock,
 } from "@/lib/data/hooks";
-import { SHOPS as MOCK_TRANSFER_SHOPS } from "@/lib/mock/session";
-import { PRODUCTS, formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
+
+const CURRENCIES = ["XOF", "XAF", "EUR", "USD", "GHS", "NGN"];
+const COUNTRIES = ["Bénin", "Togo", "Côte d'Ivoire", "Sénégal", "Burkina Faso", "Mali", "Niger", "Guinée", "Cameroun"];
 
 export const Route = createFileRoute("/app/parametres")({
   component: ParametresPage,
@@ -32,9 +37,14 @@ function ParametresPage() {
   const [ticket, setTicket] = useState<TicketConfig>(DEFAULT_TICKET_CONFIG);
   const [footer, setFooter] = useState("");
   const [logoUploading, setLogoUploading] = useState(false);
+  const [currency, setCurrency] = useState("XOF");
+  const [taxIncluded, setTaxIncluded] = useState(true);
+  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
+  const [showAddShop, setShowAddShop] = useState(false);
+  const createShop = useCreateAdditionalShop();
 
   useEffect(() => {
-    if (currentShop) setName(currentShop.name);
+    if (currentShop) { setName(currentShop.name); setCurrency(currentShop.currency); }
   }, [currentShop]);
 
   useEffect(() => {
@@ -42,6 +52,8 @@ function ParametresPage() {
     setShopExtra((s) => ({ ...s, ...settings.data }));
     setTicket((t) => ({ ...t, ...settings.data.ticket }));
     setFooter(settings.receipt_footer ?? "");
+    setTaxIncluded(settings.tax_included);
+    setTaxRates(settings.data.tax_rates ?? []);
   }, [settings]);
 
   const onLogo = async (file?: File) => {
@@ -74,6 +86,25 @@ function ParametresPage() {
       });
     } catch (e: any) {
       alert("Erreur enregistrement ticket : " + (e?.message ?? "inconnue"));
+    }
+  };
+
+  const saveCurrency = async () => {
+    try {
+      await updateShop.mutateAsync({ currency });
+    } catch (e: any) {
+      alert("Erreur enregistrement devise : " + (e?.message ?? "inconnue"));
+    }
+  };
+
+  const saveTaxes = async () => {
+    try {
+      await updateSettings.mutateAsync({
+        tax_included: taxIncluded,
+        data: { ...(settings?.data ?? {}), tax_rates: taxRates },
+      });
+    } catch (e: any) {
+      alert("Erreur enregistrement taxes : " + (e?.message ?? "inconnue"));
     }
   };
 
@@ -142,7 +173,9 @@ function ParametresPage() {
               <div className="mt-6">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="font-semibold">Boutiques multiples</div>
-                  <button className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-muted"><Plus className="h-3 w-3" /> Ajouter</button>
+                  {myRole === "owner" && (
+                    <button onClick={() => setShowAddShop(true)} className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-muted"><Plus className="h-3 w-3" /> Ajouter</button>
+                  )}
                 </div>
                 <div className="space-y-2">
                   {shops.map((s) => (
@@ -168,34 +201,80 @@ function ParametresPage() {
 
           {tab === "currency" && (
             <div className="rounded-2xl border border-border bg-card p-6">
-              <h2 className="mb-4 font-display text-lg font-bold">Devise et affichage</h2>
+              <h2 className="mb-4 font-display text-lg font-bold">Devise</h2>
+              <p className="mb-4 text-xs text-muted-foreground">
+                Devise utilisée pour l'abonnement et affichée à côté du nom de la boutique dans le sélecteur.
+                Les montants dans l'app restent formatés en F (XOF) partout — changer la devise ici ne reformate pas
+                encore l'affichage des montants dans toute l'application.
+              </p>
               <div className="grid gap-4 sm:grid-cols-2">
-                <SelectField label="Devise principale" options={["FCFA (XOF)", "EUR", "USD", "GHS", "NGN"]} />
-                <SelectField label="Position du symbole" options={["Après (500 F)", "Avant ($ 500)"]} />
-                <SelectField label="Séparateur milliers" options={["Espace (10 000)", "Virgule (10,000)", "Point (10.000)"]} />
-                <Field label="Décimales" defaultValue="0" />
+                <label className="block">
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Devise principale</div>
+                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={!canManage}
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-60">
+                    {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
               </div>
+              {canManage && (
+                <button onClick={saveCurrency} disabled={updateShop.isPending}
+                  className="mt-6 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                  <Save className="h-4 w-4" /> Enregistrer
+                </button>
+              )}
             </div>
           )}
 
           {tab === "taxes" && (
             <div className="rounded-2xl border border-border bg-card p-6">
-              <h2 className="mb-4 font-display text-lg font-bold">Taxes appliquées</h2>
-              <div className="overflow-hidden rounded-xl border border-border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40">
-                    <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <th className="px-3 py-2">Nom</th><th className="px-3 py-2 text-right">Taux</th>
-                      <th className="px-3 py-2">Portée</th><th className="px-3 py-2">Statut</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-t border-border/60"><td className="px-3 py-2 font-medium">TVA standard</td><td className="tabular px-3 py-2 text-right">18%</td><td className="px-3 py-2 text-xs">Tous produits</td><td className="px-3 py-2"><span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-bold text-success">Active</span></td></tr>
-                    <tr className="border-t border-border/60"><td className="px-3 py-2 font-medium">TVA réduite</td><td className="tabular px-3 py-2 text-right">5%</td><td className="px-3 py-2 text-xs">Épicerie</td><td className="px-3 py-2"><span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">Inactive</span></td></tr>
-                  </tbody>
-                </table>
+              <h2 className="mb-4 font-display text-lg font-bold">Taxes</h2>
+
+              <label className="mb-4 flex items-center justify-between rounded-xl border border-border p-3 text-sm">
+                <span>Prix affichés taxes incluses</span>
+                <input type="checkbox" checked={taxIncluded} disabled={!canManage}
+                  onChange={(e) => setTaxIncluded(e.target.checked)} className="h-5 w-5 accent-primary" />
+              </label>
+
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Taux de taxe</div>
+              <div className="space-y-2">
+                {taxRates.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                    Aucun taux défini. Le taux par produit se règle individuellement dans la fiche Produit.
+                  </div>
+                )}
+                {taxRates.map((t, i) => (
+                  <div key={t.id} className="flex items-center gap-2 rounded-xl border border-border p-2">
+                    <input value={t.name} disabled={!canManage}
+                      onChange={(e) => setTaxRates((r) => r.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x))}
+                      placeholder="Nom (ex. TVA standard)"
+                      className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-sm disabled:opacity-60" />
+                    <input type="number" min={0} max={100} value={t.rate} disabled={!canManage}
+                      onChange={(e) => setTaxRates((r) => r.map((x, idx) => idx === i ? { ...x, rate: Number(e.target.value) || 0 } : x))}
+                      className="tabular h-9 w-20 rounded-lg border border-border bg-background px-2 text-right text-sm disabled:opacity-60" />
+                    <span className="text-xs text-muted-foreground">%</span>
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input type="checkbox" checked={t.active} disabled={!canManage}
+                        onChange={(e) => setTaxRates((r) => r.map((x, idx) => idx === i ? { ...x, active: e.target.checked } : x))}
+                        className="h-4 w-4 accent-primary" /> Active
+                    </label>
+                    {canManage && (
+                      <button onClick={() => setTaxRates((r) => r.filter((_, idx) => idx !== i))}
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+                    )}
+                  </div>
+                ))}
               </div>
-              <button className="mt-4 flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Ajouter une taxe</button>
+
+              {canManage && (
+                <div className="mt-4 flex items-center gap-2">
+                  <button onClick={() => setTaxRates((r) => [...r, { id: crypto.randomUUID(), name: "", rate: 0, active: true }])}
+                    className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Ajouter un taux</button>
+                  <button onClick={saveTaxes} disabled={updateSettings.isPending}
+                    className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                    <Save className="h-4 w-4" /> Enregistrer
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -252,34 +331,18 @@ function ParametresPage() {
           )}
 
           {tab === "transfer" && (
-            <div className="rounded-2xl border border-border bg-card p-6">
-              <h2 className="mb-4 font-display text-lg font-bold">Transfert de stock entre boutiques</h2>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <SelectField label="Depuis" options={MOCK_TRANSFER_SHOPS.map((s) => s.name)} />
-                <SelectField label="Vers" options={MOCK_TRANSFER_SHOPS.map((s) => s.name)} />
-              </div>
-              <div className="mt-4">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Produits à transférer</div>
-                <div className="max-h-72 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
-                  {PRODUCTS.slice(0, 8).map((p) => (
-                    <div key={p.id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-muted/50">
-                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-muted text-base">{p.emoji}</div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{p.name}</div>
-                        <div className="text-[11px] text-muted-foreground">Stock : {p.stock} · {formatXOF(p.price)}</div>
-                      </div>
-                      <input type="number" min={0} defaultValue={0} className="w-20 rounded-lg border border-border bg-background px-2 py-1 text-right text-sm" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <button className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">
-                <ArrowLeftRight className="h-4 w-4" /> Créer le transfert
-              </button>
-            </div>
+            <TransferPanel shops={shops} currentShopId={currentShop.id} currentShopName={currentShop.name} canManage={canManage} />
           )}
         </div>
       </div>
+
+      {showAddShop && (
+        <AddShopDialog
+          onClose={() => setShowAddShop(false)}
+          onCreate={async (input) => { await createShop.mutateAsync(input); setShowAddShop(false); }}
+          pending={createShop.isPending}
+        />
+      )}
     </div>
   );
 }
@@ -293,13 +356,178 @@ function Field({ label, value, onChange, className, defaultValue, disabled }: { 
     </label>
   );
 }
-function SelectField({ label, options }: { label: string; options: string[] }) {
+
+function AddShopDialog({ onClose, onCreate, pending }: {
+  onClose: () => void; onCreate: (input: { name: string; country: string; currency: string }) => Promise<void>; pending: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [country, setCountry] = useState(COUNTRIES[0]);
+  const [currency, setCurrency] = useState("XOF");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!name.trim()) return;
+    setError(null);
+    try {
+      await onCreate({ name: name.trim(), country, currency });
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur inconnue");
+    }
+  };
+
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-      <select className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary">
-        {options.map((o) => <option key={o}>{o}</option>)}
-      </select>
-    </label>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="font-display text-lg font-bold">Ajouter une boutique</div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-3 p-5">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom de la boutique *</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pays</span>
+              <select value={country} onChange={(e) => setCountry(e.target.value)}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm">
+                {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Devise</span>
+              <select value={currency} onChange={(e) => setCurrency(e.target.value)}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm">
+                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Nouvelle boutique en période d'essai, avec son propre abonnement — comme à l'inscription.
+          </p>
+          {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
+            <button onClick={submit} disabled={!name.trim() || pending}
+              className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer la boutique
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type TransferShop = { id: string; name: string };
+
+function TransferPanel({ shops, currentShopId, currentShopName, canManage }: {
+  shops: TransferShop[]; currentShopId: string; currentShopName: string; canManage: boolean;
+}) {
+  const { data: products = [] } = useProducts();
+  const transfer = useTransferStock();
+  const otherShops = shops.filter((s) => s.id !== currentShopId);
+  const [toShopId, setToShopId] = useState(otherShops[0]?.id ?? "");
+  const [query, setQuery] = useState("");
+  const [qty, setQty] = useState<Record<string, number>>({});
+  const [result, setResult] = useState<{ transferred: number; unmatched: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return products.filter((p) => !q || p.name.toLowerCase().includes(q)).slice(0, 30);
+  }, [products, query]);
+
+  const lines = Object.entries(qty).filter(([, q]) => q > 0);
+
+  const submit = async () => {
+    setError(null); setResult(null);
+    if (!toShopId) { setError("Sélectionnez une boutique de destination."); return; }
+    const payload = lines.map(([productId, quantity]) => {
+      const p = products.find((x) => x.id === productId)!;
+      return { product_id: p.id, sku: p.sku, name: p.name, quantity };
+    });
+    try {
+      const res = await transfer.mutateAsync({ toShopId, lines: payload });
+      setResult(res);
+      setQty({});
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur inconnue");
+    }
+  };
+
+  if (otherShops.length === 0) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+        Ajoutez une deuxième boutique (onglet Boutique) pour pouvoir transférer du stock entre elles.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-6">
+      <h2 className="mb-1 font-display text-lg font-bold">Transfert de stock entre boutiques</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Envoie du stock de « {currentShopName} » vers une autre boutique. La correspondance des produits se fait par
+        SKU (ou par nom si le SKU est vide) : un article introuvable dans le catalogue de destination sera signalé,
+        pas transféré automatiquement.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Depuis</div>
+          <div className="flex h-10 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm">{currentShopName}</div>
+        </div>
+        <label className="block">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vers</div>
+          <select value={toShopId} onChange={(e) => setToShopId(e.target.value)}
+            className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm">
+            {otherShops.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-4">
+        <div className="relative mb-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un produit…"
+            className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
+        </div>
+        <div className="max-h-72 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
+          {filtered.map((p) => (
+            <div key={p.id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-muted/50">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{p.name}</div>
+                <div className="text-[11px] text-muted-foreground">Stock : {p.stock} · {formatXOF(Number(p.price))}</div>
+              </div>
+              <input type="number" min={0} max={p.stock} value={qty[p.id] ?? 0}
+                onChange={(e) => setQty((q) => ({ ...q, [p.id]: Math.max(0, Math.min(p.stock, Number(e.target.value) || 0)) }))}
+                className="w-20 rounded-lg border border-border bg-background px-2 py-1 text-right text-sm" />
+            </div>
+          ))}
+          {filtered.length === 0 && <div className="p-4 text-center text-xs text-muted-foreground">Aucun produit.</div>}
+        </div>
+      </div>
+
+      {result && (
+        <div className="mt-4 rounded-xl border border-success/40 bg-success/10 p-3 text-xs text-success">
+          {result.transferred} article{result.transferred > 1 ? "s" : ""} transféré{result.transferred > 1 ? "s" : ""}.
+          {result.unmatched.length > 0 && (
+            <div className="mt-1 text-warning-foreground">
+              Non transféré (aucune correspondance dans la boutique de destination) : {result.unmatched.join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+      {error && <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
+
+      {canManage && (
+        <button onClick={submit} disabled={lines.length === 0 || transfer.isPending}
+          className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40">
+          {transfer.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />} Créer le transfert
+        </button>
+      )}
+    </div>
   );
 }

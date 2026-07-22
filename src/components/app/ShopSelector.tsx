@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Check, ChevronsUpDown, Store, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -70,9 +71,10 @@ export function ShopSelector() {
           );
         })}
         <div className="mt-1 border-t pt-1">
-          <button className="w-full rounded-lg px-2 py-2 text-left text-xs font-medium text-primary hover:bg-primary/5">
+          <Link to="/app/parametres" onClick={() => setOpen(false)}
+            className="block w-full rounded-lg px-2 py-2 text-left text-xs font-medium text-primary hover:bg-primary/5">
             + Ajouter une boutique
-          </button>
+          </Link>
         </div>
       </PopoverContent>
     </Popover>
