@@ -80,6 +80,18 @@ returns boolean language sql stable security definer set search_path = public as
     where shop_id = _shop_id and user_id = auth.uid() and role = any(_roles));
 $$;
 
+-- Utilisé uniquement par shop_members_insert ci-dessous : encapsule la
+-- lecture de shops dans une fonction security definer (comme has_shop_access
+-- encapsule shop_members) pour éviter une dépendance circulaire — sans ça,
+-- le check RLS sur shop_members_insert lirait shops via un subquery soumis
+-- à shops_select (has_shop_access), qui exige lui-même un shop_members
+-- déjà existant : le tout premier insert shop_members d'un nouveau
+-- propriétaire serait alors systématiquement rejeté (bug corrigé migration 009).
+create or replace function public.is_shop_owner(_shop_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.shops where id = _shop_id and owner_id = auth.uid());
+$$;
+
 -- Recherche d'utilisateur par email pour le flux d'invitation Équipe — ne
 -- renvoie que l'UUID, rien d'autre de auth.users. Voir
 -- db/migrations/004_find_user_by_email.sql pour le détail et les limites.
@@ -313,6 +325,73 @@ create table if not exists public.shop_settings (
   updated_at timestamptz not null default now()
 );
 
+-- Inscription atomique : remplace une séquence de 4 inserts client séparés
+-- (shops, puis shop_members, puis subscriptions, puis shop_settings) par une
+-- seule fonction security definer — tout réussit en une transaction, ou rien
+-- n'est créé (rollback automatique sur exception). Voir migration 009 pour
+-- le contexte complet (bug corrigé : la séquence client pouvait s'arrêter à
+-- mi-chemin, laissant une boutique orpheline invisible pour son créateur).
+create or replace function public.complete_signup(
+  p_shop_name text,
+  p_country text,
+  p_currency text,
+  p_shop_phone text,
+  p_address text,
+  p_owner_phone text default null
+) returns public.shops
+language plpgsql security definer set search_path = public as $$
+declare
+  v_uid uuid := auth.uid();
+  v_shop public.shops;
+  v_slug text;
+  v_base text;
+  v_trial_ends timestamptz := now() + interval '3 days';
+begin
+  if v_uid is null then
+    raise exception 'Non authentifié.';
+  end if;
+
+  if exists (select 1 from public.shop_members where user_id = v_uid) then
+    raise exception 'Ce compte est déjà rattaché à une boutique.';
+  end if;
+
+  v_base := trim(both '-' from lower(regexp_replace(trim(p_shop_name), '[^a-zA-Z0-9]+', '-', 'g')));
+  if v_base = '' then
+    v_base := 'boutique';
+  end if;
+
+  loop
+    v_slug := v_base || '-' || substr(md5(random()::text), 1, 4);
+    begin
+      insert into public.shops (name, slug, owner_id, country, currency, plan, trial_ends_at)
+      values (trim(p_shop_name), v_slug, v_uid, p_country, coalesce(p_currency, 'XOF'), 'trial', v_trial_ends)
+      returning * into v_shop;
+      exit;
+    exception when unique_violation then
+      null; -- collision de slug : on retente avec un nouveau suffixe aléatoire
+    end;
+  end loop;
+
+  insert into public.shop_members (shop_id, user_id, role)
+  values (v_shop.id, v_uid, 'owner');
+
+  insert into public.subscriptions (shop_id, plan, status, amount, currency, current_period_end)
+  values (v_shop.id, 'trial', 'trialing', 0, coalesce(p_currency, 'XOF'), v_trial_ends);
+
+  insert into public.shop_settings (shop_id, data)
+  values (v_shop.id, jsonb_build_object('phone', p_shop_phone, 'address', p_address));
+
+  if p_owner_phone is not null and p_owner_phone <> '' then
+    update public.profiles set phone = p_owner_phone where id = v_uid;
+  end if;
+
+  return v_shop;
+end;
+$$;
+
+revoke all on function public.complete_signup(text, text, text, text, text, text) from public;
+grant execute on function public.complete_signup(text, text, text, text, text, text) to authenticated;
+
 -- Catalogue de formules, éditable depuis /admin/parametres, lu publiquement
 -- par /tarifs (anon). id en text (slug) plutôt qu'uuid : shops.plan /
 -- subscriptions.plan restent des colonnes texte libres (pas de FK ajoutée),
@@ -485,9 +564,7 @@ create policy shop_members_select on public.shop_members for select to authentic
   using (public.has_shop_access(shop_id));
 drop policy if exists shop_members_insert on public.shop_members;
 create policy shop_members_insert on public.shop_members for insert to authenticated
-  with check (
-    exists (select 1 from public.shops s where s.id = shop_id and s.owner_id = auth.uid())
-  );
+  with check (public.is_shop_owner(shop_id));
 drop policy if exists shop_members_update on public.shop_members;
 create policy shop_members_update on public.shop_members for update to authenticated
   using (public.has_role_in_shop(shop_id, 'owner'))
