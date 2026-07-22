@@ -239,7 +239,7 @@ export function useCreateSupportTicket() {
   const qc = useQueryClient();
   const { user } = useAuth();
   return useMutation({
-    mutationFn: async ({ shopId, subject, message }: { shopId: string; subject: string; message: string }) => {
+    mutationFn: async ({ shopId, subject, message }: { shopId: string; subject: string; message: string }): Promise<SupportTicket> => {
       if (!user) throw new Error("Non authentifié");
       const { data: ticket, error } = await supabase.from("support_tickets")
         .insert({ shop_id: shopId, created_by: user.id, subject }).select().single();
@@ -247,7 +247,7 @@ export function useCreateSupportTicket() {
       const { error: msgErr } = await supabase.from("support_messages")
         .insert({ ticket_id: ticket.id, author_id: user.id, is_admin: false, body: message });
       if (msgErr) throw msgErr;
-      return ticket;
+      return ticket as SupportTicket;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["support_tickets"] }),
   });

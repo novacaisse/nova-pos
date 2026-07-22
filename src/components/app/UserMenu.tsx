@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { UserCircle, KeyRound, CreditCard, LogOut, ChevronDown } from "lucide-react";
+import { UserCircle, KeyRound, CreditCard, LogOut, ChevronDown, LifeBuoy } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,6 +75,11 @@ export function UserMenu() {
         <DropdownMenuItem asChild>
           <Link to="/app/abonnement" className="cursor-pointer gap-2.5">
             <CreditCard className="h-4 w-4" /> Gérer mon abonnement
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/app/support" className="cursor-pointer gap-2.5">
+            <LifeBuoy className="h-4 w-4" /> Contacter le support
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

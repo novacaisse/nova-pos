@@ -397,3 +397,90 @@ vérifié côté MoneyFusion.
 
 Secrets Edge Function nécessaires (jamais commités, transmis uniquement via
 le Dashboard Supabase) : `PAYMENT_PROXY_URL`, `MONEYFUSION_API_URL`, `APP_URL`.
+
+## 13. Espace Super Admin, pages publiques et MoneyFusion — écrans connectés
+
+Suite logique de la section 12 : les migrations 005/006/007/008 sont
+exécutées, les Edge Functions `create-subscription-payment` et
+`moneyfusion-webhook` sont déployées et vérifiées par l'utilisateur. Cette
+section couvre le branchement de tous les écrans côté front.
+
+**Accès Super Admin** — mécanisme : table `super_admins` séparée (pas un
+rôle `shop_members`), fonction `is_super_admin()` security definer.
+`admin.tsx` avait **zéro garde-fou d'accès** avant cette tâche (n'importe
+quel compte connecté pouvait ouvrir `/admin`) — corrigé en priorité,
+traité comme faille critique : redirige vers `/connexion` (non connecté)
+ou `/app` (connecté mais pas super admin).
+
+**Écrans Super Admin connectés** (`src/routes/admin.*.tsx`,
+`src/lib/data/adminHooks.ts`) :
+- Dashboard : KPIs réels (boutiques par statut, MRR approx., churn),
+  répartition par formule, 30 derniers jours d'inscriptions, 12 derniers
+  mois de revenu (paiements `paid` uniquement).
+- Boutiques : liste réelle, recherche/filtre, suspension (`shops.plan`),
+  prolongation d'essai, suppression (confirmation par saisie du nom exact),
+  impersonation via `admin-impersonate`.
+- Abonnements/Facturation : lecture cross-tenant de `subscription_payments`
+  et `subscriptions` ; remboursement/renvoi de facture désactivés
+  ("Bientôt disponible") — aucune API de remboursement demandée/disponible.
+- Paramètres : mini-CMS `plans` complet (création/édition/suppression de
+  formules, prix mensuel/annuel, fonctionnalités, actif/recommandé) — seule
+  source de vérité pour les prix, consommée par `/tarifs`, la landing,
+  `/app/abonnement` et `/souscription`. Onglet « Contenu landing » laissé
+  statique/désactivé (hors périmètre, pas de table dédiée).
+- Support : liste de tous les tickets (`support_tickets`/`support_messages`,
+  RLS `is_super_admin() OR has_shop_access`), changement de statut réservé
+  au Super Admin (imposé par la RLS, pas seulement par l'UI), fil de
+  discussion avec réponse admin.
+
+**Impersonation** (`supabase/functions/admin-impersonate/`) : vérifie
+`is_super_admin()` server-side, génère un magic link via le service role
+(`auth.admin.generateLink`), journalise dans `admin_impersonations` — **pas
+de notification au owner**, choix explicite de l'utilisateur pour un usage
+support discret. Limite acceptée : revenir à sa session admin après
+impersonation nécessite de se déconnecter/reconnecter (pas de multi-session
+dans ce navigateur).
+
+**Périmètre RLS Super Admin** : strictement `shops`, `subscriptions`,
+`subscription_payments`, `profiles`, `plans`, plus les tables dédiées
+(`admin_impersonations`, `support_tickets`, `support_messages`) — jamais
+étendu aux données métier des boutiques (ventes, stock, clients…).
+
+**Pages publiques** — `/tarifs`, la landing (`index.tsx`) et
+`/app/abonnement` lisent désormais toutes `usePlans()` (même source que le
+CMS), au lieu du mock `PLANS` figé sur 3 formules. Conséquences assumées :
+- Suppression du tableau comparatif détaillé (`FEATURE_MATRIX`) sur
+  `/tarifs` : il supposait exactement 3 formules fixes, incompatible avec
+  des formules créées/supprimées dynamiquement.
+- Suppression de l'option de période "lifetime" (seuls mensuel/annuel
+  existent dans le modèle de données réel).
+- Correction de la mention "essai 14 jours" → "3 jours" (durée réelle,
+  `inscription.tsx`).
+
+**Parcours de paiement réel** (`/souscription`, `/souscription/confirmation`) :
+- `/souscription` : formule + périodicité + téléphone/nom, appelle
+  `create-subscription-payment`, redirige le navigateur vers l'URL
+  MoneyFusion renvoyée. Accessible depuis `/app` (redirection automatique
+  à expiration d'essai, déjà en place) et depuis `/app/abonnement`
+  ("Passer à X", jusqu'ici désactivé).
+- `/souscription/confirmation` (nouvelle route, cible du `return_url`) :
+  récupère le paiement par `payment_id` (RLS shop-scopée : pas de
+  vérification d'accès applicative supplémentaire nécessaire), poll toutes
+  les 3s tant que le statut est `pending` (le webhook peut arriver après le
+  retour du navigateur).
+
+**Support côté boutique** (`/app/support`, nouvelle route + entrée dans
+`UserMenu.tsx`) : création de ticket, fil de discussion, réponse — pas de
+changement de statut possible (réservé au Super Admin par la RLS).
+
+**Suppression** : `src/lib/mock/tenants.ts` supprimé (dernier
+consommateur — l'ancien `admin.support.tsx` mocké — remplacé).
+
+**Non vérifié dans cette session** (aucun accès réseau sortant vers
+Supabase/MoneyFusion) : le comportement réel du proxy Squid en production,
+la réception effective des webhooks MoneyFusion, et le rendu visuel des
+nouveaux écrans dans un navigateur. Vérifiés uniquement par compilation
+(`bun build --external '*'` par fichier) et par la génération réussie de
+`routeTree.gen.ts` via `bun run build` (échoue ensuite en phase SSR sur la
+résolution de `framer-motion`, limitation connue du bac à sable, sans
+rapport avec ce changement).

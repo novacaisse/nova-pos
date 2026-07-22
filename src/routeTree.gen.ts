@@ -21,6 +21,7 @@ import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as SouscriptionConfirmationRouteImport } from './routes/souscription.confirmation'
 import { Route as AppVentesRouteImport } from './routes/app.ventes'
+import { Route as AppSupportRouteImport } from './routes/app.support'
 import { Route as AppStockRouteImport } from './routes/app.stock'
 import { Route as AppRapportsRouteImport } from './routes/app.rapports'
 import { Route as AppPromotionsRouteImport } from './routes/app.promotions'
@@ -100,6 +101,11 @@ const SouscriptionConfirmationRoute =
 const AppVentesRoute = AppVentesRouteImport.update({
   id: '/ventes',
   path: '/ventes',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSupportRoute = AppSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
   getParentRoute: () => AppRoute,
 } as any)
 const AppStockRoute = AppStockRouteImport.update({
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/app/promotions': typeof AppPromotionsRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
+  '/app/support': typeof AppSupportRoute
   '/app/ventes': typeof AppVentesRoute
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
@@ -257,6 +264,7 @@ export interface FileRoutesByTo {
   '/app/promotions': typeof AppPromotionsRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
+  '/app/support': typeof AppSupportRoute
   '/app/ventes': typeof AppVentesRoute
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin': typeof AdminIndexRoute
@@ -291,6 +299,7 @@ export interface FileRoutesById {
   '/app/promotions': typeof AppPromotionsRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
+  '/app/support': typeof AppSupportRoute
   '/app/ventes': typeof AppVentesRoute
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
@@ -326,6 +335,7 @@ export interface FileRouteTypes {
     | '/app/promotions'
     | '/app/rapports'
     | '/app/stock'
+    | '/app/support'
     | '/app/ventes'
     | '/souscription/confirmation'
     | '/admin/'
@@ -357,6 +367,7 @@ export interface FileRouteTypes {
     | '/app/promotions'
     | '/app/rapports'
     | '/app/stock'
+    | '/app/support'
     | '/app/ventes'
     | '/souscription/confirmation'
     | '/admin'
@@ -390,6 +401,7 @@ export interface FileRouteTypes {
     | '/app/promotions'
     | '/app/rapports'
     | '/app/stock'
+    | '/app/support'
     | '/app/ventes'
     | '/souscription/confirmation'
     | '/admin/'
@@ -491,6 +503,13 @@ declare module '@tanstack/react-router' {
       path: '/ventes'
       fullPath: '/app/ventes'
       preLoaderRoute: typeof AppVentesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/support': {
+      id: '/app/support'
+      path: '/support'
+      fullPath: '/app/support'
+      preLoaderRoute: typeof AppSupportRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/stock': {
@@ -664,6 +683,7 @@ interface AppRouteChildren {
   AppPromotionsRoute: typeof AppPromotionsRoute
   AppRapportsRoute: typeof AppRapportsRoute
   AppStockRoute: typeof AppStockRoute
+  AppSupportRoute: typeof AppSupportRoute
   AppVentesRoute: typeof AppVentesRoute
   AppIndexRoute: typeof AppIndexRoute
 }
@@ -683,6 +703,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPromotionsRoute: AppPromotionsRoute,
   AppRapportsRoute: AppRapportsRoute,
   AppStockRoute: AppStockRoute,
+  AppSupportRoute: AppSupportRoute,
   AppVentesRoute: AppVentesRoute,
   AppIndexRoute: AppIndexRoute,
 }
