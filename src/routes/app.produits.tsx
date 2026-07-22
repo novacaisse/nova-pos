@@ -1,10 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Edit3, Trash2, X, Save, LayoutGrid, List, Tag as TagIcon, Package } from "lucide-react";
+import { Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Package } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
-  useProducts, useUpsertProduct, useDeleteProduct,
+  useProducts, useDeleteProduct,
   useCategories, useUpsertCategory, useDeleteCategory, useMyRole,
   formatXOF, type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
@@ -21,7 +21,6 @@ function ProduitsPage() {
   const { q } = Route.useSearch();
   const { data: products = [], isLoading } = useProducts();
   const { data: cats = [] } = useCategories();
-  const upsert = useUpsertProduct();
   const remove = useDeleteProduct();
   const { data: myRole } = useMyRole();
   const canManage = myRole === "owner" || myRole === "manager" || myRole === "stock"; // cashier/accountant : lecture seule
@@ -29,7 +28,6 @@ function ProduitsPage() {
   const [query, setQuery] = useState(q ?? "");
   const [cat, setCat] = useState<"all" | string>("all");
   const [view, setView] = useState<"grid" | "list">("list");
-  const [edit, setEdit] = useState<Partial<ProductWithStock> | null>(null);
   const [confirmDel, setConfirmDel] = useState<ProductWithStock | null>(null);
   const [manageCats, setManageCats] = useState(false);
 
@@ -46,7 +44,7 @@ function ProduitsPage() {
         actions={canManage && (
           <>
             <button onClick={() => setManageCats(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><TagIcon className="h-4 w-4" /> Catégories</button>
-            <button onClick={() => setEdit({ name: "", price: 0, cost: 0, unit: "pcs", is_active: true, low_stock_threshold: 5, tax_rate: 0 })} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouveau produit</button>
+            <Link to="/app/produits/nouveau" className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouveau produit</Link>
           </>
         )}
       />
@@ -77,7 +75,7 @@ function ProduitsPage() {
             <Package className="mx-auto h-8 w-8 text-muted-foreground" />
             <div className="mt-2 text-sm text-muted-foreground">Aucun produit. Commencez par créer votre catalogue.</div>
             {canManage && (
-              <button onClick={() => setEdit({ name: "", price: 0, cost: 0, unit: "pcs", is_active: true, low_stock_threshold: 5, tax_rate: 0 })} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter un produit</button>
+              <Link to="/app/produits/nouveau" className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter un produit</Link>
             )}
           </div>
         ) : view === "list" ? (
@@ -100,7 +98,9 @@ function ProduitsPage() {
                     <tr key={p.id} className="border-t border-border/60 hover:bg-muted/40">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-lg">📦</div>
+                          <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-muted text-lg">
+                            {p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : "📦"}
+                          </div>
                           <div><div className="font-semibold">{p.name}</div><div className="text-[11px] text-muted-foreground">{p.unit}</div></div>
                         </div>
                       </td>
@@ -113,7 +113,7 @@ function ProduitsPage() {
                       <td className="px-4 py-3">
                         {canManage && (
                           <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => setEdit(p)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
+                            <Link to="/app/produits/$productId" params={{ productId: p.id }} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></Link>
                             <button onClick={() => setConfirmDel(p)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
                           </div>
                         )}
@@ -128,14 +128,16 @@ function ProduitsPage() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {list.map((p) => (
               <div key={p.id} className="group rounded-2xl border border-border bg-card p-3 hover:shadow-elegant">
-                <div className="grid aspect-square place-items-center rounded-xl bg-muted text-5xl">📦</div>
+                <div className="grid aspect-square place-items-center overflow-hidden rounded-xl bg-muted text-5xl">
+                  {p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : "📦"}
+                </div>
                 <div className="mt-3 truncate text-sm font-semibold">{p.name}</div>
                 <div className="text-[11px] text-muted-foreground">{p.sku ?? "—"}</div>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="tabular font-bold">{formatXOF(Number(p.price))}</span>
                   {canManage && (
                     <div className="flex items-center gap-1">
-                      <button onClick={() => setEdit(p)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></button>
+                      <Link to="/app/produits/$productId" params={{ productId: p.id }} className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"><Edit3 className="h-3.5 w-3.5" /></Link>
                       <button onClick={() => setConfirmDel(p)} className="grid h-7 w-7 place-items-center rounded-md text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                   )}
@@ -147,12 +149,6 @@ function ProduitsPage() {
       </div>
 
       <AnimatePresence>
-        {edit && (
-          <ProductDialog initial={edit} cats={cats}
-            onClose={() => setEdit(null)}
-            onSave={async (p) => { await upsert.mutateAsync(p); setEdit(null); }}
-          />
-        )}
         {confirmDel && (
           <ConfirmDialog title={`Supprimer ${confirmDel.name} ?`} onClose={() => setConfirmDel(null)}
             onConfirm={async () => { await remove.mutateAsync(confirmDel.id); setConfirmDel(null); }} />
@@ -174,50 +170,6 @@ function Overlay({ children, onClose, w = "max-w-lg" }: { children: React.ReactN
         {children}
       </motion.div>
     </motion.div>
-  );
-}
-
-function ProductDialog({ initial, cats, onClose, onSave }: { initial: Partial<ProductWithStock>; cats: Category[]; onClose: () => void; onSave: (p: any) => Promise<void> }) {
-  const [form, setForm] = useState<Partial<ProductWithStock>>(initial);
-  const inp = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
-  const price = Number(form.price) || 0;
-  const cost = Number(form.cost) || 0;
-  const margin = price ? Math.round(((price - cost) / price) * 100) : 0;
-
-  return (
-    <Overlay onClose={onClose}>
-      <div className="flex items-center justify-between border-b border-border px-5 py-4">
-        <div className="font-display text-lg font-bold">{initial.id ? "Modifier produit" : "Nouveau produit"}</div>
-        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
-      </div>
-      <div className="space-y-3 p-5">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block sm:col-span-2"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Nom *</div><input value={form.name ?? ""} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inp} /></label>
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">SKU</div><input value={form.sku ?? ""} onChange={(e) => setForm({ ...form, sku: e.target.value })} className={inp} /></label>
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Code-barres</div><input value={form.barcode ?? ""} onChange={(e) => setForm({ ...form, barcode: e.target.value })} className={inp} /></label>
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Catégorie</div><select value={form.category_id ?? ""} onChange={(e) => setForm({ ...form, category_id: e.target.value || null })} className={inp}>
-            <option value="">— Sans catégorie —</option>
-            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select></label>
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Unité</div><input value={form.unit ?? "pcs"} onChange={(e) => setForm({ ...form, unit: e.target.value })} className={inp} /></label>
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Prix achat (F)</div><input type="number" value={form.cost ?? 0} onChange={(e) => setForm({ ...form, cost: Number(e.target.value) || 0 })} className={inp} /></label>
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Prix vente (F) *</div><input type="number" value={form.price ?? 0} onChange={(e) => setForm({ ...form, price: Number(e.target.value) || 0 })} className={inp} /></label>
-          {!initial.id && (
-            <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Stock initial</div><input type="number" value={form.stock ?? 0} onChange={(e) => setForm({ ...form, stock: Number(e.target.value) || 0 })} className={inp} /></label>
-          )}
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Seuil stock bas</div><input type="number" value={form.low_stock_threshold ?? 5} onChange={(e) => setForm({ ...form, low_stock_threshold: Number(e.target.value) || 0 })} className={inp} /></label>
-        </div>
-        {price > 0 && (
-          <div className="rounded-xl bg-muted p-3 text-xs">Marge indicative : <b className="text-success">{margin}%</b></div>
-        )}
-        <div className="flex gap-2 pt-1">
-          <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
-          <button disabled={!form.name || !form.price} onClick={() => onSave(form)} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
-            <Save className="h-4 w-4" /> Enregistrer
-          </button>
-        </div>
-      </div>
-    </Overlay>
   );
 }
 

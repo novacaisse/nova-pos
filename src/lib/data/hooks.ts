@@ -896,6 +896,28 @@ export function useUploadShopLogo() {
   });
 }
 
+// Image produit (bucket "product-images", migration 012 — public en
+// lecture, écriture owner/manager/stock). Un fichier par produit (clé
+// fixe "{shop_id}/{product_id}", écrasé à chaque upload). Ne met pas à
+// jour products.image_url elle-même (contrairement au logo boutique) :
+// le produit doit déjà exister (avoir un id) avant l'upload, donc
+// l'appelant enchaîne lui-même avec useUpsertProduct une fois l'URL
+// obtenue — cf. ProductForm.
+export function useUploadProductImage() {
+  const shopId = useShopId();
+  return useMutation({
+    mutationFn: async ({ productId, file }: { productId: string; file: File }): Promise<string> => {
+      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      const path = `${shopId}/${productId}`;
+      const { error: upErr } = await supabase.storage.from("product-images")
+        .upload(path, file, { upsert: true, cacheControl: "3600", contentType: file.type });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+      return `${data.publicUrl}?v=${Date.now()}`;
+    },
+  });
+}
+
 // ============ NOTIFICATIONS ============
 // Événements réels insérés par des triggers Postgres (migration 011) :
 // vente importante, stock bas/rupture, nouveau membre. Table déjà en

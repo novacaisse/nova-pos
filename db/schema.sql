@@ -1025,6 +1025,40 @@ create policy shop_logos_delete on storage.objects for delete to authenticated
     and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
   );
 
+-- Bucket pour les images produit (migration 012) : même principe, public
+-- en lecture, écriture restreinte aux rôles pouvant déjà écrire sur
+-- `products` (owner/manager/stock). Convention de chemin obligatoire côté
+-- client : {shop_id}/{product_id}.
+insert into storage.buckets (id, name, public)
+values ('product-images', 'product-images', true)
+on conflict (id) do nothing;
+
+drop policy if exists product_images_select on storage.objects;
+create policy product_images_select on storage.objects for select
+  using (bucket_id = 'product-images');
+drop policy if exists product_images_insert on storage.objects;
+create policy product_images_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'product-images'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager','stock']::public.app_role[])
+  );
+drop policy if exists product_images_update on storage.objects;
+create policy product_images_update on storage.objects for update to authenticated
+  using (
+    bucket_id = 'product-images'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager','stock']::public.app_role[])
+  )
+  with check (
+    bucket_id = 'product-images'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager','stock']::public.app_role[])
+  );
+drop policy if exists product_images_delete on storage.objects;
+create policy product_images_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'product-images'
+    and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager','stock']::public.app_role[])
+  );
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages).

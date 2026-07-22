@@ -41,6 +41,8 @@ import { Route as AdminParametresRouteImport } from './routes/admin.parametres'
 import { Route as AdminFacturationRouteImport } from './routes/admin.facturation'
 import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
 import { Route as AdminAbonnementsRouteImport } from './routes/admin.abonnements'
+import { Route as AppProduitsNouveauRouteImport } from './routes/app.produits.nouveau'
+import { Route as AppProduitsProductIdRouteImport } from './routes/app.produits.$productId'
 
 const TarifsRoute = TarifsRouteImport.update({
   id: '/tarifs',
@@ -203,6 +205,16 @@ const AdminAbonnementsRoute = AdminAbonnementsRouteImport.update({
   path: '/abonnements',
   getParentRoute: () => AdminRoute,
 } as any)
+const AppProduitsNouveauRoute = AppProduitsNouveauRouteImport.update({
+  id: '/nouveau',
+  path: '/nouveau',
+  getParentRoute: () => AppProduitsRoute,
+} as any)
+const AppProduitsProductIdRoute = AppProduitsProductIdRouteImport.update({
+  id: '/$productId',
+  path: '/$productId',
+  getParentRoute: () => AppProduitsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -228,7 +240,7 @@ export interface FileRoutesByFullPath {
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/parametres': typeof AppParametresRoute
-  '/app/produits': typeof AppProduitsRoute
+  '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
@@ -237,6 +249,8 @@ export interface FileRoutesByFullPath {
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
+  '/app/produits/$productId': typeof AppProduitsProductIdRoute
+  '/app/produits/nouveau': typeof AppProduitsNouveauRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -260,7 +274,7 @@ export interface FileRoutesByTo {
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/parametres': typeof AppParametresRoute
-  '/app/produits': typeof AppProduitsRoute
+  '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
@@ -269,6 +283,8 @@ export interface FileRoutesByTo {
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
+  '/app/produits/$productId': typeof AppProduitsProductIdRoute
+  '/app/produits/nouveau': typeof AppProduitsNouveauRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -295,7 +311,7 @@ export interface FileRoutesById {
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/parametres': typeof AppParametresRoute
-  '/app/produits': typeof AppProduitsRoute
+  '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
   '/app/stock': typeof AppStockRoute
@@ -304,6 +320,8 @@ export interface FileRoutesById {
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
+  '/app/produits/$productId': typeof AppProduitsProductIdRoute
+  '/app/produits/nouveau': typeof AppProduitsNouveauRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -340,6 +358,8 @@ export interface FileRouteTypes {
     | '/souscription/confirmation'
     | '/admin/'
     | '/app/'
+    | '/app/produits/$productId'
+    | '/app/produits/nouveau'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -372,6 +392,8 @@ export interface FileRouteTypes {
     | '/souscription/confirmation'
     | '/admin'
     | '/app'
+    | '/app/produits/$productId'
+    | '/app/produits/nouveau'
   id:
     | '__root__'
     | '/'
@@ -406,6 +428,8 @@ export interface FileRouteTypes {
     | '/souscription/confirmation'
     | '/admin/'
     | '/app/'
+    | '/app/produits/$productId'
+    | '/app/produits/nouveau'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -646,6 +670,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAbonnementsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/app/produits/nouveau': {
+      id: '/app/produits/nouveau'
+      path: '/nouveau'
+      fullPath: '/app/produits/nouveau'
+      preLoaderRoute: typeof AppProduitsNouveauRouteImport
+      parentRoute: typeof AppProduitsRoute
+    }
+    '/app/produits/$productId': {
+      id: '/app/produits/$productId'
+      path: '/$productId'
+      fullPath: '/app/produits/$productId'
+      preLoaderRoute: typeof AppProduitsProductIdRouteImport
+      parentRoute: typeof AppProduitsRoute
+    }
   }
 }
 
@@ -669,6 +707,20 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface AppProduitsRouteChildren {
+  AppProduitsProductIdRoute: typeof AppProduitsProductIdRoute
+  AppProduitsNouveauRoute: typeof AppProduitsNouveauRoute
+}
+
+const AppProduitsRouteChildren: AppProduitsRouteChildren = {
+  AppProduitsProductIdRoute: AppProduitsProductIdRoute,
+  AppProduitsNouveauRoute: AppProduitsNouveauRoute,
+}
+
+const AppProduitsRouteWithChildren = AppProduitsRoute._addFileChildren(
+  AppProduitsRouteChildren,
+)
+
 interface AppRouteChildren {
   AppAbonnementRoute: typeof AppAbonnementRoute
   AppCaisseRoute: typeof AppCaisseRoute
@@ -679,7 +731,7 @@ interface AppRouteChildren {
   AppFournisseursRoute: typeof AppFournisseursRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
   AppParametresRoute: typeof AppParametresRoute
-  AppProduitsRoute: typeof AppProduitsRoute
+  AppProduitsRoute: typeof AppProduitsRouteWithChildren
   AppProfilRoute: typeof AppProfilRoute
   AppRapportsRoute: typeof AppRapportsRoute
   AppStockRoute: typeof AppStockRoute
@@ -698,7 +750,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppFournisseursRoute: AppFournisseursRoute,
   AppNotificationsRoute: AppNotificationsRoute,
   AppParametresRoute: AppParametresRoute,
-  AppProduitsRoute: AppProduitsRoute,
+  AppProduitsRoute: AppProduitsRouteWithChildren,
   AppProfilRoute: AppProfilRoute,
   AppRapportsRoute: AppRapportsRoute,
   AppStockRoute: AppStockRoute,
