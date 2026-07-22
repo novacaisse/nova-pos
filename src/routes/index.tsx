@@ -4,7 +4,7 @@ import {
   Zap, ArrowRight, ScanBarcode, Warehouse, BarChart3, Users, Store, Tag,
   Sparkles, Truck, Wallet, Bell, Smartphone, Bot, Check, Star, Menu,
 } from "lucide-react";
-import { PLANS } from "@/lib/mock/subscription";
+import { usePlans } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 
 export const Route = createFileRoute("/")({
@@ -105,7 +105,7 @@ function Hero() {
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link to="/inscription" className="inline-flex h-12 items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-primary-glow px-6 font-display font-bold text-primary-foreground shadow-elegant">
-              Essayer 14 jours gratuits <ArrowRight className="h-4 w-4" />
+              Essayer 3 jours gratuits <ArrowRight className="h-4 w-4" />
             </Link>
             <Link to="/app/caisse" className="inline-flex h-12 items-center gap-2 rounded-xl border border-border bg-card px-6 font-semibold hover:bg-muted">
               Voir la démo
@@ -283,6 +283,8 @@ function Testimonials() {
 }
 
 function PricingPreview() {
+  const { data: plans = [] } = usePlans();
+
   return (
     <section className="border-t border-border bg-muted/30 py-20">
       <div className="mx-auto max-w-6xl px-5">
@@ -291,9 +293,9 @@ function PricingPreview() {
           <h2 className="mt-2 font-display text-3xl font-black tracking-tight sm:text-4xl">Une formule pour chaque commerce.</h2>
         </div>
         <div className="mt-10 grid gap-4 md:grid-cols-3">
-          {PLANS.map((p) => (
-            <div key={p.id} className={`rounded-2xl border p-6 ${p.recommended ? "border-primary bg-card shadow-elegant" : "border-border bg-card"}`}>
-              {p.recommended && <span className="mb-2 inline-block rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase text-primary-foreground">Populaire</span>}
+          {plans.map((p) => (
+            <div key={p.id} className={`rounded-2xl border p-6 ${p.is_recommended ? "border-primary bg-card shadow-elegant" : "border-border bg-card"}`}>
+              {p.is_recommended && <span className="mb-2 inline-block rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase text-primary-foreground">Populaire</span>}
               <div className="font-display text-xl font-bold">{p.name}</div>
               <div className="mt-2 flex items-baseline gap-1">
                 <span className="tabular font-display text-3xl font-black">{formatXOF(p.price_month)}</span>

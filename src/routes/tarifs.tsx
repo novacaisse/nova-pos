@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Zap, ArrowRight, Check, X, Sparkles } from "lucide-react";
-import { PLANS } from "@/lib/mock/subscription";
+import { Zap, ArrowRight, Check, Sparkles, Loader2 } from "lucide-react";
+import { usePlans } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
@@ -9,42 +9,24 @@ export const Route = createFileRoute("/tarifs")({
   head: () => ({
     meta: [
       { title: "Tarifs — NovaCaisse" },
-      { name: "description", content: "Choisissez la formule NovaCaisse adaptée à votre commerce. Starter, Pro ou Business — mensuel, annuel ou lifetime." },
+      { name: "description", content: "Choisissez la formule NovaCaisse adaptée à votre commerce. Starter, Pro ou Business — mensuel ou annuel." },
     ],
   }),
   component: TarifsPage,
 });
 
-type Period = "mensuel" | "annuel" | "lifetime";
-
-const FEATURE_MATRIX: { label: string; starter: boolean | string; pro: boolean | string; business: boolean | string }[] = [
-  { label: "Caisses", starter: "1", pro: "3", business: "Illimité" },
-  { label: "Boutiques", starter: "1", pro: "3", business: "Illimité" },
-  { label: "Utilisateurs", starter: "2", pro: "10", business: "Illimité" },
-  { label: "Produits", starter: "500", pro: "5 000", business: "Illimité" },
-  { label: "Gestion de stock", starter: true, pro: true, business: true },
-  { label: "Multi-boutique", starter: false, pro: true, business: true },
-  { label: "Rapports avancés", starter: false, pro: true, business: true },
-  { label: "Assistant IA Nova", starter: false, pro: "500 req/mois", business: "Illimité" },
-  { label: "API & webhooks", starter: false, pro: false, business: true },
-  { label: "Support", starter: "Email", pro: "Prioritaire", business: "Téléphone 7j/7" },
-];
+type Period = "mensuel" | "annuel";
 
 const FAQ = [
-  { q: "Puis-je essayer gratuitement ?", a: "Oui, 14 jours d'essai sur toutes les formules, sans carte bancaire." },
+  { q: "Puis-je essayer gratuitement ?", a: "Oui, 3 jours d'essai sur toutes les formules, sans carte bancaire." },
   { q: "Puis-je changer de formule ?", a: "Vous pouvez évoluer ou rétrograder à tout moment depuis votre espace Abonnement." },
-  { q: "Puis-je payer en Mobile Money ?", a: "Oui — Orange Money, MTN MoMo, Moov Money et Wave sont tous acceptés via MoneyFusion." },
-  { q: "Comment résilier ?", a: "En un clic depuis votre espace Abonnement. Aucun engagement, aucun frais caché." },
+  { q: "Puis-je payer en Mobile Money ?", a: "Oui — via MoneyFusion (Orange Money, MTN MoMo, Moov Money…)." },
+  { q: "Comment résilier ?", a: "Depuis votre espace Abonnement. Aucun engagement, aucun frais caché." },
 ];
 
 function TarifsPage() {
   const [period, setPeriod] = useState<Period>("annuel");
-
-  const priceFor = (monthly: number) => {
-    if (period === "mensuel") return { amount: monthly, suffix: "/ mois" };
-    if (period === "annuel") return { amount: Math.round(monthly * 12 * 0.8), suffix: "/ an" };
-    return { amount: monthly * 24, suffix: "à vie" };
-  };
+  const { data: plans = [], isLoading } = usePlans();
 
   return (
     <div className="min-h-screen bg-background">
@@ -66,38 +48,42 @@ function TarifsPage() {
             <Sparkles className="h-3.5 w-3.5" /> Sans engagement
           </span>
           <h1 className="mt-4 font-display text-4xl font-black tracking-tight sm:text-5xl">Des tarifs simples, sans surprise.</h1>
-          <p className="mt-3 text-muted-foreground">14 jours d'essai gratuits sur toutes les formules.</p>
+          <p className="mt-3 text-muted-foreground">3 jours d'essai gratuits sur toutes les formules.</p>
 
           <div className="mt-8 inline-flex rounded-2xl border border-border bg-card p-1">
-            {(["mensuel", "annuel", "lifetime"] as const).map((p) => (
+            {(["mensuel", "annuel"] as const).map((p) => (
               <button key={p} onClick={() => setPeriod(p)}
                 className={cn("relative rounded-xl px-4 py-2 text-sm font-semibold capitalize transition-colors",
                   period === p ? "bg-primary text-primary-foreground shadow-elegant" : "text-muted-foreground hover:text-foreground")}>
                 {p}
                 {p === "annuel" && (
-                  <span className="ml-1.5 rounded-full bg-success/20 px-1.5 py-0.5 text-[9px] font-bold text-success">-20%</span>
+                  <span className="ml-1.5 rounded-full bg-success/20 px-1.5 py-0.5 text-[9px] font-bold text-success">économisez</span>
                 )}
               </button>
             ))}
           </div>
         </div>
 
+        {isLoading ? (
+          <div className="mt-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : (
         <div className="mx-auto mt-12 grid max-w-6xl gap-5 px-5 md:grid-cols-3">
-          {PLANS.map((plan) => {
-            const price = priceFor(plan.price_month);
+          {plans.map((plan) => {
+            const amount = period === "mensuel" ? plan.price_month : plan.price_year;
+            const suffix = period === "mensuel" ? "/ mois" : "/ an";
             return (
               <div key={plan.id}
                 className={cn("relative rounded-3xl border p-7 transition-all",
-                  plan.recommended ? "border-primary bg-card shadow-elegant lg:scale-105" : "border-border bg-card")}>
-                {plan.recommended && (
+                  plan.is_recommended ? "border-primary bg-card shadow-elegant lg:scale-105" : "border-border bg-card")}>
+                {plan.is_recommended && (
                   <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-primary to-primary-glow px-3 py-1 text-[10px] font-bold uppercase text-primary-foreground shadow-glow">
                     Populaire
                   </span>
                 )}
                 <div className="font-display text-xl font-bold">{plan.name}</div>
                 <div className="mt-3 flex items-baseline gap-1.5">
-                  <span className="tabular font-display text-4xl font-black">{formatXOF(price.amount)}</span>
-                  <span className="text-xs text-muted-foreground">{price.suffix}</span>
+                  <span className="tabular font-display text-4xl font-black">{formatXOF(amount)}</span>
+                  <span className="text-xs text-muted-foreground">{suffix}</span>
                 </div>
                 <ul className="mt-5 space-y-2 text-sm">
                   {plan.features.map((f) => (
@@ -106,7 +92,7 @@ function TarifsPage() {
                 </ul>
                 <Link to="/inscription"
                   className={cn("mt-6 flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-bold transition-colors",
-                    plan.recommended
+                    plan.is_recommended
                       ? "bg-gradient-to-r from-primary to-primary-glow text-primary-foreground shadow-elegant hover:opacity-90"
                       : "border border-border bg-background hover:bg-muted")}>
                   Choisir {plan.name} <ArrowRight className="h-4 w-4" />
@@ -114,42 +100,11 @@ function TarifsPage() {
               </div>
             );
           })}
+          {plans.length === 0 && (
+            <div className="col-span-full text-center text-sm text-muted-foreground">Aucune formule disponible pour le moment.</div>
+          )}
         </div>
-      </section>
-
-      <section className="border-y border-border bg-muted/30 py-16">
-        <div className="mx-auto max-w-5xl px-5">
-          <h2 className="text-center font-display text-2xl font-bold sm:text-3xl">Comparez en détail</h2>
-          <div className="mt-8 overflow-hidden rounded-2xl border border-border bg-card">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40">
-                <tr>
-                  <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Fonctionnalité</th>
-                  <th className="px-4 py-3 text-center text-xs font-bold">Starter</th>
-                  <th className="px-4 py-3 text-center text-xs font-bold text-primary">Pro</th>
-                  <th className="px-4 py-3 text-center text-xs font-bold">Business</th>
-                </tr>
-              </thead>
-              <tbody>
-                {FEATURE_MATRIX.map((row) => (
-                  <tr key={row.label} className="border-t border-border/60">
-                    <td className="px-4 py-3 font-medium">{row.label}</td>
-                    {(["starter", "pro", "business"] as const).map((k) => {
-                      const v = row[k];
-                      return (
-                        <td key={k} className="px-4 py-3 text-center">
-                          {v === true ? <Check className="mx-auto h-4 w-4 text-success" /> :
-                            v === false ? <X className="mx-auto h-4 w-4 text-muted-foreground/50" /> :
-                              <span className="text-xs tabular font-semibold">{v}</span>}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        )}
       </section>
 
       <section className="py-16">

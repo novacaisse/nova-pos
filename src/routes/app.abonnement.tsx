@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { useShop } from "@/lib/auth/ShopProvider";
 import { useSubscription, useSubscriptionPayments, formatXOF } from "@/lib/data/hooks";
 import { getTrialInfo } from "@/lib/trial";
-import { PLANS } from "@/lib/mock/subscription";
+import { usePlans } from "@/lib/data/adminHooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/abonnement")({
@@ -19,9 +19,10 @@ function AbonnementPage() {
   const { currentShop } = useShop();
   const { data: subscription, isLoading: subLoading } = useSubscription();
   const { data: payments = [], isLoading: paymentsLoading } = useSubscriptionPayments();
+  const { data: plans = [] } = usePlans();
   const trial = getTrialInfo(currentShop);
 
-  const currentPlan = PLANS.find((p) => p.id === subscription?.plan);
+  const currentPlan = plans.find((p) => p.id === subscription?.plan);
 
   return (
     <div>
@@ -78,14 +79,14 @@ function AbonnementPage() {
             Le paiement en ligne (MoneyFusion) arrive bientôt — le changement de formule n'est pas encore disponible.
           </p>
           <div className="grid gap-3 md:grid-cols-3">
-            {PLANS.map((p) => {
+            {plans.map((p) => {
               const isCurrent = p.id === subscription?.plan;
               return (
                 <div key={p.id} className={cn(
                   "relative flex flex-col rounded-2xl border p-5 transition-shadow",
-                  p.recommended ? "border-primary/60 bg-card shadow-elegant" : "border-border bg-card",
+                  p.is_recommended ? "border-primary/60 bg-card shadow-elegant" : "border-border bg-card",
                 )}>
-                  {p.recommended && (
+                  {p.is_recommended && (
                     <span className="absolute -top-2.5 left-5 rounded-full bg-gradient-to-br from-primary to-primary-glow px-2 py-0.5 text-[10px] font-bold uppercase text-primary-foreground shadow-glow">
                       <Sparkles className="mr-1 inline h-3 w-3" /> Recommandé
                     </span>
