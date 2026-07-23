@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Store, CreditCard, Receipt, LifeBuoy, Settings, Shield } from "lucide-react";
+import { LayoutDashboard, Store, CreditCard, Receipt, LifeBuoy, Settings, Shield, UserCircle } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, useSidebar,
@@ -13,6 +13,7 @@ const ITEMS = [
   { title: "Facturation", url: "/admin/facturation", icon: Receipt },
   { title: "Support", url: "/admin/support", icon: LifeBuoy },
   { title: "Paramètres", url: "/admin/parametres", icon: Settings },
+  { title: "Mon profil", url: "/admin/profil", icon: UserCircle },
 ];
 
 export function AdminSidebar() {
@@ -29,8 +30,8 @@ export function AdminSidebar() {
           </div>
           {!collapsed && (
             <div className="min-w-0">
-              <div className="truncate font-display text-sm font-bold">Digitorizon</div>
-              <div className="truncate text-[10px] uppercase tracking-widest text-muted-foreground">Super Admin</div>
+              <div className="truncate font-display text-sm font-bold">NovaCaisse</div>
+              <div className="truncate text-[10px] uppercase tracking-widest text-muted-foreground">Back-office</div>
             </div>
           )}
         </Link>

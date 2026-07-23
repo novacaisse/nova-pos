@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { Shield, ArrowUpRight, Loader2 } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
+import { AdminUserMenu } from "@/components/admin/AdminUserMenu";
+import { AdminBottomNav } from "@/components/admin/AdminBottomNav";
 import { ThemeToggle } from "@/components/app/ThemeToggle";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useIsSuperAdmin } from "@/lib/data/adminHooks";
@@ -48,19 +50,14 @@ function AdminLayout() {
                 Voir le site <ArrowUpRight className="h-3.5 w-3.5" />
               </a>
               <ThemeToggle />
-              <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card py-1 pl-1 pr-3">
-                <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-foreground to-foreground/70 text-xs font-bold text-background">DT</div>
-                <div className="hidden leading-tight sm:block">
-                  <div className="text-xs font-semibold">Digitorizon</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Super Admin</div>
-                </div>
-              </div>
+              <AdminUserMenu />
             </div>
           </header>
-          <main className="flex-1 min-w-0">
+          <main className="flex-1 min-w-0 pb-16 md:pb-0">
             <Outlet />
           </main>
         </div>
+        <AdminBottomNav />
       </div>
     </SidebarProvider>
   );
