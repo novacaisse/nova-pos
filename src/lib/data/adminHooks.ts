@@ -66,6 +66,53 @@ export function useDeletePlan() {
   });
 }
 
+// ============ BRANDING GLOBAL (logo/favicon plateforme) ============
+// Table singleton (migration 019) — lecture publique (anon inclus : landing,
+// connexion, inscription), écriture réservée au Super Admin. Distinct de
+// shops.logo_url (propre à chaque boutique).
+export type AppSettings = { logo_url: string | null; favicon_url: string | null };
+
+export function useAppSettings() {
+  return useQuery({
+    queryKey: ["app_settings"],
+    queryFn: async (): Promise<AppSettings> => {
+      const { data, error } = await supabase.from("app_settings").select("logo_url, favicon_url").eq("id", true).single();
+      if (error) throw error;
+      return data as AppSettings;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpdateAppSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<AppSettings>) => {
+      const { error } = await supabase.from("app_settings").update(patch).eq("id", true);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["app_settings"] }),
+  });
+}
+
+// Upload logo/favicon (bucket "app-branding", migration 019 — public en
+// lecture, écriture Super Admin uniquement). Un fichier fixe par usage
+// ("logo" / "favicon", écrasé à chaque upload), met à jour app_settings.
+export function useUploadBrandingAsset() {
+  const updateSettings = useUpdateAppSettings();
+  return useMutation({
+    mutationFn: async ({ kind, file }: { kind: "logo" | "favicon"; file: File }): Promise<string> => {
+      const { error: upErr } = await supabase.storage.from("app-branding")
+        .upload(kind, file, { upsert: true, cacheControl: "3600", contentType: file.type });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("app-branding").getPublicUrl(kind);
+      const url = `${data.publicUrl}?v=${Date.now()}`;
+      await updateSettings.mutateAsync(kind === "logo" ? { logo_url: url } : { favicon_url: url });
+      return url;
+    },
+  });
+}
+
 // ============ BOUTIQUES (toutes, cross-tenant) ============
 export type AdminShop = {
   id: string; name: string; slug: string; owner_id: string;

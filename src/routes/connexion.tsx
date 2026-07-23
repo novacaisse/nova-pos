@@ -1,8 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Zap, Mail, Lock, ArrowRight, Loader2, AlertCircle } from "lucide-react";
+import { Mail, Lock, ArrowRight, Loader2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { BrandLogo } from "@/components/app/BrandLogo";
 
 export const Route = createFileRoute("/connexion")({
   head: () => ({ meta: [{ title: "Connexion — NovaCaisse" }] }),
@@ -34,9 +35,7 @@ function ConnexionPage() {
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/10">
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-5 py-10">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-glow">
-            <Zap className="h-5 w-5" strokeWidth={2.5} />
-          </div>
+          <BrandLogo className="h-11 w-11 shadow-glow" iconClassName="h-5 w-5" />
           <span className="font-display text-2xl font-bold tracking-tight">NovaCaisse</span>
         </Link>
 

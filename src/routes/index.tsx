@@ -7,6 +7,7 @@ import {
 import { usePlans } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 import { formatMoney } from "@/lib/data/hooks";
+import { BrandLogo } from "@/components/app/BrandLogo";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -64,9 +65,7 @@ function Header() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-glow">
-            <Zap className="h-5 w-5" strokeWidth={2.5} />
-          </div>
+          <BrandLogo className="h-10 w-10 shadow-glow" iconClassName="h-5 w-5" />
           <span className="font-display text-xl font-bold tracking-tight">NovaCaisse</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
@@ -341,7 +340,7 @@ function Footer() {
       <div className="mx-auto grid max-w-6xl gap-8 px-5 py-12 sm:grid-cols-4">
         <div className="sm:col-span-2">
           <div className="flex items-center gap-2.5">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground"><Zap className="h-4 w-4" strokeWidth={2.5} /></div>
+            <BrandLogo className="h-9 w-9" iconClassName="h-4 w-4" />
             <span className="font-display text-lg font-bold">NovaCaisse</span>
           </div>
           <p className="mt-3 max-w-sm text-xs text-muted-foreground">La caisse moderne pour les commerçants d'Afrique de l'Ouest. Édité par Digitorizon.</p>

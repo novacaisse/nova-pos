@@ -2,7 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Zap, Loader2, CircleCheck, XCircle, Check } from "lucide-react";
+import { Loader2, CircleCheck, XCircle, Check } from "lucide-react";
+import { BrandLogo } from "@/components/app/BrandLogo";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useSubscriptionPayment, useCheckSubscriptionPayment } from "@/lib/data/hooks";
 
@@ -125,9 +126,7 @@ function ConfirmationPage() {
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center px-5 py-8">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-glow">
-            <Zap className="h-5 w-5" strokeWidth={2.5} />
-          </div>
+          <BrandLogo className="h-11 w-11 shadow-glow" iconClassName="h-5 w-5" />
           <span className="font-display text-2xl font-bold">NovaCaisse</span>
         </Link>
 

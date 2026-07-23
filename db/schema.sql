@@ -569,6 +569,19 @@ create index if not exists idx_support_messages_ticket on public.support_message
 alter table public.support_tickets enable row level security;
 alter table public.support_messages enable row level security;
 
+-- Branding global de la plateforme (migration 019) : table singleton (une
+-- seule ligne, id fixé à true) — logo/favicon affichés sur les pages
+-- publiques/boutique, distinct de shops.logo_url (propre à chaque boutique).
+create table if not exists public.app_settings (
+  id boolean primary key default true,
+  logo_url text,
+  favicon_url text,
+  updated_at timestamptz not null default now(),
+  constraint app_settings_singleton check (id)
+);
+insert into public.app_settings (id) values (true) on conflict (id) do nothing;
+alter table public.app_settings enable row level security;
+
 -- =============== GRANTS (obligatoires pour la Data API PostgREST) ===============
 grant select, insert, update, delete on public.shops           to authenticated;
 grant select, insert, update, delete on public.profiles        to authenticated;
@@ -596,6 +609,8 @@ grant select, insert, update, delete on public.support_tickets to authenticated;
 grant select, insert on public.support_messages to authenticated;
 grant select, insert, update, delete on public.purchase_orders to authenticated;
 grant select, insert, update, delete on public.purchase_order_items to authenticated;
+grant select on public.app_settings to anon, authenticated;
+grant update on public.app_settings to authenticated;
 grant all on all tables in schema public to service_role;
 
 -- =============== RLS ===============
@@ -1024,6 +1039,16 @@ create policy support_messages_insert on public.support_messages for insert to a
     )
   );
 
+-- 21. app_settings — lecture publique (anon inclus : landing, connexion,
+-- inscription avant authentification), écriture réservée au Super Admin.
+drop policy if exists app_settings_select on public.app_settings;
+create policy app_settings_select on public.app_settings for select to anon, authenticated
+  using (true);
+drop policy if exists app_settings_update on public.app_settings;
+create policy app_settings_update on public.app_settings for update to authenticated
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
+
 -- =============== TRIGGERS ===============
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -1219,6 +1244,60 @@ create policy product_images_delete on storage.objects for delete to authenticat
     bucket_id = 'product-images'
     and public.has_any_role_in_shop(((storage.foldername(name))[1])::uuid, array['owner','manager','stock']::public.app_role[])
   );
+
+-- Bucket pour la photo de profil (migration 018) : public en lecture,
+-- écriture restreinte au propriétaire du profil. Convention de chemin
+-- obligatoire côté client : {user_id}/avatar.
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+drop policy if exists avatars_select on storage.objects;
+create policy avatars_select on storage.objects for select
+  using (bucket_id = 'avatars');
+drop policy if exists avatars_insert on storage.objects;
+create policy avatars_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'avatars'
+    and ((storage.foldername(name))[1])::uuid = auth.uid()
+  );
+drop policy if exists avatars_update on storage.objects;
+create policy avatars_update on storage.objects for update to authenticated
+  using (
+    bucket_id = 'avatars'
+    and ((storage.foldername(name))[1])::uuid = auth.uid()
+  )
+  with check (
+    bucket_id = 'avatars'
+    and ((storage.foldername(name))[1])::uuid = auth.uid()
+  );
+drop policy if exists avatars_delete on storage.objects;
+create policy avatars_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'avatars'
+    and ((storage.foldername(name))[1])::uuid = auth.uid()
+  );
+
+-- Bucket pour le branding global de la plateforme (migration 019) :
+-- public en lecture, écriture réservée aux super-admins. Convention de
+-- chemin : "logo" / "favicon" (pas de préfixe, un seul jeu de fichiers).
+insert into storage.buckets (id, name, public)
+values ('app-branding', 'app-branding', true)
+on conflict (id) do nothing;
+
+drop policy if exists app_branding_select on storage.objects;
+create policy app_branding_select on storage.objects for select
+  using (bucket_id = 'app-branding');
+drop policy if exists app_branding_insert on storage.objects;
+create policy app_branding_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'app-branding' and public.is_super_admin());
+drop policy if exists app_branding_update on storage.objects;
+create policy app_branding_update on storage.objects for update to authenticated
+  using (bucket_id = 'app-branding' and public.is_super_admin())
+  with check (bucket_id = 'app-branding' and public.is_super_admin());
+drop policy if exists app_branding_delete on storage.objects;
+create policy app_branding_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'app-branding' and public.is_super_admin());
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables (19 + super_admins, plans,

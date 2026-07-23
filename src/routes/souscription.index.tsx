@@ -1,8 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, Check, Loader2, Smartphone, ArrowRight, AlertTriangle } from "lucide-react";
+import { Check, Loader2, Smartphone, ArrowRight, AlertTriangle } from "lucide-react";
 import { invokeFn } from "@/lib/data/invokeFn";
+import { BrandLogo } from "@/components/app/BrandLogo";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useShop } from "@/lib/auth/ShopProvider";
 import { useProfile, formatMoney } from "@/lib/data/hooks";
@@ -100,9 +101,7 @@ function SouscriptionPage() {
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col px-5 py-8">
         <Link to="/" className="mx-auto flex items-center gap-2.5">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-glow">
-            <Zap className="h-5 w-5" strokeWidth={2.5} />
-          </div>
+          <BrandLogo className="h-11 w-11 shadow-glow" iconClassName="h-5 w-5" />
           <span className="font-display text-2xl font-bold">NovaCaisse</span>
         </Link>
 

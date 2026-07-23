@@ -14,7 +14,6 @@ import {
   UsersRound,
   Tag,
   Settings,
-  Zap,
   FileText,
   Sparkles,
   X,
@@ -32,6 +31,7 @@ import {
   SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { BrandLogo } from "@/components/app/BrandLogo";
 
 const ICONS = {
   LayoutDashboard,
@@ -157,9 +157,7 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex items-center gap-2 px-2 py-3">
           <Link to="/app" onClick={handleNavClick} className="flex min-w-0 flex-1 items-center gap-2.5">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sidebar-primary to-primary-glow shadow-glow">
-              <Zap className="h-4.5 w-4.5 text-sidebar-primary-foreground" strokeWidth={2.5} />
-            </div>
+            <BrandLogo className="h-9 w-9 shadow-glow" iconClassName="h-4.5 w-4.5" variant="sidebar" />
             {!collapsed && (
               <div className="min-w-0 leading-tight">
                 <div className="font-display text-base font-bold tracking-tight text-sidebar-foreground">

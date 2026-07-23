@@ -1,10 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Zap, ArrowRight, Image as ImageIcon, Sparkles, AlertCircle, Loader2 } from "lucide-react";
+import { ArrowRight, Image as ImageIcon, Sparkles, AlertCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
+import { BrandLogo } from "@/components/app/BrandLogo";
 
 export const Route = createFileRoute("/inscription")({
   head: () => ({ meta: [{ title: "Créer un compte — NovaCaisse" }] }),
@@ -102,9 +103,7 @@ function InscriptionPage() {
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-5 py-10">
         <Link to="/" className="mx-auto flex items-center gap-2.5">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-glow">
-            <Zap className="h-5 w-5" strokeWidth={2.5} />
-          </div>
+          <BrandLogo className="h-11 w-11 shadow-glow" iconClassName="h-5 w-5" />
           <span className="font-display text-2xl font-bold">NovaCaisse</span>
         </Link>
 

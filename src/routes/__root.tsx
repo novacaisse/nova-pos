@@ -14,6 +14,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { ShopProvider } from "@/lib/auth/ShopProvider";
 import { ThemeProvider } from "@/lib/theme";
+import { DynamicFavicon } from "@/components/app/DynamicFavicon";
 
 
 function NotFoundComponent() {
@@ -133,6 +134,7 @@ function RootComponent() {
       <ThemeProvider>
         <AuthProvider>
           <ShopProvider>
+            <DynamicFavicon />
             {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
             <Outlet />
           </ShopProvider>

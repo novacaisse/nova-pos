@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { Save, FileText, Package, Plus, Trash2, Loader2, Star } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Save, FileText, Package, Plus, Trash2, Loader2, Star, Palette, Image as ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { usePlans, useUpsertPlan, useDeletePlan, type Plan } from "@/lib/data/adminHooks";
+import {
+  usePlans, useUpsertPlan, useDeletePlan, useAppSettings, useUploadBrandingAsset,
+  type Plan,
+} from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +18,7 @@ const slugify = (s: string) =>
     .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "formule";
 
 function AdminParametres() {
-  const [tab, setTab] = useState<"plans" | "landing">("plans");
+  const [tab, setTab] = useState<"plans" | "branding" | "landing">("plans");
   const { data: plans = [], isLoading } = usePlans();
   const [creating, setCreating] = useState(false);
 
@@ -33,6 +36,7 @@ function AdminParametres() {
         <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
           {([
             { k: "plans" as const, label: "Formules & tarifs", icon: Package },
+            { k: "branding" as const, label: "Marque", icon: Palette },
             { k: "landing" as const, label: "Contenu landing", icon: FileText },
           ]).map((t) => (
             <button key={t.k} onClick={() => setTab(t.k)}
@@ -53,6 +57,8 @@ function AdminParametres() {
             </div>
           )
         )}
+
+        {tab === "branding" && <BrandingTab />}
 
         {tab === "landing" && (
           <div className="rounded-2xl border border-border bg-card p-6">
@@ -189,6 +195,79 @@ function PriceField({ label, value, onChange }: { label: string; value: number; 
       </div>
       <div className="mt-1 text-[10px] text-muted-foreground">≈ {formatXOF(value)}</div>
     </label>
+  );
+}
+
+function BrandingTab() {
+  const { data: settings, isLoading } = useAppSettings();
+  const upload = useUploadBrandingAsset();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"logo" | "favicon" | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const faviconInputRef = useRef<HTMLInputElement>(null);
+
+  const pick = async (kind: "logo" | "favicon", file?: File) => {
+    if (!file) return;
+    setError(null);
+    setBusy(kind);
+    try {
+      await upload.mutateAsync({ kind, file });
+    } catch (e: any) {
+      setError(e?.message ?? "Impossible d'enregistrer le fichier.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (isLoading) {
+    return <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>;
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-6">
+      <div className="mb-4">
+        <div className="font-display text-lg font-bold">Marque de la plateforme</div>
+        <div className="text-xs text-muted-foreground">
+          Logo et favicon affichés sur les pages publiques et l'espace boutique (landing, tarifs, connexion,
+          inscription, souscription, sidebar) — distinct du logo propre à chaque boutique.
+        </div>
+      </div>
+      {error && <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div className="rounded-xl border border-border p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Logo</div>
+          <div className="flex items-center gap-3">
+            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-muted">
+              {settings?.logo_url ? <img src={settings.logo_url} alt="" className="h-full w-full object-contain" /> : <ImageIcon className="h-6 w-6 text-muted-foreground" />}
+            </div>
+            <button onClick={() => logoInputRef.current?.click()} disabled={busy === "logo"}
+              className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold hover:bg-muted disabled:opacity-60">
+              {busy === "logo" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+              {settings?.logo_url ? "Remplacer" : "Choisir un logo"}
+            </button>
+            <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick("logo", e.target.files?.[0])} />
+          </div>
+        </div>
+        <div className="rounded-xl border border-border p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Favicon</div>
+          <div className="flex items-center gap-3">
+            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-muted">
+              {settings?.favicon_url ? <img src={settings.favicon_url} alt="" className="h-8 w-8 object-contain" /> : <ImageIcon className="h-6 w-6 text-muted-foreground" />}
+            </div>
+            <button onClick={() => faviconInputRef.current?.click()} disabled={busy === "favicon"}
+              className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold hover:bg-muted disabled:opacity-60">
+              {busy === "favicon" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+              {settings?.favicon_url ? "Remplacer" : "Choisir un favicon"}
+            </button>
+            <input ref={faviconInputRef} type="file" accept="image/png,image/x-icon,image/svg+xml" className="hidden" onChange={(e) => pick("favicon", e.target.files?.[0])} />
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 text-[11px] text-muted-foreground">
+        Le favicon se met à jour dans les onglets déjà ouverts après quelques secondes ; l'icône utilisée lors de
+        l'installation en PWA (écran d'accueil) reste pour l'instant celle empaquetée avec l'application.
+      </div>
+    </div>
   );
 }
 
