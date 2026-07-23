@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { useShop } from "@/lib/auth/ShopProvider";
 import { invokeFn } from "@/lib/data/invokeFn";
 
 export function useIsSuperAdmin() {
@@ -24,13 +25,34 @@ export function useIsSuperAdmin() {
 // Une seule requête pour les deux usages : la RLS renvoie automatiquement
 // les formules inactives en plus si l'appelant est super admin (OR des
 // deux policies), donc pas besoin d'un hook séparé pour le CMS.
+// limits.max_users / limits.ai_credits : 0 ou absent = illimité.
+// limits.modules : urls de modules inclus (cf. PLAN_MODULES) — absent ou
+// vide = aucune restriction (comportement par défaut, rétrocompatible
+// avec les formules créées avant l'ajout de ce champ, Bloc 27).
+export type PlanLimits = { max_users?: number; ai_credits?: number; modules?: string[] };
 export type Plan = {
   id: string; name: string;
   price_month: number; price_year: number; currency: string;
-  features: string[]; limits: Record<string, number | string>;
+  features: string[]; limits: PlanLimits;
   is_active: boolean; is_recommended: boolean; sort_order: number;
   created_at: string;
 };
+
+// Modules "métier" pouvant être inclus/exclus par formule — le tableau de
+// bord, l'équipe et les paramètres restent toujours accessibles (gestion
+// du compte, jamais verrouillable par une formule).
+export const PLAN_MODULES: { url: string; label: string }[] = [
+  { url: "/app/caisse", label: "Point de vente" },
+  { url: "/app/ventes", label: "Ventes" },
+  { url: "/app/devis", label: "Devis" },
+  { url: "/app/clients", label: "Clients" },
+  { url: "/app/produits", label: "Produits" },
+  { url: "/app/stock", label: "Stock" },
+  { url: "/app/fournisseurs", label: "Fournisseurs" },
+  { url: "/app/depenses", label: "Dépenses" },
+  { url: "/app/rapports", label: "Rapports" },
+  { url: "/app/nova", label: "Nova IA" },
+];
 
 export function usePlans() {
   return useQuery({
@@ -53,6 +75,27 @@ export function useUpsertPlan() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["plans"] }),
   });
+}
+
+// Formule de la boutique courante (recherchée dans plans par shops.plan) —
+// null tant que non chargée ou si le plan n'existe plus. Base commune pour
+// useCurrentPlanModules (nav) et l'enforcement du nombre de comptes max
+// (Équipe), Bloc 27.
+export function useCurrentPlan(): Plan | null {
+  const { currentShop } = useShop();
+  const { data: plans = [] } = usePlans();
+  return plans.find((p) => p.id === currentShop?.plan) ?? null;
+}
+
+// Modules inclus dans la formule de la boutique courante — null = aucune
+// restriction (formule sans `modules` défini, ou en attente de chargement).
+// Utilisé par AppSidebar/BottomNav (Bloc 27) pour masquer les modules non
+// inclus dans la formule active, en plus des restrictions par rôle déjà
+// en place (HIDDEN_FOR).
+export function useCurrentPlanModules(): string[] | null {
+  const plan = useCurrentPlan();
+  const modules = plan?.limits.modules;
+  return modules && modules.length > 0 ? modules : null;
 }
 
 export function useDeletePlan() {

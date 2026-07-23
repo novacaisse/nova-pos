@@ -8,6 +8,7 @@ import {
   type ShopMember, type TeamPermissions,
 } from "@/lib/data/hooks";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { useCurrentPlan } from "@/lib/data/adminHooks";
 import { ROLE_LABEL, type AppRole } from "@/lib/roles";
 import { PERMISSIONS_MATRIX } from "@/lib/permissionsMatrix";
 import { cn } from "@/lib/utils";
@@ -36,21 +37,31 @@ function EquipePage() {
 
   const isOwner = myRole === "owner";
   const roleCounts = new Set(members.map((m) => m.role)).size;
+  const plan = useCurrentPlan();
+  const maxUsers = plan?.limits.max_users ?? 0;
+  const atUserLimit = maxUsers > 0 && members.length >= maxUsers;
 
   return (
     <div>
       <PageHeader title="Équipe" subtitle="Utilisateurs, rôles et permissions"
         actions={isOwner && (
-          <button onClick={() => setInviting(true)}
-            className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
+          <button onClick={() => setInviting(true)} disabled={atUserLimit}
+            title={atUserLimit ? `Limite de ${maxUsers} comptes atteinte pour la formule ${plan?.name}` : undefined}
+            className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
             <Plus className="h-4 w-4" /> Ajouter un membre
           </button>
         )}
       />
 
       <div className="space-y-4 p-5 sm:p-8">
+        {atUserLimit && (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
+            Limite de {maxUsers} comptes atteinte pour la formule <b>{plan?.name}</b>. Passez à une formule supérieure
+            depuis <a href="/app/abonnement" className="underline">Abonnement</a> pour ajouter plus de membres.
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
-          <StatCard label="Membres" value={String(members.length)} icon={<UserCog className="h-5 w-5" />} accent="primary" />
+          <StatCard label="Membres" value={maxUsers > 0 ? `${members.length} / ${maxUsers}` : String(members.length)} icon={<UserCog className="h-5 w-5" />} accent="primary" />
           <StatCard label="Rôles distincts" value={String(roleCounts)} icon={<Shield className="h-5 w-5" />} accent="accent" />
         </div>
 

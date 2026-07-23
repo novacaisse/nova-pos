@@ -16,6 +16,7 @@ import {
   FileText,
   X,
 } from "lucide-react";
+import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
 import { cn } from "@/lib/utils";
 
 type Item = { label: string; to: string; icon: React.ComponentType<{ className?: string }> };
@@ -43,14 +44,20 @@ export function BottomNav() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const isActive = (to: string) => (to === "/app" ? pathname === "/app" : pathname === to || pathname.startsWith(to + "/"));
 
+  const planModules = useCurrentPlanModules();
+  const isGatableModule = (to: string) => PLAN_MODULES.some((m) => m.url === to);
+  const included = (item: Item) => !planModules || !isGatableModule(item.to) || planModules.includes(item.to);
+  const primary = PRIMARY.filter(included);
+  const more = MORE.filter(included);
+
   return (
     <>
       <nav
         aria-label="Navigation principale"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
       >
-        <ul className="grid grid-cols-5">
-          {PRIMARY.map((item) => {
+        <ul className="grid" style={{ gridTemplateColumns: `repeat(${primary.length + 1}, minmax(0, 1fr))` }}>
+          {primary.map((item) => {
             const active = isActive(item.to);
             const Icon = item.icon;
             return (
@@ -101,7 +108,7 @@ export function BottomNav() {
               </button>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {MORE.map((m) => {
+              {more.map((m) => {
                 const Icon = m.icon;
                 const active = isActive(m.to);
                 return (

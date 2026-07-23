@@ -40,6 +40,13 @@ function AbonnementPage() {
                   <span className="font-display text-3xl font-bold">{currentPlan?.name ?? "Essai gratuit"}</span>
                   {currentPlan && <span className="tabular text-sm text-muted-foreground">{formatMoney(currentPlan.price_month, currentPlan.currency)} / mois</span>}
                 </div>
+                {currentPlan && (currentPlan.limits.max_users || currentPlan.limits.ai_credits) && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {currentPlan.limits.max_users ? `${currentPlan.limits.max_users} comptes` : "Comptes illimités"}
+                    {" · "}
+                    {currentPlan.limits.ai_credits ? `${currentPlan.limits.ai_credits} crédits IA/mois` : "Crédits IA illimités"}
+                  </div>
+                )}
                 <div className="mt-2 flex items-center gap-2 text-xs">
                   {trial.onTrial ? (
                     <>

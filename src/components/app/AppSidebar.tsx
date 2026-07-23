@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useMyRole } from "@/lib/data/hooks";
+import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
 import type { AppRole } from "@/lib/roles";
 import {
   LayoutDashboard,
@@ -100,11 +101,15 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { data: myRole } = useMyRole();
+  const planModules = useCurrentPlanModules();
 
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
 
-  const visible = (item: NavItem) => !myRole || !HIDDEN_FOR[item.url]?.includes(myRole);
+  const isGatableModule = (url: string) => PLAN_MODULES.some((m) => m.url === url);
+  const visible = (item: NavItem) =>
+    (!myRole || !HIDDEN_FOR[item.url]?.includes(myRole))
+    && (!planModules || !isGatableModule(item.url) || planModules.includes(item.url));
 
   // Ferme automatiquement la sidebar sur mobile après un clic.
   const handleNavClick = () => {

@@ -4,7 +4,7 @@ import { Save, FileText, Package, Plus, Trash2, Loader2, Star, Palette, Image as
 import { PageHeader } from "@/components/app/PageHeader";
 import {
   usePlans, useUpsertPlan, useDeletePlan, useAppSettings, useUploadBrandingAsset,
-  type Plan,
+  PLAN_MODULES, type Plan,
 } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
@@ -97,6 +97,15 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
   const [newFeature, setNewFeature] = useState("");
   const [isActive, setIsActive] = useState(plan?.is_active ?? true);
   const [isRecommended, setIsRecommended] = useState(plan?.is_recommended ?? false);
+  const [maxUsers, setMaxUsers] = useState(plan?.limits.max_users ?? 0);
+  const [aiCredits, setAiCredits] = useState(plan?.limits.ai_credits ?? 0);
+  // Un plan sans `modules` défini = tout inclus (rétrocompatible) — l'état
+  // local part alors de la liste complète cochée, pour que décocher une
+  // case retire bien ce module plutôt que de créer une liste à un élément.
+  const allModuleUrls = PLAN_MODULES.map((m) => m.url);
+  const [modules, setModules] = useState<string[]>(
+    plan?.limits.modules?.length ? plan.limits.modules : allModuleUrls,
+  );
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -104,8 +113,15 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
     if (plan) {
       setName(plan.name); setPriceMonth(plan.price_month); setPriceYear(plan.price_year);
       setFeatures(plan.features); setIsActive(plan.is_active); setIsRecommended(plan.is_recommended);
+      setMaxUsers(plan.limits.max_users ?? 0); setAiCredits(plan.limits.ai_credits ?? 0);
+      setModules(plan.limits.modules?.length ? plan.limits.modules : allModuleUrls);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan]);
+
+  const toggleModule = (url: string) => {
+    setModules((ms) => ms.includes(url) ? ms.filter((m) => m !== url) : [...ms, url]);
+  };
 
   const save = async () => {
     setSaving(true);
@@ -115,7 +131,11 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
         name, price_month: priceMonth, price_year: priceYear,
         features, is_active: isActive, is_recommended: isRecommended,
         currency: plan?.currency ?? "XOF",
-        limits: plan?.limits ?? {},
+        limits: {
+          max_users: maxUsers || undefined,
+          ai_credits: aiCredits || undefined,
+          modules: modules.length === allModuleUrls.length ? undefined : modules,
+        },
         sort_order: plan?.sort_order ?? 99,
       });
       if (isNew) onDoneCreating?.();
@@ -160,6 +180,34 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
             <button onClick={() => { if (newFeature.trim()) { setFeatures((fs) => [...fs, newFeature.trim()]); setNewFeature(""); } }}
               className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border hover:bg-muted"><Plus className="h-3.5 w-3.5" /></button>
           </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Comptes max</span>
+          <input type="number" min={0} value={maxUsers} onChange={(e) => setMaxUsers(Math.max(0, Number(e.target.value) || 0))}
+            placeholder="0 = illimité"
+            className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Crédits IA / mois</span>
+          <input type="number" min={0} value={aiCredits} onChange={(e) => setAiCredits(Math.max(0, Number(e.target.value) || 0))}
+            placeholder="0 = illimité"
+            className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
+        </label>
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Modules inclus</div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {PLAN_MODULES.map((m) => (
+            <label key={m.url} className="flex items-center gap-1.5 rounded-lg border border-border/60 px-2 py-1.5 text-xs">
+              <input type="checkbox" checked={modules.includes(m.url)}
+                onChange={() => toggleModule(m.url)} className="h-3.5 w-3.5 accent-primary" />
+              {m.label}
+            </label>
+          ))}
         </div>
       </div>
 
