@@ -28,6 +28,7 @@ import { Route as AppRapportsRouteImport } from './routes/app.rapports'
 import { Route as AppProfilRouteImport } from './routes/app.profil'
 import { Route as AppProduitsRouteImport } from './routes/app.produits'
 import { Route as AppParametresRouteImport } from './routes/app.parametres'
+import { Route as AppNovaRouteImport } from './routes/app.nova'
 import { Route as AppNotificationsRouteImport } from './routes/app.notifications'
 import { Route as AppFournisseursRouteImport } from './routes/app.fournisseurs'
 import { Route as AppEquipeRouteImport } from './routes/app.equipe'
@@ -143,6 +144,11 @@ const AppParametresRoute = AppParametresRouteImport.update({
   path: '/parametres',
   getParentRoute: () => AppRoute,
 } as any)
+const AppNovaRoute = AppNovaRouteImport.update({
+  id: '/nova',
+  path: '/nova',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppNotificationsRoute = AppNotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -256,6 +262,7 @@ export interface FileRoutesByFullPath {
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
+  '/app/nova': typeof AppNovaRoute
   '/app/parametres': typeof AppParametresRoute
   '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
@@ -292,6 +299,7 @@ export interface FileRoutesByTo {
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
+  '/app/nova': typeof AppNovaRoute
   '/app/parametres': typeof AppParametresRoute
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
@@ -330,6 +338,7 @@ export interface FileRoutesById {
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
+  '/app/nova': typeof AppNovaRoute
   '/app/parametres': typeof AppParametresRoute
   '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
@@ -371,6 +380,7 @@ export interface FileRouteTypes {
     | '/app/equipe'
     | '/app/fournisseurs'
     | '/app/notifications'
+    | '/app/nova'
     | '/app/parametres'
     | '/app/produits'
     | '/app/profil'
@@ -407,6 +417,7 @@ export interface FileRouteTypes {
     | '/app/equipe'
     | '/app/fournisseurs'
     | '/app/notifications'
+    | '/app/nova'
     | '/app/parametres'
     | '/app/profil'
     | '/app/rapports'
@@ -444,6 +455,7 @@ export interface FileRouteTypes {
     | '/app/equipe'
     | '/app/fournisseurs'
     | '/app/notifications'
+    | '/app/nova'
     | '/app/parametres'
     | '/app/produits'
     | '/app/profil'
@@ -606,6 +618,13 @@ declare module '@tanstack/react-router' {
       path: '/parametres'
       fullPath: '/app/parametres'
       preLoaderRoute: typeof AppParametresRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/nova': {
+      id: '/app/nova'
+      path: '/nova'
+      fullPath: '/app/nova'
+      preLoaderRoute: typeof AppNovaRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/notifications': {
@@ -796,6 +815,7 @@ interface AppRouteChildren {
   AppEquipeRoute: typeof AppEquipeRoute
   AppFournisseursRoute: typeof AppFournisseursRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
+  AppNovaRoute: typeof AppNovaRoute
   AppParametresRoute: typeof AppParametresRoute
   AppProduitsRoute: typeof AppProduitsRouteWithChildren
   AppProfilRoute: typeof AppProfilRoute
@@ -815,6 +835,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppEquipeRoute: AppEquipeRoute,
   AppFournisseursRoute: AppFournisseursRoute,
   AppNotificationsRoute: AppNotificationsRoute,
+  AppNovaRoute: AppNovaRoute,
   AppParametresRoute: AppParametresRoute,
   AppProduitsRoute: AppProduitsRouteWithChildren,
   AppProfilRoute: AppProfilRoute,

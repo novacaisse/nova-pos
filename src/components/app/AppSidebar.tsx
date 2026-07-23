@@ -16,6 +16,7 @@ import {
   Settings,
   Zap,
   FileText,
+  Sparkles,
   X,
 } from "lucide-react";
 import {
@@ -46,6 +47,7 @@ const ICONS = {
   Tag,
   Settings,
   FileText,
+  Sparkles,
 } as const;
 
 type NavItem = {
@@ -60,6 +62,7 @@ type NavItem = {
 const NAV: Record<string, NavItem[]> = {
   pilotage: [
     { title: "Tableau de bord", url: "/app", icon: "LayoutDashboard" },
+    { title: "Nova IA", url: "/app/nova", icon: "Sparkles" },
     { title: "Rapports", url: "/app/rapports", icon: "BarChart3" },
     { title: "Dépenses", url: "/app/depenses", icon: "Wallet" },
   ],
