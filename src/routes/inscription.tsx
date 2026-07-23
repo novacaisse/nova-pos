@@ -92,8 +92,6 @@ function InscriptionPage() {
 
     // 5. Préférences locales (UI uniquement)
     if (typeof window !== "undefined") {
-      localStorage.setItem("novacaisse.showPwaBanner", "1");
-      localStorage.removeItem("novacaisse.pwaBannerDismissed");
       localStorage.setItem("novacaisse.currentShopId", shopId);
     }
     navigate({ to: "/app" });
