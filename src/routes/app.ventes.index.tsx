@@ -14,6 +14,7 @@ import {
   useShopSettings, useProfile, useProducts, DEFAULT_TICKET_CONFIG, isRevenueSale,
   useFormatMoney, type Sale, type SaleItem,
 } from "@/lib/data/hooks";
+import { renderA4Document, openPrintWindow, THERMAL_CSS } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
 
 type SaleFull = Sale & { sale_items: SaleItem[]; customers: { name: string } | null };
@@ -211,23 +212,51 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
   // caissier qui a lui-même mis ce ticket en attente (RLS étendue en ce sens).
   const canEditDraft = sale.status === "draft" && (canManage || (myRole === "cashier" && sale.cashier_id === user?.id));
 
-  const printDocument = (mode: "receipt" | "proforma") => {
+  const ticket = { ...DEFAULT_TICKET_CONFIG, ...(settings?.data.ticket ?? {}) };
+  const extra = settings?.data ?? {};
+
+  const printReceipt = () => {
     if (!printRef.current) return;
-    const title = mode === "proforma" ? `Proforma ${sale.reference}` : `Reçu ${sale.reference}`;
     const w = window.open("", "_blank", "width=420,height=680");
     if (!w) return;
-    w.document.write(`<html><head><title>${title}</title>
-      <style>body{font-family:-apple-system,sans-serif;font-size:12px;padding:16px;color:#000}
-      h1{font-size:14px;margin:0 0 4px}.row{display:flex;justify-content:space-between;margin:2px 0}
-      hr{border:none;border-top:1px dashed #999;margin:8px 0}img{max-width:80px;display:block;margin:0 auto 6px}
-      .center{text-align:center}.b{font-weight:700}.banner{text-align:center;font-weight:700;letter-spacing:1px;margin-bottom:8px}
-      </style></head><body>${mode === "proforma" ? '<div class="banner">FACTURE PROFORMA — NON FISCALE</div>' : ""}${printRef.current!.innerHTML}</body></html>`);
+    w.document.write(`<html><head><title>Reçu ${sale.reference}</title><style>${THERMAL_CSS}</style></head><body>${printRef.current.innerHTML}</body></html>`);
     w.document.close();
     setTimeout(() => { w.print(); w.close(); }, 200);
   };
 
-  const ticket = { ...DEFAULT_TICKET_CONFIG, ...(settings?.data.ticket ?? {}) };
-  const extra = settings?.data ?? {};
+  const printProforma = () => {
+    const isDueLocal = Number(sale.paid) < Number(sale.total);
+    const bodyHtml = `
+      <div class="doc-parties">
+        <div class="block"><h2>Client</h2><div class="name">${sale.customers?.name ?? "Comptoir"}</div></div>
+        <div class="block" style="text-align:right"><h2>Mode de paiement</h2><div class="name">${PAY_LABEL[sale.payment_method]}</div></div>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>Article</th><th class="num">Qté</th><th class="num">P.U.</th><th class="num">Total</th></tr></thead>
+        <tbody>${sale.sale_items.map((l) => `<tr><td>${l.name}</td><td class="num">${l.quantity}</td><td class="num">${formatXOF(Number(l.unit_price))}</td><td class="num">${formatXOF(Number(l.total))}</td></tr>`).join("")}</tbody>
+      </table>
+      <div class="doc-totals">
+        <div class="row"><span>Sous-total</span><span>${formatXOF(Number(sale.subtotal))}</span></div>
+        ${Number(sale.discount) > 0 ? `<div class="row"><span>Remise</span><span>-${formatXOF(Number(sale.discount))}</span></div>` : ""}
+        <div class="row total"><span>Total</span><span>${formatXOF(Number(sale.total))}</span></div>
+        ${isDueLocal ? `<div class="row"><span>Reste à payer</span><span>${formatXOF(Number(sale.total) - Number(sale.paid))}</span></div>` : ""}
+      </div>`;
+    const html = renderA4Document({
+      docTitle: "Facture proforma",
+      docNumber: sale.reference,
+      docDate: new Date(sale.created_at).toLocaleString("fr-FR"),
+      banner: "Document non fiscal — proforma",
+      shop: {
+        shopName: currentShop?.name ?? "Boutique",
+        logoUrl: currentShop?.logo_url,
+        address: extra.address,
+        phone: extra.phone,
+        ifu: extra.ifu,
+      },
+      bodyHtml,
+    });
+    openPrintWindow(html, { width: 900, height: 700 });
+  };
 
   return (
     <Overlay onClose={onClose}>
@@ -283,11 +312,11 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
           )}
           {sale.status !== "draft" && (
             <>
-              <button onClick={() => printDocument("receipt")}
+              <button onClick={printReceipt}
                 className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-muted">
                 <Printer className="h-3.5 w-3.5" /> Reçu
               </button>
-              <button onClick={() => printDocument("proforma")}
+              <button onClick={printProforma}
                 className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-muted">
                 <FileText className="h-3.5 w-3.5" /> PDF proforma
               </button>

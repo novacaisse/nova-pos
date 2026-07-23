@@ -1,14 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, FileText, Search, X, Send, ArrowRightLeft, Trash2, Edit3, CheckCircle2, Loader2 } from "lucide-react";
+import { Plus, FileText, Search, X, Send, ArrowRightLeft, Trash2, Edit3, CheckCircle2, Loader2, Printer } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import {
   useQuotes, useUpsertQuote, useDeleteQuote, useMarkQuoteConverted,
-  useCreateSale, useCustomers, useProducts, useMyRole, useFormatMoney,
+  useCreateSale, useCustomers, useProducts, useMyRole, useShopSettings, useFormatMoney,
   type QuoteWithItems, type QuoteStatus,
 } from "@/lib/data/hooks";
+import { useShop } from "@/lib/auth/ShopProvider";
+import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/devis")({
@@ -22,6 +24,8 @@ const QUOTE_STATUS_LABEL: Record<QuoteStatus, string> = {
 
 function DevisPage() {
   const formatXOF = useFormatMoney();
+  const { currentShop } = useShop();
+  const { data: settings } = useShopSettings();
   const [period, setPeriod] = useState<Period>("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -48,6 +52,39 @@ function DevisPage() {
 
   const total = filtered.reduce((s, q) => s + q.total, 0);
   const accepted = quotes.filter((q) => q.status === "accepted" || q.status === "converted").length;
+
+  const printQuote = (q: QuoteWithItems) => {
+    const bodyHtml = `
+      <div class="doc-parties">
+        <div class="block"><h2>Client</h2><div class="name">${q.customers?.name ?? "—"}</div></div>
+        <div class="block" style="text-align:right"><h2>Valide jusqu'au</h2><div class="name">${q.valid_until ? new Date(q.valid_until).toLocaleDateString("fr-FR") : "—"}</div></div>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>Article</th><th class="num">Qté</th><th class="num">P.U.</th><th class="num">Total</th></tr></thead>
+        <tbody>${q.quote_items.map((l) => `<tr><td>${l.name}</td><td class="num">${l.quantity}</td><td class="num">${formatXOF(l.unit_price)}</td><td class="num">${formatXOF(l.total)}</td></tr>`).join("")}</tbody>
+      </table>
+      <div class="doc-totals">
+        <div class="row"><span>Sous-total</span><span>${formatXOF(q.subtotal)}</span></div>
+        ${q.discount > 0 ? `<div class="row"><span>Remise</span><span>-${formatXOF(q.discount)}</span></div>` : ""}
+        <div class="row total"><span>Total</span><span>${formatXOF(q.total)}</span></div>
+      </div>
+      ${q.notes ? `<div class="doc-notes">${q.notes}</div>` : ""}`;
+    const html = renderA4Document({
+      docTitle: "Devis",
+      docNumber: q.reference,
+      docDate: new Date(q.created_at).toLocaleDateString("fr-FR"),
+      shop: {
+        shopName: currentShop?.name ?? "Boutique",
+        logoUrl: currentShop?.logo_url,
+        address: settings?.data.address,
+        phone: settings?.data.phone,
+        ifu: settings?.data.ifu,
+      },
+      bodyHtml,
+      footerHtml: "Devis généré par NovaCaisse — sujet à modification jusqu'à acceptation.",
+    });
+    openPrintWindow(html, { width: 900, height: 700 });
+  };
 
   return (
     <div>
@@ -115,6 +152,10 @@ function DevisPage() {
                     <td className="tabular px-4 py-3 text-right font-bold">{formatXOF(q.total)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => printQuote(q)} title="Imprimer / PDF"
+                          className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted">
+                          <Printer className="h-4 w-4" />
+                        </button>
                         {canManage && q.status !== "converted" && (
                           <button onClick={() => setConverting(q)} title="Convertir en vente"
                             className="grid h-8 w-8 place-items-center rounded-lg text-primary hover:bg-primary/10">

@@ -7,7 +7,9 @@ import {
   startOfYear, endOfYear, subMonths, subYears,
 } from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useSales, useProducts, useSuppliers, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
+import { useSales, useProducts, useSuppliers, useShopSettings, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
+import { useShop } from "@/lib/auth/ShopProvider";
+import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/rapports")({
@@ -80,6 +82,8 @@ function periodRange(period: PeriodId, from: string, to: string): { from: string
 
 function RapportsPage() {
   const formatXOF = useFormatMoney();
+  const { currentShop } = useShop();
+  const { data: settings } = useShopSettings();
   const [period, setPeriod] = useState<PeriodId>("month");
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
   const [report, setReport] = useState<ReportId>("sales");
@@ -201,18 +205,29 @@ function RapportsPage() {
   };
 
   const exportPdf = () => {
-    const html = `<html><head><title>Rapport ${report}</title>
-      <style>body{font-family:sans-serif;padding:24px}h1{color:#0891b2}table{width:100%;border-collapse:collapse;margin-top:16px}
-      th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}th{background:#f5f5f5}</style></head>
-      <body><h1>NovaCaisse — ${REPORTS.find((r) => r.id === report)?.label}</h1>
-      <p>Période : <b>${range.label}</b></p>
-      <table><thead><tr><th>Libellé</th><th>Qté</th><th>CA</th><th>Marge</th></tr></thead>
-      <tbody>${currentRows.map((r) => `<tr><td>${r.label}</td><td>${r.qty}</td><td>${formatXOF(r.ca)}</td><td>${r.margin}</td></tr>`).join("")}</tbody></table>
-      <p style="margin-top:24px;color:#666;font-size:12px">Généré le ${new Date().toLocaleString("fr-FR")}</p></body></html>`;
-    const w = window.open("", "_blank", "width=900,height=700");
-    if (!w) return;
-    w.document.write(html); w.document.close();
-    setTimeout(() => w.print(), 300);
+    const reportLabel = REPORTS.find((r) => r.id === report)?.label ?? "";
+    const bodyHtml = `
+      <div class="doc-parties">
+        <div class="block"><h2>Période</h2><div class="name">${range.label}</div></div>
+        <div class="block" style="text-align:right"><h2>Lignes</h2><div class="name">${currentRows.length}</div></div>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>Libellé</th><th class="num">Qté</th><th class="num">CA</th><th class="num">Marge</th></tr></thead>
+        <tbody>${currentRows.map((r) => `<tr><td>${r.label}</td><td class="num">${r.qty}</td><td class="num">${formatXOF(r.ca)}</td><td class="num">${r.margin}</td></tr>`).join("")}</tbody>
+      </table>`;
+    const html = renderA4Document({
+      docTitle: `Rapport — ${reportLabel}`,
+      docDate: new Date().toLocaleString("fr-FR"),
+      shop: {
+        shopName: currentShop?.name ?? "Boutique",
+        logoUrl: currentShop?.logo_url,
+        address: settings?.data.address,
+        phone: settings?.data.phone,
+        ifu: settings?.data.ifu,
+      },
+      bodyHtml,
+    });
+    openPrintWindow(html);
   };
 
   const send = () => {

@@ -13,6 +13,7 @@ import {
   type HoldTicket, type ProductWithStock, type Customer,
 } from "@/lib/data/hooks";
 import { useShop } from "@/lib/auth/ShopProvider";
+import { THERMAL_CSS } from "@/lib/printDoc";
 
 export const Route = createFileRoute("/app/caisse")({
   validateSearch: (search: Record<string, unknown>): { holdId?: string } => ({
@@ -728,11 +729,7 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
     if (!ref.current) return;
     const w = window.open("", "_blank", "width=380,height=600");
     if (!w) return;
-    w.document.write(`<html><head><title>${receipt.ticket}</title>
-      <style>body{font-family:-apple-system,sans-serif;font-size:12px;padding:12px;color:#000}
-      h1{font-size:14px;margin:0 0 4px}.row{display:flex;justify-content:space-between;margin:2px 0}
-      hr{border:none;border-top:1px dashed #999;margin:8px 0}img{max-width:80px;display:block;margin:0 auto 6px}
-      .center{text-align:center}.b{font-weight:700}</style></head><body>${ref.current.innerHTML}</body></html>`);
+    w.document.write(`<html><head><title>${receipt.ticket}</title><style>${THERMAL_CSS}</style></head><body>${ref.current.innerHTML}</body></html>`);
     w.document.close();
     setTimeout(() => { w.print(); w.close(); }, 200);
   };
