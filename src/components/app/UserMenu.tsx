@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { useProfile } from "@/lib/data/hooks";
 
 const ROLE_LABEL: Record<string, string> = {
   owner: "Propriétaire",
@@ -22,13 +23,18 @@ const ROLE_LABEL: Record<string, string> = {
 export function UserMenu() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { data: profile } = useProfile();
 
   const email = user?.email ?? "";
-  const fullName = (user?.user_metadata?.full_name as string | undefined) ?? email.split("@")[0] ?? "Utilisateur";
+  // profiles.full_name (modifiable dans Profil) prévaut sur les métadonnées
+  // auth figées à l'inscription — sans ça, un changement de nom dans Profil
+  // ne se reflétait jamais ici.
+  const fullName = profile?.full_name || (user?.user_metadata?.full_name as string | undefined) || email.split("@")[0] || "Utilisateur";
   const initials = fullName
     .split(/\s+/).filter(Boolean).slice(0, 2)
     .map((p) => p[0]?.toUpperCase()).join("") || "U";
   const role = (user?.user_metadata?.role as string | undefined) ?? "owner";
+  const avatarUrl = profile?.avatar_url;
 
   const handleSignOut = async () => {
     await signOut();
@@ -39,8 +45,8 @@ export function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button className="flex items-center gap-2.5 rounded-xl border border-border bg-card py-1 pl-1 pr-2.5 transition-colors hover:bg-muted">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-primary to-primary-glow text-xs font-bold text-primary-foreground">
-            {initials}
+          <div className="grid h-8 w-8 place-items-center overflow-hidden rounded-lg bg-gradient-to-br from-primary to-primary-glow text-xs font-bold text-primary-foreground">
+            {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : initials}
           </div>
           <div className="hidden leading-tight sm:block">
             <div className="text-xs font-semibold text-foreground">{fullName}</div>
@@ -53,8 +59,8 @@ export function UserMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={10} className="w-64">
         <DropdownMenuLabel className="flex items-center gap-3 py-2.5">
-          <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-primary to-primary-glow text-sm font-bold text-primary-foreground">
-            {initials}
+          <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-lg bg-gradient-to-br from-primary to-primary-glow text-sm font-bold text-primary-foreground">
+            {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : initials}
           </div>
           <div className="min-w-0 leading-tight">
             <div className="truncate text-sm font-semibold">{fullName}</div>

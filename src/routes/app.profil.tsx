@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { User, Lock, Palette, Save, Sun, Moon, Monitor, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { User, Lock, Palette, Save, Sun, Moon, Monitor, Loader2, Camera } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { useProfile, useUpdateProfile, useMyRole } from "@/lib/data/hooks";
+import { useProfile, useUpdateProfile, useUploadAvatar, useMyRole } from "@/lib/data/hooks";
 import { ROLE_LABEL } from "@/lib/roles";
 import { useTheme, type ThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,9 @@ function ProfilPage() {
   const { user, updateEmail, updatePassword } = useAuth();
   const { data: profile, isLoading: profileLoading } = useProfile();
   const updateProfile = useUpdateProfile();
+  const uploadAvatar = useUploadAvatar();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const { data: role } = useMyRole();
   const { theme, setTheme } = useTheme();
 
@@ -61,6 +64,16 @@ function ProfilPage() {
     }
   };
 
+  const pickAvatar = async (file?: File) => {
+    if (!file) return;
+    setAvatarError(null);
+    try {
+      await uploadAvatar.mutateAsync(file);
+    } catch (e: any) {
+      setAvatarError(e?.message ?? "Impossible d'enregistrer la photo.");
+    }
+  };
+
   const savePassword = async () => {
     setPwdMsg(null);
     if (newPwd.length < 6) { setPwdMsg("Le nouveau mot de passe doit faire au moins 6 caractères."); return; }
@@ -85,9 +98,26 @@ function ProfilPage() {
       <div className="grid gap-6 p-5 sm:p-8 lg:grid-cols-4">
         <div className="lg:col-span-1">
           <div className="rounded-2xl border border-border bg-card p-5 text-center">
-            <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-primary to-primary-glow text-2xl font-bold text-primary-foreground shadow-glow">
-              {initials(profile?.full_name, user?.email)}
+            <div className="relative mx-auto h-20 w-20">
+              <div className="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-primary to-primary-glow text-2xl font-bold text-primary-foreground shadow-glow">
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  initials(profile?.full_name, user?.email)
+                )}
+              </div>
+              <button
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadAvatar.isPending}
+                aria-label="Changer la photo de profil"
+                className="absolute -bottom-1 -right-1 grid h-7 w-7 place-items-center rounded-full border-2 border-card bg-primary text-primary-foreground shadow-elegant hover:opacity-90 disabled:opacity-60"
+              >
+                {uploadAvatar.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+              </button>
+              <input ref={avatarInputRef} type="file" accept="image/*" className="hidden"
+                onChange={(e) => pickAvatar(e.target.files?.[0])} />
             </div>
+            {avatarError && <div className="mt-2 text-xs text-destructive">{avatarError}</div>}
             <div className="mt-3 font-display text-lg font-bold">{profile?.full_name || user?.email}</div>
             {role && (
               <div className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">

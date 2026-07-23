@@ -201,8 +201,12 @@ function MemberRow({ member, isOwner, isSelf, onRoleChange, onRemove }: {
     <tr className="border-t border-border/60 hover:bg-muted/40">
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-primary to-primary-glow text-xs font-bold text-primary-foreground">
-            {initials(member.profile?.full_name)}
+          <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-primary to-primary-glow text-xs font-bold text-primary-foreground">
+            {member.profile?.avatar_url ? (
+              <img src={member.profile.avatar_url} alt="" className="h-full w-full object-cover" />
+            ) : (
+              initials(member.profile?.full_name)
+            )}
           </div>
           <div className="font-semibold">{member.profile?.full_name || "—"}{isSelf && <span className="ml-1 text-xs font-normal text-muted-foreground">(vous)</span>}</div>
         </div>

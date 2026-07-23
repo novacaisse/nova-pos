@@ -975,13 +975,34 @@ export function useProfile() {
 export function useUpdateProfile() {
   const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (patch: Partial<Pick<Profile, "full_name" | "phone" | "address">>) => {
+    mutationFn: async (patch: Partial<Pick<Profile, "full_name" | "phone" | "address" | "avatar_url">>) => {
       if (!user) throw new Error("Non authentifié");
       const { data, error } = await supabase.from("profiles").update(patch).eq("id", user.id).select().single();
       if (error) throw error;
       return data as Profile;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profile", user?.id] }),
+  });
+}
+
+// Photo de profil (bucket "avatars", migration 018 — public en lecture,
+// écriture restreinte au propriétaire). Un fichier par utilisateur (clé
+// fixe "{user_id}/avatar", écrasé à chaque upload), même schéma que
+// useUploadShopLogo — met aussi à jour profiles.avatar_url elle-même.
+export function useUploadAvatar() {
+  const { user } = useAuth(); const updateProfile = useUpdateProfile();
+  return useMutation({
+    mutationFn: async (file: File): Promise<string> => {
+      if (!user) throw new Error("Non authentifié");
+      const path = `${user.id}/avatar`;
+      const { error: upErr } = await supabase.storage.from("avatars")
+        .upload(path, file, { upsert: true, cacheControl: "3600", contentType: file.type });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+      const url = `${data.publicUrl}?v=${Date.now()}`; // casse le cache navigateur après remplacement
+      await updateProfile.mutateAsync({ avatar_url: url });
+      return url;
+    },
   });
 }
 
@@ -1008,7 +1029,7 @@ export function useMyRole() {
 // fait deux requêtes et on fusionne côté client.
 export type ShopMember = {
   id: string; shop_id: string; user_id: string; role: AppRole; created_at: string;
-  profile: { full_name: string | null; phone: string | null } | null;
+  profile: { full_name: string | null; phone: string | null; avatar_url: string | null } | null;
 };
 
 export function useShopMembers() {
@@ -1021,10 +1042,10 @@ export function useShopMembers() {
         .select("*").eq("shop_id", shopId!).order("created_at");
       if (error) throw error;
       const userIds = (members ?? []).map((m: any) => m.user_id);
-      let profiles: Record<string, { full_name: string | null; phone: string | null }> = {};
+      let profiles: Record<string, { full_name: string | null; phone: string | null; avatar_url: string | null }> = {};
       if (userIds.length) {
         const { data: profs, error: profErr } = await supabase.from("profiles")
-          .select("id, full_name, phone").in("id", userIds);
+          .select("id, full_name, phone, avatar_url").in("id", userIds);
         if (profErr) throw profErr;
         profiles = Object.fromEntries((profs ?? []).map((p: any) => [p.id, p]));
       }
