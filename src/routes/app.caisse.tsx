@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Search, Plus, Minus, Trash2, Percent, Pause, Banknote, Smartphone, CreditCard,
   UserPlus, ScanLine, X, Maximize2, Minimize2, RotateCcw, Printer, Check, Loader2,
+  Package, ShoppingCart, ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -80,6 +81,10 @@ function CaissePage() {
   const [payment, setPayment] = useState<PaymentMethod>("cash");
   const [showPay, setShowPay] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  // Sur mobile, Produits et Panier ne tiennent pas à l'écran l'un sous
+  // l'autre (chacun est pensé pour occuper toute la hauteur disponible) —
+  // un onglet bascule entre les deux au lieu de les empiler.
+  const [mobileView, setMobileView] = useState<"products" | "cart">("products");
   const [showHolds, setShowHolds] = useState(false);
   const [showHoldLabel, setShowHoldLabel] = useState(false);
   const [customer, setCustomer] = useState<Customer | undefined>();
@@ -189,7 +194,27 @@ function CaissePage() {
 
   return (
     <div className={cn("grid gap-0", "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px]", fullscreen ? "h-screen" : "h-[calc(100vh-4rem)]")}>
-      <section className="flex min-w-0 flex-col overflow-hidden border-r border-border">
+      <div className="flex border-b border-border bg-card p-1.5 lg:hidden">
+        <button onClick={() => setMobileView("products")}
+          className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-colors",
+            mobileView === "products" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
+          <Package className="h-4 w-4" /> Produits
+        </button>
+        <button onClick={() => setMobileView("cart")}
+          className={cn("relative flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-colors",
+            mobileView === "cart" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
+          <ShoppingCart className="h-4 w-4" /> Panier
+          {itemsCount > 0 && (
+            <span className={cn("grid h-4.5 min-w-4.5 place-items-center rounded-full px-1 text-[10px] font-bold",
+              mobileView === "cart" ? "bg-white/25" : "bg-primary text-primary-foreground")}>
+              {itemsCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      <section className={cn("min-w-0 flex-col overflow-hidden border-r border-border",
+        mobileView === "products" ? "flex" : "hidden lg:flex")}>
         <div className="border-b border-border bg-card px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2">
             <div className="relative min-w-0 flex-1">
@@ -231,9 +256,22 @@ function CaissePage() {
             </div>
           )}
         </div>
+
+        {cart.length > 0 && (
+          <button onClick={() => setMobileView("cart")}
+            className="flex items-center justify-between gap-2 border-t border-border bg-primary px-5 py-3 text-primary-foreground shadow-elegant lg:hidden">
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              <ShoppingCart className="h-4 w-4" /> {itemsCount} article{itemsCount > 1 ? "s" : ""} · {formatXOF(total)}
+            </span>
+            <span className="flex items-center gap-1 text-sm font-bold">
+              Voir le panier <ChevronUp className="h-4 w-4" />
+            </span>
+          </button>
+        )}
       </section>
 
-      <aside className="flex min-w-0 flex-col overflow-hidden bg-card">
+      <aside className={cn("min-w-0 flex-col overflow-hidden bg-card",
+        mobileView === "cart" ? "flex" : "hidden lg:flex")}>
         <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-4">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Ticket en cours</div>
