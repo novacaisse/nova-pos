@@ -81,7 +81,7 @@ function DevisPage() {
         ifu: settings?.data.ifu,
       },
       bodyHtml,
-      footerHtml: "Devis généré par NovaCaisse — sujet à modification jusqu'à acceptation.",
+      footerHtml: "Devis généré par ZegCaisse — sujet à modification jusqu'à acceptation.",
     });
     openPrintWindow(html, { width: 900, height: 700 });
   };

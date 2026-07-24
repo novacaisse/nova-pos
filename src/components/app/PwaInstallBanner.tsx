@@ -94,7 +94,7 @@ export function PwaInstallBanner() {
           <Smartphone className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">Installez NovaCaisse sur cet appareil</div>
+          <div className="text-sm font-semibold">Installez ZegCaisse sur cet appareil</div>
           {iosNoPrompt ? (
             <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
               Appuyez sur <Share2 className="h-3 w-3 shrink-0" /> puis « Sur l'écran d'accueil » — accès instantané, même hors-ligne.

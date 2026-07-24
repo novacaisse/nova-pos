@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { useIsSuperAdmin } from "@/lib/data/adminHooks";
 
 export const Route = createFileRoute("/admin")({
-  head: () => ({ meta: [{ title: "Super Admin — NovaCaisse" }] }),
+  head: () => ({ meta: [{ title: "Super Admin — ZegCaisse" }] }),
   component: AdminLayout,
 });
 

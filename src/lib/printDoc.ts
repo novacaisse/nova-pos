@@ -77,7 +77,7 @@ export function renderA4Document(opts: {
     </div>
     ${banner ? `<div class="doc-banner">${escapeHtml(banner)}</div>` : ""}
     ${bodyHtml}
-    <div class="doc-footer">${footerHtml ?? "Document généré par NovaCaisse"}</div>
+    <div class="doc-footer">${footerHtml ?? "Document généré par ZegCaisse"}</div>
   </body></html>`;
 }
 

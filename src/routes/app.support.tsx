@@ -28,7 +28,7 @@ function AppSupport() {
 
   return (
     <div>
-      <PageHeader title="Support" subtitle="Une question, un problème ? Contactez l'équipe NovaCaisse."
+      <PageHeader title="Support" subtitle="Une question, un problème ? Contactez l'équipe ZegCaisse."
         actions={
           <button onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
             <Plus className="h-4 w-4" /> Nouveau ticket
@@ -143,7 +143,7 @@ function TicketThread({ ticket, onBack }: { ticket: SupportTicket; onBack: () =>
             <div key={m.id} className={cn("max-w-[85%] rounded-2xl p-3 text-sm", m.is_admin ? "bg-muted" : "ml-auto bg-primary text-primary-foreground")}>
               <div>{m.body}</div>
               <div className={cn("mt-1 text-[10px]", m.is_admin ? "text-muted-foreground" : "text-primary-foreground/70")}>
-                {m.is_admin ? "Équipe NovaCaisse" : "Vous"} · {new Date(m.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                {m.is_admin ? "Équipe ZegCaisse" : "Vous"} · {new Date(m.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
               </div>
             </div>
           ))

@@ -78,7 +78,7 @@ function AdminDashboard() {
 
   return (
     <div>
-      <PageHeader title="Vue d'ensemble" subtitle="Métriques globales du parc NovaCaisse" />
+      <PageHeader title="Vue d'ensemble" subtitle="Métriques globales du parc ZegCaisse" />
 
       <div className="space-y-4 p-5 sm:p-8">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">

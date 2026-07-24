@@ -162,13 +162,12 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex items-center gap-2 px-2 py-3">
           <Link to="/app" onClick={handleNavClick} className="flex min-w-0 flex-1 items-center gap-2.5">
-            <BrandLogo className="h-9 w-9 shadow-glow" iconClassName="h-4.5 w-4.5" variant="sidebar" />
-            {!collapsed && (
+            {collapsed ? (
+              <BrandLogo className="h-9 w-9 shadow-glow" iconClassName="h-4.5 w-4.5" variant="sidebar" brand="zegcaisse" compact />
+            ) : (
               <div className="min-w-0 leading-tight">
-                <div className="font-display text-base font-bold tracking-tight text-sidebar-foreground">
-                  NovaCaisse
-                </div>
-                <div className="text-[10px] uppercase tracking-widest text-sidebar-foreground/50">
+                <BrandLogo className="h-9 w-9 shadow-glow" textClassName="text-base text-sidebar-foreground" variant="sidebar" brand="zegcaisse" />
+                <div className="mt-0.5 text-[10px] uppercase tracking-widest text-sidebar-foreground/50">
                   Espace boutique
                 </div>
               </div>

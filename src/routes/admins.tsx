@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/admins")({
-  head: () => ({ meta: [{ title: "Administration — NovaCaisse" }] }),
+  head: () => ({ meta: [{ title: "Administration — ZegCaisse" }] }),
   component: AdminsLogin,
 });
 
@@ -52,7 +52,7 @@ function AdminsLogin() {
             <Shield className="h-5 w-5" strokeWidth={2.5} />
           </div>
           <div className="leading-tight">
-            <div className="font-display text-lg font-bold">NovaCaisse</div>
+            <div className="font-display text-lg font-bold">ZegCaisse</div>
             <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Back-office</div>
           </div>
         </div>

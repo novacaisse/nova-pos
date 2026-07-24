@@ -1,6 +1,6 @@
 {
-  "name": "NovaCaisse",
-  "short_name": "NovaCaisse",
+  "name": "ZegCaisse",
+  "short_name": "ZegCaisse",
   "description": "Point de vente, stock, ventes et rapports pour boutiques et commerces.",
   "start_url": "/app/caisse",
   "scope": "/",

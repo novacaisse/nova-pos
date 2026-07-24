@@ -30,7 +30,7 @@ export function AdminSidebar() {
           </div>
           {!collapsed && (
             <div className="min-w-0">
-              <div className="truncate font-display text-sm font-bold">NovaCaisse</div>
+              <div className="truncate font-display text-sm font-bold">ZegCaisse</div>
               <div className="truncate text-[10px] uppercase tracking-widest text-muted-foreground">Back-office</div>
             </div>
           )}

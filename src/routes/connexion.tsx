@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { BrandLogo } from "@/components/app/BrandLogo";
 
 export const Route = createFileRoute("/connexion")({
-  head: () => ({ meta: [{ title: "Connexion — NovaCaisse" }] }),
+  head: () => ({ meta: [{ title: "Connexion — ZegCaisse" }] }),
   component: ConnexionPage,
 });
 
@@ -35,8 +35,7 @@ function ConnexionPage() {
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/10">
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-5 py-10">
         <Link to="/" className="flex items-center gap-2.5">
-          <BrandLogo className="h-11 w-11 shadow-glow" iconClassName="h-5 w-5" />
-          <span className="font-display text-2xl font-bold tracking-tight">NovaCaisse</span>
+          <BrandLogo className="h-11 w-11 shadow-glow" textClassName="text-2xl" brand="zegcaisse" />
         </Link>
 
         <motion.form

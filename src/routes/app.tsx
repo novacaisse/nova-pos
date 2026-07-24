@@ -18,6 +18,10 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { useShop } from "@/lib/auth/ShopProvider";
 
 export const Route = createFileRoute("/app")({
+  // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
+  // ("NovaCaisse — La caisse moderne…"), volontairement inchangé pour les
+  // pages publiques (landing) — l'espace connecté a besoin du sien.
+  head: () => ({ meta: [{ title: "ZegCaisse" }] }),
   component: AppLayout,
 });
 
