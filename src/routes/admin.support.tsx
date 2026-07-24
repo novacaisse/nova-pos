@@ -58,7 +58,7 @@ function AdminSupport() {
                 const s = STATUS[t.status];
                 return (
                   <tr key={t.id} onClick={() => setSelected(t)} className="cursor-pointer border-t border-border/60 hover:bg-muted/40">
-                    <td className="px-4 py-3 font-semibold">{t.shops?.name ?? "—"}</td>
+                    <td className="px-4 py-3 font-semibold">{t.organizations?.name ?? "—"}</td>
                     <td className="px-4 py-3">{t.subject}</td>
                     <td className="px-4 py-3">
                       <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase", s.color)}>{s.label}</span>
@@ -109,7 +109,7 @@ function TicketDrawer({ ticket, onClose }: { ticket: SupportTicket; onClose: () 
         <header className="flex items-start justify-between border-b border-border p-5">
           <div>
             <div className="font-display text-lg font-bold">{ticket.subject}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{ticket.shops?.name ?? "—"}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{ticket.organizations?.name ?? "—"}</div>
           </div>
           <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl border border-border hover:bg-muted"><X className="h-4 w-4" /></button>
         </header>

@@ -3,8 +3,8 @@ import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { Wallet, TrendingUp, Sparkles, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useAdminShops, useAdminSubscriptions, useAdminPayments, usePlans } from "@/lib/data/adminHooks";
-import { shopStatus } from "@/lib/adminShopStatus";
+import { useAdminOrganizations, useAdminSubscriptions, useAdminPayments, usePlans } from "@/lib/data/adminHooks";
+import { organizationStatus } from "@/lib/adminShopStatus";
 import { formatXOF } from "@/lib/mock/catalog";
 
 export const Route = createFileRoute("/admin/facturation")({
@@ -12,14 +12,14 @@ export const Route = createFileRoute("/admin/facturation")({
 });
 
 function AdminFacturation() {
-  const { data: shops = [], isLoading: shopsLoading } = useAdminShops();
+  const { data: organizations = [], isLoading: shopsLoading } = useAdminOrganizations();
   const { data: subs = [] } = useAdminSubscriptions();
   const { data: payments = [] } = useAdminPayments();
   const { data: plans = [] } = usePlans();
 
-  const subByShop = useMemo(() => {
+  const subByOrganization = useMemo(() => {
     const m = new Map<string, (typeof subs)[number]>();
-    for (const s of subs) if (!m.has(s.shop_id)) m.set(s.shop_id, s);
+    for (const s of subs) if (!m.has(s.organization_id)) m.set(s.organization_id, s);
     return m;
   }, [subs]);
 
@@ -47,15 +47,15 @@ function AdminFacturation() {
   const byPlan = useMemo(() => {
     const counts: Record<string, { mrr: number; active: number }> = {};
     for (const p of plans) counts[p.id] = { mrr: 0, active: 0 };
-    for (const s of shops) {
-      const sub = subByShop.get(s.id);
-      if (shopStatus(s, sub) === "active" && counts[s.plan]) {
+    for (const s of organizations) {
+      const sub = subByOrganization.get(s.id);
+      if (organizationStatus(s, sub) === "active" && counts[s.plan]) {
         counts[s.plan].mrr += Number(sub?.amount ?? 0);
         counts[s.plan].active += 1;
       }
     }
     return counts;
-  }, [shops, subByShop, plans]);
+  }, [organizations, subByOrganization, plans]);
   const totalMRR = Object.values(byPlan).reduce((s, p) => s + p.mrr, 0);
 
   if (shopsLoading) {

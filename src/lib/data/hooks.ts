@@ -1,16 +1,16 @@
-// Supabase data hooks — multi-tenant, always filtered by current shop_id.
-// RLS also enforces this server-side; the shop_id filter is belt + suspenders.
+// Supabase data hooks — multi-tenant, always filtered by current organization_id.
+// RLS also enforces this server-side; the organization_id filter is belt + suspenders.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import type { AppRole } from "@/lib/roles";
 import { invokeFn } from "@/lib/data/invokeFn";
 
 // ============ TYPES (Supabase shape) ============
-export type Category = { id: string; shop_id: string; name: string; color: string | null };
+export type Category = { id: string; organization_id: string; name: string; color: string | null };
 export type Product = {
-  id: string; shop_id: string; category_id: string | null; supplier_id: string | null;
+  id: string; organization_id: string; category_id: string | null; supplier_id: string | null;
   sku: string | null; barcode: string | null; name: string; description: string | null;
   price: number; cost: number; tax_rate: number; unit: string | null;
   image_url: string | null; is_active: boolean; low_stock_threshold: number;
@@ -18,29 +18,29 @@ export type Product = {
 export type ProductWithStock = Product & { stock: number };
 
 export type Customer = {
-  id: string; shop_id: string; name: string;
+  id: string; organization_id: string; name: string;
   email: string | null; phone: string | null; address: string | null;
   loyalty_points: number; credit_balance: number; notes: string | null;
   created_at: string;
 };
 export type Supplier = {
-  id: string; shop_id: string; name: string;
+  id: string; organization_id: string; name: string;
   contact: string | null; email: string | null; phone: string | null;
   address: string | null; notes: string | null; created_at: string;
 };
 export type Expense = {
-  id: string; shop_id: string; category: string | null; label: string;
+  id: string; organization_id: string; category: string | null; label: string;
   amount: number; paid_at: string; method: string | null; notes: string | null;
   created_at: string;
 };
 export type StockMovement = {
-  id: string; shop_id: string; product_id: string;
+  id: string; organization_id: string; product_id: string;
   type: "in" | "out" | "adjustment" | "transfer" | "sale" | "return";
   quantity: number; unit_cost: number | null; reason: string | null;
   reference: string | null; created_by: string | null; created_at: string;
 };
 export type Sale = {
-  id: string; shop_id: string; reference: string;
+  id: string; organization_id: string; reference: string;
   customer_id: string | null; cashier_id: string | null;
   status: "draft" | "completed" | "refunded" | "partially_refunded" | "cancelled";
   subtotal: number; discount: number; tax: number; total: number;
@@ -49,13 +49,13 @@ export type Sale = {
   notes: string | null; created_at: string;
 };
 export type SaleItem = {
-  id: string; shop_id: string; sale_id: string; product_id: string | null;
+  id: string; organization_id: string; sale_id: string; product_id: string | null;
   name: string; quantity: number; unit_price: number; discount: number;
   tax_rate: number; total: number;
 };
 
 // ============ HELPERS ============
-// Formatage monétaire par devise (Paramètres > Devise, shops.currency) —
+// Formatage monétaire par devise (Paramètres > Devise, organizations.currency) —
 // avant, chaque montant affiché dans l'app était formaté en F (XOF) en dur,
 // quelle que soit la devise réellement configurée pour la boutique.
 type CurrencyMeta = { symbol: string; decimals: number; position: "before" | "after" };
@@ -89,8 +89,8 @@ export function formatXOF(n: number): string {
 // local peut rester `formatXOF` à l'appel (const formatXOF = useFormatMoney())
 // pour ne pas avoir à renommer chaque site d'appel existant.
 export function useFormatMoney() {
-  const { currentShop } = useShop();
-  const currency = currentShop?.currency;
+  const { currentOrganization } = useOrganization();
+  const currency = currentOrganization?.currency;
   return (n: number) => formatMoney(n, currency);
 }
 
@@ -103,59 +103,59 @@ export function isRevenueSale(s: { status: Sale["status"] }): boolean {
   return s.status === "completed" || s.status === "partially_refunded";
 }
 
-function useShopId() {
-  const { currentShop } = useShop();
-  return currentShop?.id ?? null;
+function useOrganizationId() {
+  const { currentOrganization } = useOrganization();
+  return currentOrganization?.id ?? null;
 }
 
 // ============ CATEGORIES ============
 export function useCategories() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["categories", shopId],
-    enabled: !!shopId,
+    queryKey: ["categories", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<Category[]> => {
       const { data, error } = await supabase.from("categories")
-        .select("*").eq("shop_id", shopId!).order("name");
+        .select("*").eq("organization_id", organizationId!).order("name");
       if (error) throw error;
       return data as Category[];
     },
   });
 }
 export function useUpsertCategory() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (c: Partial<Category> & { name: string }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const payload = { ...c, shop_id: shopId };
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const payload = { ...c, organization_id: organizationId };
       const { data, error } = await supabase.from("categories")
         .upsert(payload).select().single();
       if (error) throw error; return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories", organizationId] }),
   });
 }
 export function useDeleteCategory() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("categories").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories", organizationId] }),
   });
 }
 
 // ============ PRODUCTS (with stock) ============
 export function useProducts() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["products", shopId],
-    enabled: !!shopId,
+    queryKey: ["products", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<ProductWithStock[]> => {
       const { data, error } = await supabase.from("products")
         .select("*, stock_levels(quantity)")
-        .eq("shop_id", shopId!).order("created_at", { ascending: false });
+        .eq("organization_id", organizationId!).order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []).map((p: any) => ({
         ...p,
@@ -165,74 +165,74 @@ export function useProducts() {
   });
 }
 export function useUpsertProduct() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: Partial<Product> & { name: string; price: number }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const { stock, ...rest } = p as any;
-      const payload: any = { ...rest, shop_id: shopId };
+      const payload: any = { ...rest, organization_id: organizationId };
       const { data, error } = await supabase.from("products").upsert(payload).select().single();
       if (error) throw error;
       // Optional initial stock (only on create)
       if (!p.id && typeof stock === "number" && stock > 0) {
         await supabase.from("stock_movements").insert({
-          shop_id: shopId, product_id: data.id, type: "in",
+          organization_id: organizationId, product_id: data.id, type: "in",
           quantity: stock, reason: "Stock initial",
         });
       }
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["products", shopId] });
-      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
     },
   });
 }
 export function useDeleteProduct() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("products").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["products", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["products", organizationId] }),
   });
 }
 
 // ============ CUSTOMERS ============
 export function useCustomers() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["customers", shopId],
-    enabled: !!shopId,
+    queryKey: ["customers", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<Customer[]> => {
       const { data, error } = await supabase.from("customers")
-        .select("*").eq("shop_id", shopId!).order("name");
+        .select("*").eq("organization_id", organizationId!).order("name");
       if (error) throw error;
       return data as Customer[];
     },
   });
 }
 export function useUpsertCustomer() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (c: Partial<Customer> & { name: string }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const { data, error } = await supabase.from("customers")
-        .upsert({ ...c, shop_id: shopId }).select().single();
+        .upsert({ ...c, organization_id: organizationId }).select().single();
       if (error) throw error; return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers", organizationId] }),
   });
 }
 export function useDeleteCustomer() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("customers").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers", organizationId] }),
   });
 }
 
@@ -257,38 +257,38 @@ export function useCustomerSales(customerId: string | null) {
 
 // ============ SUPPLIERS ============
 export function useSuppliers() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["suppliers", shopId],
-    enabled: !!shopId,
+    queryKey: ["suppliers", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<Supplier[]> => {
       const { data, error } = await supabase.from("suppliers")
-        .select("*").eq("shop_id", shopId!).order("name");
+        .select("*").eq("organization_id", organizationId!).order("name");
       if (error) throw error;
       return data as Supplier[];
     },
   });
 }
 export function useUpsertSupplier() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (s: Partial<Supplier> & { name: string }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const { data, error } = await supabase.from("suppliers")
-        .upsert({ ...s, shop_id: shopId }).select().single();
+        .upsert({ ...s, organization_id: organizationId }).select().single();
       if (error) throw error; return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["suppliers", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["suppliers", organizationId] }),
   });
 }
 export function useDeleteSupplier() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("suppliers").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["suppliers", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["suppliers", organizationId] }),
   });
 }
 
@@ -299,13 +299,13 @@ export function useDeleteSupplier() {
 // facturé. Pas de réception partielle ligne par ligne (migration 014).
 export type PurchaseOrderStatus = "draft" | "sent" | "received" | "cancelled";
 export type PurchaseOrder = {
-  id: string; shop_id: string; supplier_id: string;
+  id: string; organization_id: string; supplier_id: string;
   reference: string; status: PurchaseOrderStatus;
   expected_at: string | null; notes: string | null;
   created_by: string | null; created_at: string;
 };
 export type PurchaseOrderItem = {
-  id: string; shop_id: string; purchase_order_id: string;
+  id: string; organization_id: string; purchase_order_id: string;
   product_id: string | null; name: string;
   quantity: number; unit_cost: number; total: number;
 };
@@ -314,14 +314,14 @@ export type PurchaseOrderWithItems = PurchaseOrder & {
 };
 
 export function usePurchaseOrders() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["purchase_orders", shopId],
-    enabled: !!shopId,
+    queryKey: ["purchase_orders", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<PurchaseOrderWithItems[]> => {
       const { data, error } = await supabase.from("purchase_orders")
         .select("*, purchase_order_items(*), suppliers(name)")
-        .eq("shop_id", shopId!).order("created_at", { ascending: false });
+        .eq("organization_id", organizationId!).order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as PurchaseOrderWithItems[];
     },
@@ -329,16 +329,16 @@ export function usePurchaseOrders() {
 }
 
 export function useUpsertPurchaseOrder() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       id?: string; supplier_id: string; expected_at?: string | null; notes?: string | null;
       items: { product_id: string | null; name: string; quantity: number; unit_cost: number }[];
     }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const items = input.items.map((it) => ({ ...it, total: it.quantity * it.unit_cost }));
       const payload = {
-        shop_id: shopId, supplier_id: input.supplier_id,
+        organization_id: organizationId, supplier_id: input.supplier_id,
         expected_at: input.expected_at || null, notes: input.notes ?? null,
       };
 
@@ -357,46 +357,46 @@ export function useUpsertPurchaseOrder() {
       }
 
       if (items.length) {
-        const itemsPayload = items.map((it) => ({ shop_id: shopId, purchase_order_id: poId, ...it }));
+        const itemsPayload = items.map((it) => ({ organization_id: organizationId, purchase_order_id: poId, ...it }));
         const { error } = await supabase.from("purchase_order_items").insert(itemsPayload);
         if (error) throw error;
       }
       return poId!;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", organizationId] }),
   });
 }
 
 export function useDeletePurchaseOrder() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", organizationId] }),
   });
 }
 
 export function useSendPurchaseOrder() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("purchase_orders").update({ status: "sent" }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", organizationId] }),
   });
 }
 
 export function useCancelPurchaseOrder() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("purchase_orders").update({ status: "cancelled" }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchase_orders", organizationId] }),
   });
 }
 
@@ -405,14 +405,14 @@ export function useCancelPurchaseOrder() {
 // "dernier coût connu", pas de moyenne pondérée), puis passe le bon à
 // 'received'.
 export function useReceivePurchaseOrder() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (po: PurchaseOrderWithItems) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const stockRows = po.purchase_order_items
         .filter((it) => it.product_id)
         .map((it) => ({
-          shop_id: shopId, product_id: it.product_id!,
+          organization_id: organizationId, product_id: it.product_id!,
           type: "in" as const, quantity: it.quantity, unit_cost: it.unit_cost,
           reason: `Réception ${po.reference}`, reference: po.reference,
           created_by: user?.id,
@@ -429,82 +429,82 @@ export function useReceivePurchaseOrder() {
       if (e2) throw e2;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["purchase_orders", shopId] });
-      qc.invalidateQueries({ queryKey: ["products", shopId] });
-      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+      qc.invalidateQueries({ queryKey: ["purchase_orders", organizationId] });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
     },
   });
 }
 
 // ============ EXPENSES ============
 export function useExpenses() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["expenses", shopId],
-    enabled: !!shopId,
+    queryKey: ["expenses", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<Expense[]> => {
       const { data, error } = await supabase.from("expenses")
-        .select("*").eq("shop_id", shopId!).order("paid_at", { ascending: false });
+        .select("*").eq("organization_id", organizationId!).order("paid_at", { ascending: false });
       if (error) throw error;
       return data as Expense[];
     },
   });
 }
 export function useUpsertExpense() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (e: Partial<Expense> & { label: string; amount: number }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const payload: any = { ...e, shop_id: shopId };
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const payload: any = { ...e, organization_id: organizationId };
       if (!e.id) payload.created_by = user?.id;
       const { data, error } = await supabase.from("expenses").upsert(payload).select().single();
       if (error) throw error; return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["expenses", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["expenses", organizationId] }),
   });
 }
 export function useDeleteExpense() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("expenses").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["expenses", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["expenses", organizationId] }),
   });
 }
 
 // ============ STOCK MOVEMENTS ============
 export function useStockMovements(limit = 100) {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["stock_movements", shopId, limit],
-    enabled: !!shopId,
+    queryKey: ["stock_movements", organizationId, limit],
+    enabled: !!organizationId,
     queryFn: async () => {
       const { data, error } = await supabase.from("stock_movements")
         .select("*, products(name)")
-        .eq("shop_id", shopId!).order("created_at", { ascending: false }).limit(limit);
+        .eq("organization_id", organizationId!).order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []).map((m: any) => ({ ...m, product_name: m.products?.name ?? "—" }));
     },
   });
 }
 export function useCreateStockMovement() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (m: {
       product_id: string; type: StockMovement["type"];
       quantity: number; reason?: string; reference?: string; unit_cost?: number;
     }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const { error } = await supabase.from("stock_movements").insert({
-        shop_id: shopId, created_by: user?.id, ...m,
+        organization_id: organizationId, created_by: user?.id, ...m,
       });
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
-      qc.invalidateQueries({ queryKey: ["products", shopId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
     },
   });
 }
@@ -515,14 +515,14 @@ export function useCreateStockMovement() {
 // côté requête plutôt que de tout charger et trier côté client.
 export function useSales(opts: number | { limit?: number; from?: string; to?: string } = 200) {
   const { limit = 200, from, to } = typeof opts === "number" ? { limit: opts } : opts;
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["sales", shopId, limit, from, to],
-    enabled: !!shopId,
+    queryKey: ["sales", organizationId, limit, from, to],
+    enabled: !!organizationId,
     queryFn: async () => {
       let q = supabase.from("sales")
         .select("*, sale_items(*), customers(name)")
-        .eq("shop_id", shopId!);
+        .eq("organization_id", organizationId!);
       if (from) q = q.gte("created_at", from);
       if (to) q = q.lte("created_at", to);
       const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
@@ -534,7 +534,7 @@ export function useSales(opts: number | { limit?: number; from?: string; to?: st
 
 // createSale: inserts sale + items + payment + sale-type stock movements atomically enough.
 export function useCreateSale() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       reference: string;
@@ -546,7 +546,7 @@ export function useCreateSale() {
       notes?: string;
       status?: Sale["status"];
     }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const items = input.items.map((it) => {
         const line = it.quantity * it.unit_price - (it.discount ?? 0);
         return { ...it, discount: it.discount ?? 0, tax_rate: it.tax_rate ?? 0, total: line };
@@ -558,7 +558,7 @@ export function useCreateSale() {
       const change_due = Math.max(0, input.paid - total);
 
       const { data: sale, error: e1 } = await supabase.from("sales").insert({
-        shop_id: shopId,
+        organization_id: organizationId,
         reference: input.reference,
         customer_id: input.customer_id ?? null,
         cashier_id: user?.id,
@@ -571,7 +571,7 @@ export function useCreateSale() {
       if (e1) throw e1;
 
       const itemsPayload = items.map((it) => ({
-        shop_id: shopId, sale_id: sale.id,
+        organization_id: organizationId, sale_id: sale.id,
         product_id: it.product_id, name: it.name,
         quantity: it.quantity, unit_price: it.unit_price,
         discount: it.discount, tax_rate: it.tax_rate, total: it.total,
@@ -581,7 +581,7 @@ export function useCreateSale() {
 
       if (input.paid > 0) {
         await supabase.from("payments").insert({
-          shop_id: shopId, sale_id: sale.id,
+          organization_id: organizationId, sale_id: sale.id,
           method: input.payment_method === "mixed" ? "cash" : input.payment_method,
           amount: input.paid,
         });
@@ -591,7 +591,7 @@ export function useCreateSale() {
       const stockRows = items
         .filter((it) => it.product_id)
         .map((it) => ({
-          shop_id: shopId, product_id: it.product_id!,
+          organization_id: organizationId, product_id: it.product_id!,
           type: "sale" as const, quantity: it.quantity,
           reason: `Vente ${input.reference}`, reference: input.reference,
           created_by: user?.id,
@@ -602,9 +602,9 @@ export function useCreateSale() {
       return sale;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["sales", shopId] });
-      qc.invalidateQueries({ queryKey: ["products", shopId] });
-      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+      qc.invalidateQueries({ queryKey: ["sales", organizationId] });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
     },
   });
 }
@@ -616,14 +616,14 @@ export function useCreateSale() {
 // geste manuel (caisse/mobile money) laissé à l'utilisateur, comme pour
 // un remboursement classique.
 export function useCancelSale() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (sale: Sale & { sale_items: SaleItem[] }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const stockRows = sale.sale_items
         .filter((it) => it.product_id)
         .map((it) => ({
-          shop_id: shopId, product_id: it.product_id!,
+          organization_id: organizationId, product_id: it.product_id!,
           type: "return" as const, quantity: it.quantity,
           reason: `Annulation vente ${sale.reference}`, reference: sale.reference,
           created_by: user?.id,
@@ -636,9 +636,9 @@ export function useCancelSale() {
       if (e2) throw e2;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["sales", shopId] });
-      qc.invalidateQueries({ queryKey: ["products", shopId] });
-      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+      qc.invalidateQueries({ queryKey: ["sales", organizationId] });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
     },
   });
 }
@@ -647,13 +647,13 @@ export function useCancelSale() {
 // une ligne payments et met à jour sales.paid/change_due. Ne touche ni au
 // stock ni aux lignes de la vente.
 export function useAddSalePayment() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ sale, amount, method }: { sale: Sale; amount: number; method: Sale["payment_method"] }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       if (amount <= 0) throw new Error("Le montant doit être positif.");
       const { error: e1 } = await supabase.from("payments").insert({
-        shop_id: shopId, sale_id: sale.id,
+        organization_id: organizationId, sale_id: sale.id,
         method: method === "mixed" ? "cash" : method, amount,
       });
       if (e1) throw e1;
@@ -662,7 +662,7 @@ export function useAddSalePayment() {
       const { error: e2 } = await supabase.from("sales").update({ paid, change_due }).eq("id", sale.id);
       if (e2) throw e2;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sales", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sales", organizationId] }),
   });
 }
 
@@ -677,14 +677,14 @@ export function useAddSalePayment() {
 export type HoldTicket = Sale & { sale_items: SaleItem[]; customers: { name: string } | null };
 
 export function useHoldTickets() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["hold_tickets", shopId],
-    enabled: !!shopId,
+    queryKey: ["hold_tickets", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<HoldTicket[]> => {
       const { data, error } = await supabase.from("sales")
         .select("*, sale_items(*), customers(name)")
-        .eq("shop_id", shopId!).eq("status", "draft")
+        .eq("organization_id", organizationId!).eq("status", "draft")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as HoldTicket[];
@@ -693,7 +693,7 @@ export function useHoldTickets() {
 }
 
 export function useSaveHoldTicket() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       label?: string;
@@ -701,7 +701,7 @@ export function useSaveHoldTicket() {
       items: { product_id: string | null; name: string; quantity: number; unit_price: number; discount?: number }[];
       discount?: number;
     }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const items = input.items.map((it) => ({
         ...it, discount: it.discount ?? 0, tax_rate: 0,
         total: it.quantity * it.unit_price - (it.discount ?? 0),
@@ -711,7 +711,7 @@ export function useSaveHoldTicket() {
       const total = Math.max(0, subtotal - discount);
 
       const { data: sale, error: e1 } = await supabase.from("sales").insert({
-        shop_id: shopId, reference: newTicketRef("H"),
+        organization_id: organizationId, reference: newTicketRef("H"),
         customer_id: input.customer_id ?? null, cashier_id: user?.id,
         status: "draft", subtotal, discount, tax: 0, total,
         paid: 0, change_due: 0, payment_method: "cash",
@@ -720,7 +720,7 @@ export function useSaveHoldTicket() {
       if (e1) throw e1;
 
       const itemsPayload = items.map((it) => ({
-        shop_id: shopId, sale_id: sale.id,
+        organization_id: organizationId, sale_id: sale.id,
         product_id: it.product_id, name: it.name, quantity: it.quantity,
         unit_price: it.unit_price, discount: it.discount, tax_rate: it.tax_rate, total: it.total,
       }));
@@ -728,25 +728,25 @@ export function useSaveHoldTicket() {
       if (e2) throw e2;
       return sale;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hold_tickets", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hold_tickets", organizationId] }),
   });
 }
 
 export function useDeleteHoldTicket() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("sales").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hold_tickets", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hold_tickets", organizationId] }),
   });
 }
 
 // ============ DEVIS ============
 export type QuoteStatus = "draft" | "sent" | "accepted" | "refused" | "converted" | "expired";
 export type Quote = {
-  id: string; shop_id: string; reference: string;
+  id: string; organization_id: string; reference: string;
   customer_id: string | null;
   status: QuoteStatus;
   subtotal: number; discount: number; tax: number; total: number;
@@ -755,7 +755,7 @@ export type Quote = {
   notes: string | null; created_at: string;
 };
 export type QuoteItem = {
-  id: string; shop_id: string; quote_id: string; product_id: string | null;
+  id: string; organization_id: string; quote_id: string; product_id: string | null;
   name: string; quantity: number; unit_price: number; discount: number;
   tax_rate: number; total: number;
 };
@@ -763,14 +763,14 @@ export type QuoteWithItems = Quote & { quote_items: QuoteItem[]; customers: { na
 
 export function useQuotes(opts: number | { limit?: number; from?: string; to?: string } = 200) {
   const { limit = 200, from, to } = typeof opts === "number" ? { limit: opts } : opts;
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["quotes", shopId, limit, from, to],
-    enabled: !!shopId,
+    queryKey: ["quotes", organizationId, limit, from, to],
+    enabled: !!organizationId,
     queryFn: async (): Promise<QuoteWithItems[]> => {
       let q = supabase.from("quotes")
         .select("*, quote_items(*), customers(name)")
-        .eq("shop_id", shopId!);
+        .eq("organization_id", organizationId!);
       if (from) q = q.gte("created_at", from);
       if (to) q = q.lte("created_at", to);
       const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
@@ -786,7 +786,7 @@ export function useQuotes(opts: number | { limit?: number; from?: string; to?: s
 // quote_items, réservé à owner/manager par la RLS — un cashier ne peut donc
 // créer que de nouveaux devis, pas modifier les existants.
 export function useUpsertQuote() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       id?: string;
@@ -797,7 +797,7 @@ export function useUpsertQuote() {
       status?: QuoteStatus;
       items: { product_id: string | null; name: string; quantity: number; unit_price: number; discount?: number; tax_rate?: number }[];
     }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const items = input.items.map((it) => {
         const line = it.quantity * it.unit_price - (it.discount ?? 0);
         return { ...it, discount: it.discount ?? 0, tax_rate: it.tax_rate ?? 0, total: line };
@@ -807,7 +807,7 @@ export function useUpsertQuote() {
       const total = Math.max(0, subtotal - itemsDiscount);
 
       const payload = {
-        shop_id: shopId,
+        organization_id: organizationId,
         reference: input.reference ?? newTicketRef("DEV"),
         customer_id: input.customer_id ?? null,
         status: input.status ?? "draft",
@@ -830,7 +830,7 @@ export function useUpsertQuote() {
 
       if (items.length) {
         const itemsPayload = items.map((it) => ({
-          shop_id: shopId, quote_id: quoteId,
+          organization_id: organizationId, quote_id: quoteId,
           product_id: it.product_id, name: it.name,
           quantity: it.quantity, unit_price: it.unit_price,
           discount: it.discount, tax_rate: it.tax_rate, total: it.total,
@@ -840,18 +840,18 @@ export function useUpsertQuote() {
       }
       return quoteId!;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", organizationId] }),
   });
 }
 
 export function useDeleteQuote() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("quotes").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", organizationId] }),
   });
 }
 
@@ -859,34 +859,34 @@ export function useDeleteQuote() {
 // useCreateSale, réutilisé tel quel pour la conversion — pas de logique de
 // vente dupliquée).
 export function useMarkQuoteConverted() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ quoteId, saleId }: { quoteId: string; saleId: string }) => {
       const { error } = await supabase.from("quotes")
         .update({ status: "converted" as QuoteStatus, converted_sale_id: saleId }).eq("id", quoteId);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes", organizationId] }),
   });
 }
 
 // ============ ABONNEMENT ============
 export type SubscriptionStatus = "trialing" | "active" | "past_due" | "canceled" | "expired";
 export type Subscription = {
-  id: string; shop_id: string; plan: string; status: SubscriptionStatus;
+  id: string; organization_id: string; plan: string; status: SubscriptionStatus;
   amount: number; currency: string; started_at: string;
   current_period_end: string | null; provider: string | null; provider_ref: string | null;
   created_at: string;
 };
 
 export function useSubscription() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["subscription", shopId],
-    enabled: !!shopId,
+    queryKey: ["subscription", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<Subscription | null> => {
       const { data, error } = await supabase.from("subscriptions")
-        .select("*").eq("shop_id", shopId!)
+        .select("*").eq("organization_id", organizationId!)
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (error) throw error;
       return data as Subscription | null;
@@ -896,20 +896,20 @@ export function useSubscription() {
 
 export type SubscriptionPaymentStatus = "pending" | "paid" | "failed" | "refunded";
 export type SubscriptionPayment = {
-  id: string; shop_id: string; subscription_id: string;
+  id: string; organization_id: string; subscription_id: string;
   amount: number; currency: string; method: string; status: SubscriptionPaymentStatus;
   provider: string | null; provider_ref: string | null;
   paid_at: string | null; created_at: string;
 };
 
 export function useSubscriptionPayments(limit = 50) {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["subscription_payments", shopId, limit],
-    enabled: !!shopId,
+    queryKey: ["subscription_payments", organizationId, limit],
+    enabled: !!organizationId,
     queryFn: async (): Promise<SubscriptionPayment[]> => {
       const { data, error } = await supabase.from("subscription_payments")
-        .select("*").eq("shop_id", shopId!)
+        .select("*").eq("organization_id", organizationId!)
         .order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []) as SubscriptionPayment[];
@@ -1009,37 +1009,37 @@ export function useUploadAvatar() {
 // ============ RÔLE de l'utilisateur courant dans la boutique active ============
 // Fondation partagée par Profil, Équipe et les garde-fous UI par rôle.
 export function useMyRole() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   const { user } = useAuth();
   return useQuery({
-    queryKey: ["my_role", shopId, user?.id],
-    enabled: !!shopId && !!user,
+    queryKey: ["my_role", organizationId, user?.id],
+    enabled: !!organizationId && !!user,
     queryFn: async (): Promise<AppRole | null> => {
-      const { data, error } = await supabase.from("shop_members")
-        .select("role").eq("shop_id", shopId!).eq("user_id", user!.id).maybeSingle();
+      const { data, error } = await supabase.from("organization_members")
+        .select("role").eq("organization_id", organizationId!).eq("user_id", user!.id).maybeSingle();
       if (error) throw error;
       return (data?.role as AppRole | undefined) ?? null;
     },
   });
 }
 
-// ============ ÉQUIPE (shop_members + profils) ============
-// Pas de FK shop_members.user_id -> profiles.id (les deux référencent
+// ============ ÉQUIPE (organization_members + profils) ============
+// Pas de FK organization_members.user_id -> profiles.id (les deux référencent
 // auth.users indépendamment), donc pas d'embed PostgREST possible : on
 // fait deux requêtes et on fusionne côté client.
 export type ShopMember = {
-  id: string; shop_id: string; user_id: string; role: AppRole; created_at: string;
+  id: string; organization_id: string; user_id: string; role: AppRole; created_at: string;
   profile: { full_name: string | null; phone: string | null; avatar_url: string | null } | null;
 };
 
 export function useShopMembers() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["shop_members", shopId],
-    enabled: !!shopId,
+    queryKey: ["organization_members", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<ShopMember[]> => {
-      const { data: members, error } = await supabase.from("shop_members")
-        .select("*").eq("shop_id", shopId!).order("created_at");
+      const { data: members, error } = await supabase.from("organization_members")
+        .select("*").eq("organization_id", organizationId!).order("created_at");
       if (error) throw error;
       const userIds = (members ?? []).map((m: any) => m.user_id);
       let profiles: Record<string, { full_name: string | null; phone: string | null; avatar_url: string | null }> = {};
@@ -1060,44 +1060,44 @@ export function useShopMembers() {
 // mot de passe, rôle, coordonnées. Si un compte existe déjà avec cet
 // email, la fonction le rattache à la boutique sans mot de passe à définir.
 export function useCreateTeamMember() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       email: string; password?: string; full_name: string;
       phone?: string; address?: string; role: AppRole;
     }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      return invokeFn<{ user_id: string }>("create-team-member", { shop_id: shopId, ...input });
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      return invokeFn<{ user_id: string }>("create-team-member", { organization_id: organizationId, ...input });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
   });
 }
 
 export function useUpdateMemberRole() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ memberId, role }: { memberId: string; role: AppRole }) => {
-      const { error } = await supabase.from("shop_members").update({ role }).eq("id", memberId);
+      const { error } = await supabase.from("organization_members").update({ role }).eq("id", memberId);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
   });
 }
 
 export function useRemoveMember() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (memberId: string) => {
-      const { error } = await supabase.from("shop_members").delete().eq("id", memberId);
+      const { error } = await supabase.from("organization_members").delete().eq("id", memberId);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_members", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
   });
 }
 
 // ============ SHOP (identité + logo + ticket de caisse) ============
-// Les champs sans colonne dédiée sur `shops` (adresse, téléphone, RCCM/IFU,
-// réseaux sociaux) vivent dans shop_settings.data (jsonb), pour éviter une
+// Les champs sans colonne dédiée sur `organizations` (adresse, téléphone, RCCM/IFU,
+// réseaux sociaux) vivent dans organization_settings.data (jsonb), pour éviter une
 // migration de schéma supplémentaire.
 export type TicketConfig = {
   showLogo?: boolean; showAddress?: boolean; showPhone?: boolean;
@@ -1105,7 +1105,7 @@ export type TicketConfig = {
   thanks?: string;
 };
 // Comportement par défaut tant que la boutique n'a jamais enregistré sa
-// config de ticket (shop_settings.data.ticket vide) — même valeurs pour
+// config de ticket (organization_settings.data.ticket vide) — même valeurs pour
 // l'aperçu (Paramètres) et le reçu réel (Caisse), une seule source de vérité.
 export const DEFAULT_TICKET_CONFIG: TicketConfig = {
   showLogo: true, showAddress: true, showPhone: true,
@@ -1137,7 +1137,7 @@ export type ShopSettingsData = {
   permissions?: Partial<TeamPermissions>;
 };
 export type ShopSettings = {
-  shop_id: string;
+  organization_id: string;
   receipt_header: string | null;
   receipt_footer: string | null;
   receipt_logo_url: string | null;
@@ -1145,36 +1145,36 @@ export type ShopSettings = {
   data: ShopSettingsData;
 };
 
-const EMPTY_SHOP_SETTINGS: Omit<ShopSettings, "shop_id"> = {
+const EMPTY_SHOP_SETTINGS: Omit<ShopSettings, "organization_id"> = {
   receipt_header: null, receipt_footer: null, receipt_logo_url: null,
   tax_included: true, data: {},
 };
 
 export function useShopSettings() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["shop_settings", shopId],
-    enabled: !!shopId,
+    queryKey: ["organization_settings", organizationId],
+    enabled: !!organizationId,
     queryFn: async (): Promise<ShopSettings> => {
-      const { data, error } = await supabase.from("shop_settings")
-        .select("*").eq("shop_id", shopId!).maybeSingle();
+      const { data, error } = await supabase.from("organization_settings")
+        .select("*").eq("organization_id", organizationId!).maybeSingle();
       if (error) throw error;
-      return (data as ShopSettings | null) ?? { shop_id: shopId!, ...EMPTY_SHOP_SETTINGS };
+      return (data as ShopSettings | null) ?? { organization_id: organizationId!, ...EMPTY_SHOP_SETTINGS };
     },
   });
 }
 
 export function useUpdateShopSettings() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (patch: Partial<Omit<ShopSettings, "shop_id">>) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const { data, error } = await supabase.from("shop_settings")
-        .upsert({ shop_id: shopId, ...patch }).select().single();
+    mutationFn: async (patch: Partial<Omit<ShopSettings, "organization_id">>) => {
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("organization_settings")
+        .upsert({ organization_id: organizationId, ...patch }).select().single();
       if (error) throw error;
       return data as ShopSettings;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["shop_settings", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_settings", organizationId] }),
   });
 }
 
@@ -1187,13 +1187,13 @@ export function useTeamPermissions(): TeamPermissions {
 }
 
 export function useUpdateShop() {
-  const shopId = useShopId();
-  const { refresh } = useShop();
+  const organizationId = useOrganizationId();
+  const { refresh } = useOrganization();
   return useMutation({
     mutationFn: async (patch: { name?: string; logo_url?: string | null; currency?: string }) => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const { data, error } = await supabase.from("shops")
-        .update(patch).eq("id", shopId).select().single();
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("organizations")
+        .update(patch).eq("id", organizationId).select().single();
       if (error) throw error;
       return data;
     },
@@ -1202,10 +1202,12 @@ export function useUpdateShop() {
 }
 
 // Ajout d'une boutique supplémentaire par un owner déjà existant (migration
-// 015) — respecte plans.limits.shops côté serveur (RPC security definer),
-// jamais uniquement côté UI.
+// 015) — respecte plans.limits.shops côté serveur (RPC security definer,
+// clé JSON encore nommée "shops" dans plans.limits — pas renommée par la
+// migration 020a, qui n'a touché qu'aux tables/colonnes), jamais
+// uniquement côté UI.
 export function useCreateAdditionalShop() {
-  const { refresh, setCurrentShopId } = useShop();
+  const { refresh, setCurrentOrganizationId } = useOrganization();
   return useMutation({
     mutationFn: async (input: { name: string; country: string; currency: string }) => {
       const { data, error } = await supabase.rpc("create_additional_shop", {
@@ -1216,13 +1218,13 @@ export function useCreateAdditionalShop() {
     },
     onSuccess: async (shop) => {
       await refresh();
-      setCurrentShopId(shop.id);
+      setCurrentOrganizationId(shop.id);
     },
   });
 }
 
 // Transfert de stock entre boutiques d'un même compte : les catalogues
-// produits sont indépendants par boutique (shop_id), donc on fait
+// produits sont indépendants par boutique (organization_id), donc on fait
 // correspondre les lignes par SKU (ou, à défaut, par nom exact) dans la
 // boutique de destination — pas de création automatique de produit côté
 // destination si aucune correspondance n'est trouvée, on le signale à
@@ -1230,18 +1232,18 @@ export function useCreateAdditionalShop() {
 // dans la boutique source et un mouvement 'in' (entrée) dans la boutique
 // de destination, tous deux traçables via la même référence.
 export function useTransferStock() {
-  const shopId = useShopId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
-      toShopId: string;
+      toOrganizationId: string;
       lines: { product_id: string; sku: string | null; name: string; quantity: number }[];
     }): Promise<{ transferred: number; unmatched: string[] }> => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const linesToSend = input.lines.filter((l) => l.quantity > 0);
       if (linesToSend.length === 0) throw new Error("Aucune quantité à transférer.");
 
       const { data: destProducts, error: destErr } = await supabase.from("products")
-        .select("id, sku, name").eq("shop_id", input.toShopId) as {
+        .select("id, sku, name").eq("organization_id", input.toOrganizationId) as {
           data: { id: string; sku: string | null; name: string }[] | null; error: any;
         };
       if (destErr) throw destErr;
@@ -1255,11 +1257,11 @@ export function useTransferStock() {
         const match = (l.sku && bySku.get(l.sku.toLowerCase())) ?? byName.get(l.name.toLowerCase());
         if (!match) { unmatched.push(l.name); continue; }
         outRows.push({
-          shop_id: shopId, product_id: l.product_id, type: "transfer", quantity: l.quantity,
+          organization_id: organizationId, product_id: l.product_id, type: "transfer", quantity: l.quantity,
           reason: `Transfert sortant (${reference})`, reference, created_by: user?.id,
         });
         inRows.push({
-          shop_id: input.toShopId, product_id: match.id, type: "in", quantity: l.quantity,
+          organization_id: input.toOrganizationId, product_id: match.id, type: "in", quantity: l.quantity,
           reason: `Transfert entrant (${reference})`, reference, created_by: user?.id,
         });
       }
@@ -1272,23 +1274,23 @@ export function useTransferStock() {
       return { transferred: outRows.length, unmatched };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["products", shopId] });
-      qc.invalidateQueries({ queryKey: ["stock_movements", shopId] });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
     },
   });
 }
 
 // Upload du logo vers le bucket Storage "shop-logos" (public en lecture,
 // écriture owner/manager — voir db/migrations/003_...). Un seul fichier par
-// boutique (clé fixe "{shop_id}/logo", écrasé à chaque upload) pour éviter
+// boutique (clé fixe "{organization_id}/logo", écrasé à chaque upload) pour éviter
 // d'accumuler des fichiers orphelins.
 export function useUploadShopLogo() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   const updateShop = useUpdateShop();
   return useMutation({
     mutationFn: async (file: File): Promise<string> => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const path = `${shopId}/logo`;
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const path = `${organizationId}/logo`;
       const { error: upErr } = await supabase.storage.from("shop-logos")
         .upload(path, file, { upsert: true, cacheControl: "3600", contentType: file.type });
       if (upErr) throw upErr;
@@ -1302,17 +1304,17 @@ export function useUploadShopLogo() {
 
 // Image produit (bucket "product-images", migration 012 — public en
 // lecture, écriture owner/manager/stock). Un fichier par produit (clé
-// fixe "{shop_id}/{product_id}", écrasé à chaque upload). Ne met pas à
+// fixe "{organization_id}/{product_id}", écrasé à chaque upload). Ne met pas à
 // jour products.image_url elle-même (contrairement au logo boutique) :
 // le produit doit déjà exister (avoir un id) avant l'upload, donc
 // l'appelant enchaîne lui-même avec useUpsertProduct une fois l'URL
 // obtenue — cf. ProductForm.
 export function useUploadProductImage() {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useMutation({
     mutationFn: async ({ productId, file }: { productId: string; file: File }): Promise<string> => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
-      const path = `${shopId}/${productId}`;
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const path = `${organizationId}/${productId}`;
       const { error: upErr } = await supabase.storage.from("product-images")
         .upload(path, file, { upsert: true, cacheControl: "3600", contentType: file.type });
       if (upErr) throw upErr;
@@ -1328,19 +1330,19 @@ export function useUploadProductImage() {
 // place depuis le schéma initial (RLS ouverte à tout membre de la
 // boutique — voir permissionsMatrix.ts), seule l'écriture était morte.
 export type AppNotification = {
-  id: string; shop_id: string; user_id: string | null;
+  id: string; organization_id: string; user_id: string | null;
   title: string; body: string | null; kind: string | null;
   read_at: string | null; created_at: string;
 };
 
 export function useNotifications(limit = 50) {
-  const shopId = useShopId();
+  const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["notifications", shopId, limit],
-    enabled: !!shopId,
+    queryKey: ["notifications", organizationId, limit],
+    enabled: !!organizationId,
     queryFn: async (): Promise<AppNotification[]> => {
       const { data, error } = await supabase.from("notifications")
-        .select("*").eq("shop_id", shopId!).order("created_at", { ascending: false }).limit(limit);
+        .select("*").eq("organization_id", organizationId!).order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []) as AppNotification[];
     },
@@ -1348,38 +1350,38 @@ export function useNotifications(limit = 50) {
 }
 
 export function useMarkNotificationRead() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("notifications")
         .update({ read_at: new Date().toISOString() }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", organizationId] }),
   });
 }
 
 export function useMarkAllNotificationsRead() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      if (!shopId) throw new Error("Aucune boutique sélectionnée");
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const { error } = await supabase.from("notifications")
         .update({ read_at: new Date().toISOString() })
-        .eq("shop_id", shopId).is("read_at", null);
+        .eq("organization_id", organizationId).is("read_at", null);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", organizationId] }),
   });
 }
 
 export function useDismissNotification() {
-  const shopId = useShopId(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("notifications").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", shopId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", organizationId] }),
   });
 }

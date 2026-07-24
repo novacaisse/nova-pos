@@ -8,7 +8,7 @@ import {
 } from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useSales, useProducts, useSuppliers, useShopSettings, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
 
@@ -82,7 +82,7 @@ function periodRange(period: PeriodId, from: string, to: string): { from: string
 
 function RapportsPage() {
   const formatXOF = useFormatMoney();
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: settings } = useShopSettings();
   const [period, setPeriod] = useState<PeriodId>("month");
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
@@ -219,8 +219,8 @@ function RapportsPage() {
       docTitle: `Rapport — ${reportLabel}`,
       docDate: new Date().toLocaleString("fr-FR"),
       shop: {
-        shopName: currentShop?.name ?? "Boutique",
-        logoUrl: currentShop?.logo_url,
+        shopName: currentOrganization?.name ?? "Boutique",
+        logoUrl: currentOrganization?.logo_url,
         address: settings?.data.address,
         phone: settings?.data.phone,
         ifu: settings?.data.ifu,

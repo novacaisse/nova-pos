@@ -3,13 +3,13 @@ import { Link } from "@tanstack/react-router";
 import { Check, ChevronsUpDown, Store, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 
 export function ShopSelector() {
   const [open, setOpen] = useState(false);
-  const { shops, currentShop, setCurrentShopId, loading } = useShop();
+  const { organizations, currentOrganization, setCurrentOrganizationId, loading } = useOrganization();
 
-  if (loading && !currentShop) {
+  if (loading && !currentOrganization) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
@@ -17,7 +17,7 @@ export function ShopSelector() {
     );
   }
 
-  if (!currentShop) {
+  if (!currentOrganization) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-card px-3 py-2 text-xs text-muted-foreground">
         <Store className="h-4 w-4" /> Aucune boutique
@@ -37,7 +37,7 @@ export function ShopSelector() {
           </div>
           <div className="min-w-0 leading-tight">
             <div className="truncate text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Boutique</div>
-            <div className="truncate text-sm font-semibold text-foreground">{currentShop.name}</div>
+            <div className="truncate text-sm font-semibold text-foreground">{currentOrganization.name}</div>
           </div>
           <ChevronsUpDown className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" />
         </button>
@@ -46,12 +46,12 @@ export function ShopSelector() {
         <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
           Vos boutiques
         </div>
-        {shops.map((s) => {
-          const isActive = s.id === currentShop.id;
+        {organizations.map((s) => {
+          const isActive = s.id === currentOrganization.id;
           return (
             <button
               key={s.id}
-              onClick={() => { setCurrentShopId(s.id); setOpen(false); }}
+              onClick={() => { setCurrentOrganizationId(s.id); setOpen(false); }}
               className={cn(
                 "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
                 isActive ? "bg-primary/10" : "hover:bg-muted",

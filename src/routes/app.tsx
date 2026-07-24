@@ -15,7 +15,7 @@ import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
 import { getTrialInfo } from "@/lib/trial";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 
 export const Route = createFileRoute("/app")({
   // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
@@ -29,7 +29,7 @@ function AppLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user, loading, signOut } = useAuth();
-  const { shops, currentShop, loading: shopLoading, error: shopError, refresh } = useShop();
+  const { organizations, currentOrganization, loading: shopLoading, error: shopError, refresh } = useOrganization();
 
   // Auth guard côté client (SPA)
   useEffect(() => {
@@ -37,12 +37,12 @@ function AppLayout() {
   }, [loading, user, navigate]);
 
   // Blocage automatique après expiration de l'essai gratuit — basé sur
-  // shops.trial_ends_at (Supabase), pas sur un flag local contournable.
+  // organizations.trial_ends_at (Supabase), pas sur un flag local contournable.
   useEffect(() => {
     if (shopLoading) return;
-    const info = getTrialInfo(currentShop);
+    const info = getTrialInfo(currentOrganization);
     if (info.onTrial && info.expired) navigate({ to: "/souscription" });
-  }, [pathname, currentShop, shopLoading, navigate]);
+  }, [pathname, currentOrganization, shopLoading, navigate]);
 
   if (loading || !user) {
     return (
@@ -53,10 +53,10 @@ function AppLayout() {
   }
 
   // Garde-fou : un utilisateur authentifié sans aucune boutique (ex.
-  // inscription interrompue avant la création de shops/shop_members) ne
-  // doit jamais atterrir silencieusement sur des écrans vides/désactivés —
-  // un état clair vaut mieux qu'un silence déroutant.
-  if (!shopLoading && shops.length === 0) {
+  // inscription interrompue avant la création de organizations/
+  // organization_members) ne doit jamais atterrir silencieusement sur des
+  // écrans vides/désactivés — un état clair vaut mieux qu'un silence déroutant.
+  if (!shopLoading && organizations.length === 0) {
     return <NoShopScreen onRetry={refresh} onSignOut={signOut} error={shopError} />;
   }
 

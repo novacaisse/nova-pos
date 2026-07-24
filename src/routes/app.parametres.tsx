@@ -5,7 +5,7 @@ import {
   X, Trash2, Search, Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
   useCreateAdditionalShop, useTransferStock, useProducts,
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/app/parametres")({
 
 function ParametresPage() {
   const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer">("shop");
-  const { shops, currentShop } = useShop();
+  const { organizations, currentOrganization } = useOrganization();
   const { data: settings, isLoading: settingsLoading } = useShopSettings();
   const updateShop = useUpdateShop();
   const updateSettings = useUpdateShopSettings();
@@ -44,8 +44,8 @@ function ParametresPage() {
   const createShop = useCreateAdditionalShop();
 
   useEffect(() => {
-    if (currentShop) { setName(currentShop.name); setCurrency(currentShop.currency); }
-  }, [currentShop]);
+    if (currentOrganization) { setName(currentOrganization.name); setCurrency(currentOrganization.currency); }
+  }, [currentOrganization]);
 
   useEffect(() => {
     if (!settings) return;
@@ -57,7 +57,7 @@ function ParametresPage() {
   }, [settings]);
 
   const onLogo = async (file?: File) => {
-    if (!file || !currentShop) return;
+    if (!file || !currentOrganization) return;
     setLogoUploading(true);
     try {
       await uploadLogo.mutateAsync(file);
@@ -69,7 +69,7 @@ function ParametresPage() {
   };
 
   const saveShop = async () => {
-    if (!currentShop) return;
+    if (!currentOrganization) return;
     try {
       await updateShop.mutateAsync({ name });
       await updateSettings.mutateAsync({ data: { ...(settings?.data ?? {}), ...shopExtra, ticket } });
@@ -108,7 +108,7 @@ function ParametresPage() {
     }
   };
 
-  if (!currentShop) {
+  if (!currentOrganization) {
     return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une boutique.</div>;
   }
 
@@ -143,7 +143,7 @@ function ParametresPage() {
               <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-border p-4">
                 <div className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl bg-muted">
                   {logoUploading ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    : currentShop.logo_url ? <img src={currentShop.logo_url} alt="Logo" className="h-full w-full object-contain" />
+                    : currentOrganization.logo_url ? <img src={currentOrganization.logo_url} alt="Logo" className="h-full w-full object-contain" />
                     : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -178,7 +178,7 @@ function ParametresPage() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  {shops.map((s) => (
+                  {organizations.map((s) => (
                     <div key={s.id} className="flex items-center gap-3 rounded-xl border border-border p-3">
                       <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary"><Store className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
@@ -308,9 +308,9 @@ function ParametresPage() {
               <div className="sticky top-20">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Aperçu</div>
                 <div className="rounded-2xl bg-white p-5 text-black shadow-elegant" style={{ fontFamily: "monospace" }}>
-                  {ticket.showLogo && currentShop.logo_url && <img src={currentShop.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />}
+                  {ticket.showLogo && currentOrganization.logo_url && <img src={currentOrganization.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />}
                   <div className="text-center">
-                    <div className="text-sm font-bold">{name || currentShop.name}</div>
+                    <div className="text-sm font-bold">{name || currentOrganization.name}</div>
                     {ticket.showAddress && shopExtra.address && <div className="text-xs">{shopExtra.address}</div>}
                     {ticket.showPhone && shopExtra.phone && <div className="text-xs">{shopExtra.phone}</div>}
                     {ticket.showFiscal && shopExtra.ifu && <div className="text-xs">IFU {shopExtra.ifu}</div>}
@@ -331,7 +331,7 @@ function ParametresPage() {
           )}
 
           {tab === "transfer" && (
-            <TransferPanel shops={shops} currentShopId={currentShop.id} currentShopName={currentShop.name} canManage={canManage} />
+            <TransferPanel organizations={organizations} currentOrganizationId={currentOrganization.id} currentOrganizationName={currentOrganization.name} canManage={canManage} />
           )}
         </div>
       </div>
@@ -421,16 +421,16 @@ function AddShopDialog({ onClose, onCreate, pending }: {
   );
 }
 
-type TransferShop = { id: string; name: string };
+type TransferOrganization = { id: string; name: string };
 
-function TransferPanel({ shops, currentShopId, currentShopName, canManage }: {
-  shops: TransferShop[]; currentShopId: string; currentShopName: string; canManage: boolean;
+function TransferPanel({ organizations, currentOrganizationId, currentOrganizationName, canManage }: {
+  organizations: TransferOrganization[]; currentOrganizationId: string; currentOrganizationName: string; canManage: boolean;
 }) {
   const formatXOF = useFormatMoney();
   const { data: products = [] } = useProducts();
   const transfer = useTransferStock();
-  const otherShops = shops.filter((s) => s.id !== currentShopId);
-  const [toShopId, setToShopId] = useState(otherShops[0]?.id ?? "");
+  const otherOrganizations = organizations.filter((s) => s.id !== currentOrganizationId);
+  const [toOrganizationId, setToOrganizationId] = useState(otherOrganizations[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [qty, setQty] = useState<Record<string, number>>({});
   const [result, setResult] = useState<{ transferred: number; unmatched: string[] } | null>(null);
@@ -445,13 +445,13 @@ function TransferPanel({ shops, currentShopId, currentShopName, canManage }: {
 
   const submit = async () => {
     setError(null); setResult(null);
-    if (!toShopId) { setError("Sélectionnez une boutique de destination."); return; }
+    if (!toOrganizationId) { setError("Sélectionnez une boutique de destination."); return; }
     const payload = lines.map(([productId, quantity]) => {
       const p = products.find((x) => x.id === productId)!;
       return { product_id: p.id, sku: p.sku, name: p.name, quantity };
     });
     try {
-      const res = await transfer.mutateAsync({ toShopId, lines: payload });
+      const res = await transfer.mutateAsync({ toOrganizationId, lines: payload });
       setResult(res);
       setQty({});
     } catch (e: any) {
@@ -459,7 +459,7 @@ function TransferPanel({ shops, currentShopId, currentShopName, canManage }: {
     }
   };
 
-  if (otherShops.length === 0) {
+  if (otherOrganizations.length === 0) {
     return (
       <div className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
         Ajoutez une deuxième boutique (onglet Boutique) pour pouvoir transférer du stock entre elles.
@@ -471,20 +471,20 @@ function TransferPanel({ shops, currentShopId, currentShopName, canManage }: {
     <div className="rounded-2xl border border-border bg-card p-6">
       <h2 className="mb-1 font-display text-lg font-bold">Transfert de stock entre boutiques</h2>
       <p className="mb-4 text-xs text-muted-foreground">
-        Envoie du stock de « {currentShopName} » vers une autre boutique. La correspondance des produits se fait par
+        Envoie du stock de « {currentOrganizationName} » vers une autre boutique. La correspondance des produits se fait par
         SKU (ou par nom si le SKU est vide) : un article introuvable dans le catalogue de destination sera signalé,
         pas transféré automatiquement.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Depuis</div>
-          <div className="flex h-10 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm">{currentShopName}</div>
+          <div className="flex h-10 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm">{currentOrganizationName}</div>
         </div>
         <label className="block">
           <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vers</div>
-          <select value={toShopId} onChange={(e) => setToShopId(e.target.value)}
+          <select value={toOrganizationId} onChange={(e) => setToOrganizationId(e.target.value)}
             className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm">
-            {otherShops.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {otherOrganizations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </label>
       </div>

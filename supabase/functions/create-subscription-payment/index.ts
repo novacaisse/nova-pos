@@ -1,9 +1,9 @@
 // Edge Function : create-subscription-payment
 // Appelée par le client authentifié (souscription.tsx) avec
-// { shop_id, plan_id, period, phone, full_name }.
-// - Vérifie server-side que l'appelant est owner/manager de shop_id (ne
-//   jamais faire confiance à shop_id envoyé par le client, puisqu'on va
-//   écrire ensuite avec le service role, qui contourne la RLS).
+// { organization_id, plan_id, period, phone, full_name }.
+// - Vérifie server-side que l'appelant est owner/manager de organization_id
+//   (ne jamais faire confiance à organization_id envoyé par le client,
+//   puisqu'on va écrire ensuite avec le service role, qui contourne la RLS).
 // - Crée une ligne subscription_payments (status: pending).
 // - Appelle MoneyFusion via un proxy à IP fixe (PAYMENT_PROXY_URL) — le
 //   lien API MoneyFusion n'accepte que les requêtes depuis une IP
@@ -66,13 +66,13 @@ Deno.serve(async (req) => {
     const userId = userData.user.id;
 
     const body = await req.json().catch(() => null);
-    const shop_id = body?.shop_id as string | undefined;
+    const organization_id = body?.organization_id as string | undefined;
     const plan_id = body?.plan_id as string | undefined;
     const period = body?.period as string | undefined;
     const phone = body?.phone as string | undefined;
     const full_name = body?.full_name as string | undefined;
 
-    if (!shop_id || !plan_id || !period || !phone || !full_name) {
+    if (!organization_id || !plan_id || !period || !phone || !full_name) {
       return json({ error: "Paramètres manquants." }, 400);
     }
     if (period !== "month" && period !== "year") {
@@ -80,9 +80,9 @@ Deno.serve(async (req) => {
     }
 
     const { data: membership, error: memberErr } = await userClient
-      .from("shop_members")
+      .from("organization_members")
       .select("role")
-      .eq("shop_id", shop_id)
+      .eq("organization_id", organization_id)
       .eq("user_id", userId)
       .maybeSingle();
     if (memberErr || !membership || (membership.role !== "owner" && membership.role !== "manager")) {
@@ -102,14 +102,14 @@ Deno.serve(async (req) => {
     // l'inscription) plutôt que d'en créer une nouvelle à chaque paiement.
     const { data: subscription, error: subErr } = await admin
       .from("subscriptions").select("id")
-      .eq("shop_id", shop_id)
+      .eq("organization_id", organization_id)
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (subErr || !subscription) return json({ error: "Abonnement introuvable pour cette boutique." }, 404);
 
     const { data: payment, error: payErr } = await admin
       .from("subscription_payments")
       .insert({
-        shop_id, subscription_id: subscription.id,
+        organization_id, subscription_id: subscription.id,
         amount: totalPrice, currency: plan.currency,
         method: "mobile_money", status: "pending", provider: "moneyfusion",
         metadata: { plan_id, period },
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
           article: [{ [plan.name]: totalPrice }],
           numeroSend: phone,
           nomclient: full_name,
-          personal_Info: [{ shop_id, plan_id, period, payment_id: payment.id }],
+          personal_Info: [{ organization_id, plan_id, period, payment_id: payment.id }],
           return_url: `${APP_URL}/souscription/confirmation?payment_id=${payment.id}`,
           webhook_url: `${SUPABASE_URL}/functions/v1/moneyfusion-webhook`,
         }),

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { subDays } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Send, RotateCcw, User } from "lucide-react";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useSales, useProducts, useCustomers, useExpenses } from "@/lib/data/hooks";
 import { answerNova, NOVA_SUGGESTIONS, type NovaContext } from "@/lib/nova/engine";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,7 @@ export const Route = createFileRoute("/app/nova")({
 type Message = { id: string; role: "user" | "assistant"; text: string };
 
 function NovaPage() {
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: sales = [] } = useSales({ from: subDays(new Date(), 35).toISOString() });
   const { data: products = [] } = useProducts();
   const { data: customers = [] } = useCustomers();
@@ -28,10 +28,10 @@ function NovaPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const ctx: NovaContext = useMemo(() => ({
-    shopName: currentShop?.name ?? "votre boutique",
-    currency: currentShop?.currency,
+    shopName: currentOrganization?.name ?? "votre boutique",
+    currency: currentOrganization?.currency,
     sales, products, customers, expenses,
-  }), [currentShop, sales, products, customers, expenses]);
+  }), [currentOrganization, sales, products, customers, expenses]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -72,7 +72,7 @@ function NovaPage() {
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-xl font-bold tracking-tight">Nova</h1>
-          <p className="truncate text-xs text-muted-foreground">Assistant de {currentShop?.name ?? "votre boutique"}</p>
+          <p className="truncate text-xs text-muted-foreground">Assistant de {currentOrganization?.name ?? "votre boutique"}</p>
         </div>
         {messages.length > 0 && (
           <button
@@ -89,7 +89,7 @@ function NovaPage() {
           {messages.length === 0 && (
             <div>
               <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm text-foreground">
-                Bonjour 👋 Je suis Nova, l'assistant IA de {currentShop?.name ?? "votre boutique"}. Posez-moi une question sur vos ventes, produits, stock, clients ou dépenses.
+                Bonjour 👋 Je suis Nova, l'assistant IA de {currentOrganization?.name ?? "votre boutique"}. Posez-moi une question sur vos ventes, produits, stock, clients ou dépenses.
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {NOVA_SUGGESTIONS.map((s) => (

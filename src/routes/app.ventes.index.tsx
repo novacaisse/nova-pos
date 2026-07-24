@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import {
   useSales, useMyRole, useCancelSale, useAddSalePayment, useTeamPermissions,
@@ -191,7 +191,7 @@ const SALE_STATUS_LABEL: Record<Sale["status"], string> = {
 
 function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }) {
   const formatXOF = useFormatMoney();
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: settings } = useShopSettings();
   const { data: profile } = useProfile();
   const { data: products = [] } = useProducts();
@@ -247,8 +247,8 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
       docDate: new Date(sale.created_at).toLocaleString("fr-FR"),
       banner: "Document non fiscal — proforma",
       shop: {
-        shopName: currentShop?.name ?? "Boutique",
-        logoUrl: currentShop?.logo_url,
+        shopName: currentOrganization?.name ?? "Boutique",
+        logoUrl: currentOrganization?.logo_url,
         address: extra.address,
         phone: extra.phone,
         ifu: extra.ifu,
@@ -341,10 +341,10 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
       <div className="hidden">
         <div ref={printRef}>
           <div className="center text-center">
-            {ticket.showLogo && currentShop?.logo_url && (
-              <img src={currentShop.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />
+            {ticket.showLogo && currentOrganization?.logo_url && (
+              <img src={currentOrganization.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />
             )}
-            <div className="b text-base font-bold">{currentShop?.name ?? "Boutique"}</div>
+            <div className="b text-base font-bold">{currentOrganization?.name ?? "Boutique"}</div>
             {ticket.showAddress && extra.address && <div className="text-xs">{extra.address}</div>}
             {ticket.showPhone && extra.phone && <div className="text-xs">{extra.phone}</div>}
             {ticket.showFiscal && extra.ifu && <div className="text-xs">IFU {extra.ifu}</div>}

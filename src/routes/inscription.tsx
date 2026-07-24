@@ -65,7 +65,7 @@ function InscriptionPage() {
     // en une seule transaction atomique côté serveur (migration 009) — soit
     // tout réussit, soit rien n'est créé, plus de séquence pouvant
     // s'interrompre à mi-chemin.
-    const { data: shop, error: rpcErr } = await supabase.rpc("complete_signup", {
+    const { data: organization, error: rpcErr } = await supabase.rpc("complete_signup", {
       p_shop_name: form.shop,
       p_country: form.country,
       p_currency: "XOF",
@@ -73,27 +73,27 @@ function InscriptionPage() {
       p_address: form.address || `${form.city}, ${form.country}`,
       p_owner_phone: form.ownerPhone || null,
     });
-    if (rpcErr || !shop) {
+    if (rpcErr || !organization) {
       setError(rpcErr?.message ?? "Impossible de créer la boutique.");
       setLoading(false); return;
     }
-    const shopId = (shop as { id: string }).id;
+    const organizationId = (organization as { id: string }).id;
 
     // 4. Logo (Supabase Storage — bucket "shop-logos"), au mieux : la
     // boutique est déjà pleinement fonctionnelle sans logo si ça échoue.
     if (logoFile) {
-      const path = `${shopId}/logo`;
+      const path = `${organizationId}/logo`;
       const { error: upErr } = await supabase.storage.from("shop-logos")
         .upload(path, logoFile, { upsert: true, contentType: logoFile.type });
       if (!upErr) {
         const { data: pub } = supabase.storage.from("shop-logos").getPublicUrl(path);
-        await supabase.from("shops").update({ logo_url: pub.publicUrl }).eq("id", shopId);
+        await supabase.from("organizations").update({ logo_url: pub.publicUrl }).eq("id", organizationId);
       }
     }
 
     // 5. Préférences locales (UI uniquement)
     if (typeof window !== "undefined") {
-      localStorage.setItem("novacaisse.currentShopId", shopId);
+      localStorage.setItem("novacaisse.currentShopId", organizationId);
     }
     navigate({ to: "/app" });
   };

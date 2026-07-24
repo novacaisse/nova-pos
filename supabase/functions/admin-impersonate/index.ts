@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => null);
     const target_user_id = body?.target_user_id as string | undefined;
-    const shop_id = body?.shop_id as string | undefined;
+    const organization_id = body?.organization_id as string | undefined;
     if (!target_user_id) return json({ error: "target_user_id manquant." }, 400);
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
     await admin.from("admin_impersonations").insert({
       admin_user_id: userData.user.id,
       target_user_id,
-      shop_id: shop_id ?? null,
+      organization_id: organization_id ?? null,
     });
 
     return json({ action_link: linkData.properties.action_link });

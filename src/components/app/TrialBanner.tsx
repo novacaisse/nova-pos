@@ -1,16 +1,16 @@
 import { Link } from "@tanstack/react-router";
 import { Clock, Sparkles } from "lucide-react";
 import { getTrialInfo } from "@/lib/trial";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useSubscription } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export function TrialBanner() {
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: subscription } = useSubscription();
-  const info = getTrialInfo(currentShop);
+  const info = getTrialInfo(currentOrganization);
 
-  // Double vérification : shops.plan !== 'trial' (mis à jour par le
+  // Double vérification : organizations.plan !== 'trial' (mis à jour par le
   // webhook/la vérification de paiement) ET subscriptions.status - au cas
   // où l'un des deux resterait désynchronisé (ex. webhook manqué avant le
   // fix du Bloc 16), la boutique ne doit jamais voir le bandeau d'essai

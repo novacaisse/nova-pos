@@ -19,7 +19,7 @@ export function buildProxyClient(proxyUrl: string) {
 
 export type SubscriptionPaymentRow = {
   id: string;
-  shop_id: string;
+  organization_id: string;
   subscription_id: string;
   provider_ref: string | null;
   status: string;
@@ -74,7 +74,7 @@ export async function verifyAndApplyPayment(
       await admin.from("subscriptions")
         .update({ status: "active", plan: meta.plan_id, current_period_end: currentPeriodEnd })
         .eq("id", payment.subscription_id);
-      await admin.from("shops").update({ plan: meta.plan_id }).eq("id", payment.shop_id);
+      await admin.from("organizations").update({ plan: meta.plan_id }).eq("id", payment.organization_id);
     }
     return "paid";
   }

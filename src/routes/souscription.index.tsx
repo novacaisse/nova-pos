@@ -5,7 +5,7 @@ import { Check, Loader2, Smartphone, ArrowRight, AlertTriangle } from "lucide-re
 import { invokeFn } from "@/lib/data/invokeFn";
 import { BrandLogo } from "@/components/app/BrandLogo";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useProfile, formatMoney } from "@/lib/data/hooks";
 import { usePlans } from "@/lib/data/adminHooks";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ function SouscriptionPage() {
   const navigate = useNavigate();
   const { plan: planFromUrl } = Route.useSearch();
   const { user, loading: authLoading } = useAuth();
-  const { currentShop, loading: shopLoading } = useShop();
+  const { currentOrganization, loading: shopLoading } = useOrganization();
   const { data: profile } = useProfile();
   const { data: plans = [], isLoading: plansLoading } = usePlans();
 
@@ -58,12 +58,12 @@ function SouscriptionPage() {
   const total = plan ? (period === "mensuel" ? plan.price_month : plan.price_year) : 0;
 
   const launchPayment = async () => {
-    if (!currentShop || !plan || !phone.trim() || !fullName.trim()) return;
+    if (!currentOrganization || !plan || !phone.trim() || !fullName.trim()) return;
     setSubmitting(true);
     setError(null);
     try {
       const data = await invokeFn<{ url?: string }>("create-subscription-payment", {
-        shop_id: currentShop.id,
+        organization_id: currentOrganization.id,
         plan_id: plan.id,
         period: period === "mensuel" ? "month" : "year",
         phone: phone.trim(),
@@ -85,7 +85,7 @@ function SouscriptionPage() {
     );
   }
 
-  if (!currentShop) {
+  if (!currentOrganization) {
     return (
       <div className="grid min-h-screen place-items-center bg-background px-5 text-center">
         <div>
@@ -111,7 +111,7 @@ function SouscriptionPage() {
               <motion.div key="recap" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
                 className="rounded-3xl border border-border bg-card p-7 shadow-elegant">
                 <h1 className="font-display text-2xl font-black">Récapitulatif</h1>
-                <p className="mt-1 text-sm text-muted-foreground">Confirmez votre formule et la périodicité pour {currentShop.name}.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Confirmez votre formule et la périodicité pour {currentOrganization.name}.</p>
 
                 <div className="mt-5">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Formule</div>

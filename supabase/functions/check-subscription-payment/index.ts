@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return json({ error: "Non authentifié." }, 401);
 
-    // Client scopé à l'utilisateur : la RLS (has_shop_access) garantit
+    // Client scopé à l'utilisateur : la RLS (has_organization_access) garantit
     // qu'on ne peut lire/vérifier qu'un paiement d'une boutique à laquelle
     // on appartient — jamais confiance dans un payment_id arbitraire sans
     // ce filtre.

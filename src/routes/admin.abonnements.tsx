@@ -87,7 +87,7 @@ function AdminAbonnements() {
                 return (
                   <tr key={p.id} className="border-t border-border/60 hover:bg-muted/40">
                     <td className="tabular px-4 py-3 text-xs font-mono">{p.id.slice(0, 8)}</td>
-                    <td className="px-4 py-3 font-semibold">{p.shops?.name ?? "—"}</td>
+                    <td className="px-4 py-3 font-semibold">{p.organizations?.name ?? "—"}</td>
                     <td className="px-4 py-3 text-xs">{(p.metadata?.moyen as string | undefined) ?? p.method}</td>
                     <td className="px-4 py-3">
                       <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase", meta.color)}>

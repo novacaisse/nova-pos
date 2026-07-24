@@ -2,12 +2,12 @@
 // Remplace le flux "la personne crée son propre compte via /rejoindre,
 // puis le owner l'ajoute par email" — le owner crée directement le compte
 // (email + mot de passe + rôle) depuis Équipe. Appelée par le client
-// authentifié avec { shop_id, email, password, full_name, phone, address, role }.
-// - Vérifie server-side que l'appelant est owner de shop_id (jamais faire
-//   confiance à shop_id envoyé par le client, puisqu'on écrit ensuite avec
-//   le service role, qui contourne la RLS).
-// - Fait respecter plans.limits.users (nombre de shop_members déjà dans la
-//   boutique vs. limite de la formule active) — jamais uniquement côté UI.
+// authentifié avec { organization_id, email, password, full_name, phone, address, role }.
+// - Vérifie server-side que l'appelant est owner de organization_id (jamais
+//   faire confiance à organization_id envoyé par le client, puisqu'on écrit
+//   ensuite avec le service role, qui contourne la RLS).
+// - Fait respecter plans.limits.users (nombre de organization_members déjà
+//   dans la boutique vs. limite de la formule active) — jamais uniquement côté UI.
 // - Si l'email existe déjà (compte créé via une inscription indépendante,
 //   ou déjà membre d'une autre boutique), on rattache ce compte existant
 //   plutôt que d'échouer — pas de mot de passe à définir dans ce cas.
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     const callerId = userData.user.id;
 
     const body = await req.json().catch(() => null);
-    const shop_id = body?.shop_id as string | undefined;
+    const organization_id = body?.organization_id as string | undefined;
     const email = (body?.email as string | undefined)?.trim().toLowerCase();
     const password = body?.password as string | undefined;
     const full_name = (body?.full_name as string | undefined)?.trim();
@@ -56,27 +56,27 @@ Deno.serve(async (req) => {
     const address = body?.address as string | undefined;
     const role = body?.role as string | undefined;
 
-    if (!shop_id || !email || !full_name || !role) {
+    if (!organization_id || !email || !full_name || !role) {
       return json({ error: "Paramètres manquants." }, 400);
     }
     if (!VALID_ROLES.includes(role)) return json({ error: "Rôle invalide." }, 400);
 
     const { data: membership, error: memberErr } = await userClient
-      .from("shop_members").select("role").eq("shop_id", shop_id).eq("user_id", callerId).maybeSingle();
+      .from("organization_members").select("role").eq("organization_id", organization_id).eq("user_id", callerId).maybeSingle();
     if (memberErr || !membership || membership.role !== "owner") {
       return json({ error: "Action réservée au propriétaire de la boutique." }, 403);
     }
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    const { data: shop, error: shopErr } = await admin.from("shops").select("plan").eq("id", shop_id).maybeSingle();
-    if (shopErr || !shop) return json({ error: "Boutique introuvable." }, 404);
+    const { data: organization, error: orgErr } = await admin.from("organizations").select("plan").eq("id", organization_id).maybeSingle();
+    if (orgErr || !organization) return json({ error: "Boutique introuvable." }, 404);
 
     const { count: memberCount, error: countErr } = await admin
-      .from("shop_members").select("id", { count: "exact", head: true }).eq("shop_id", shop_id);
+      .from("organization_members").select("id", { count: "exact", head: true }).eq("organization_id", organization_id);
     if (countErr) return json({ error: "Impossible de vérifier l'effectif." }, 500);
 
-    const { data: plan } = await admin.from("plans").select("limits").eq("id", shop.plan).maybeSingle();
+    const { data: plan } = await admin.from("plans").select("limits").eq("id", organization.plan).maybeSingle();
     const userLimit = (plan?.limits as Record<string, unknown> | null)?.users;
     if (typeof userLimit === "number" && (memberCount ?? 0) >= userLimit) {
       return json({ error: `Limite d'utilisateurs atteinte pour votre formule (${userLimit} maximum). Passez à une formule supérieure pour en ajouter.` }, 403);
@@ -101,8 +101,8 @@ Deno.serve(async (req) => {
       targetUserId = created.user.id;
     }
 
-    const { error: memberInsertErr } = await admin.from("shop_members")
-      .insert({ shop_id, user_id: targetUserId, role });
+    const { error: memberInsertErr } = await admin.from("organization_members")
+      .insert({ organization_id, user_id: targetUserId, role });
     if (memberInsertErr) {
       if ((memberInsertErr as any).code === "23505") {
         return json({ error: "Cette personne fait déjà partie de l'équipe." }, 409);

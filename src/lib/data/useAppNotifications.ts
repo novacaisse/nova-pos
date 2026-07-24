@@ -3,7 +3,7 @@ import {
   useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, useDismissNotification,
   useQuotes,
 } from "@/lib/data/hooks";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { getTrialInfo } from "@/lib/trial";
 
 export type NotificationKind = "big_sale" | "stock_low" | "stock_out" | "new_member" | "quote_expiring" | "trial_expiring";
@@ -24,7 +24,7 @@ export function useAppNotifications() {
 
   const { data: real = [], isLoading } = useNotifications();
   const { data: quotes = [] } = useQuotes(200);
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
   const dismissReal = useDismissNotification();
@@ -47,7 +47,7 @@ export function useAppNotifications() {
       }
     });
 
-    const trial = getTrialInfo(currentShop);
+    const trial = getTrialInfo(currentOrganization);
     if (trial.onTrial && !trial.expired && trial.daysLeft <= 1) {
       items.push({
         id: "virtual-trial", kind: "trial_expiring",
@@ -58,7 +58,7 @@ export function useAppNotifications() {
     }
 
     return items.filter((it) => !dismissedVirtual.has(it.id));
-  }, [quotes, currentShop, dismissedVirtual]);
+  }, [quotes, currentOrganization, dismissedVirtual]);
 
   const items: NotificationItem[] = useMemo(() => [
     ...real.map((n): NotificationItem => ({

@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Sparkles, CreditCard, Loader2, Clock } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useSubscription, useSubscriptionPayments, formatMoney } from "@/lib/data/hooks";
 import { getTrialInfo } from "@/lib/trial";
 import { usePlans } from "@/lib/data/adminHooks";
@@ -16,11 +16,11 @@ const PAYMENT_STATUS_LABEL: Record<string, string> = {
 };
 
 function AbonnementPage() {
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: subscription, isLoading: subLoading } = useSubscription();
   const { data: payments = [], isLoading: paymentsLoading } = useSubscriptionPayments();
   const { data: plans = [] } = usePlans();
-  const trial = getTrialInfo(currentShop);
+  const trial = getTrialInfo(currentOrganization);
 
   const currentPlan = plans.find((p) => p.id === subscription?.plan);
 

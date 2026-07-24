@@ -13,7 +13,7 @@ import {
   useHoldTickets, useSaveHoldTicket, useDeleteHoldTicket, useMyRole, useTeamPermissions,
   type HoldTicket, type ProductWithStock, type Customer,
 } from "@/lib/data/hooks";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { THERMAL_CSS } from "@/lib/printDoc";
 
 export const Route = createFileRoute("/app/caisse")({
@@ -45,7 +45,7 @@ type Receipt = {
 
 function CaissePage() {
   const formatXOF = useFormatMoney();
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const navigate = useNavigate();
   const { holdId } = Route.useSearch();
   const { data: products = [], isLoading: loadingProducts } = useProducts();
@@ -188,7 +188,7 @@ function CaissePage() {
     }
   }
 
-  if (!currentShop) {
+  if (!currentOrganization) {
     return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une boutique.</div>;
   }
 
@@ -754,11 +754,11 @@ const RECEIPT_PAY_LABEL: Record<PaymentMethod, string> = {
 
 function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => void }) {
   const formatXOF = useFormatMoney();
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: settings } = useShopSettings();
   const { data: profile } = useProfile();
   const ref = useRef<HTMLDivElement>(null);
-  const shopName = currentShop?.name ?? "Boutique";
+  const shopName = currentOrganization?.name ?? "Boutique";
   const ticket = { ...DEFAULT_TICKET_CONFIG, ...(settings?.data.ticket ?? {}) };
   const extra = settings?.data ?? {};
   const thanks = ticket.thanks || DEFAULT_TICKET_CONFIG.thanks;
@@ -783,8 +783,8 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
       </div>
       <div ref={ref} className="max-h-[60vh] overflow-y-auto bg-white p-5 text-black">
         <div className="center text-center">
-          {ticket.showLogo && currentShop?.logo_url && (
-            <img src={currentShop.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />
+          {ticket.showLogo && currentOrganization?.logo_url && (
+            <img src={currentOrganization.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />
           )}
           <div className="b text-base font-bold">{shopName}</div>
           {ticket.showAddress && extra.address && <div className="text-xs">{extra.address}</div>}

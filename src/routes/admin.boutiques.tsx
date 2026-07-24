@@ -4,10 +4,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, X, LogIn, Pause, Play, Trash2, Clock, Store, User, Mail, Phone, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
-  useAdminShops, useAdminSubscriptions, useSuspendShop, useExtendTrial, useDeleteShop, useImpersonate,
-  usePlans, type AdminShop, type AdminSubscription,
+  useAdminOrganizations, useAdminSubscriptions, useSuspendOrganization, useExtendTrial, useDeleteOrganization, useImpersonate,
+  usePlans, type AdminOrganization, type AdminSubscription,
 } from "@/lib/data/adminHooks";
-import { shopStatus, STATUS_META, type ShopStatus } from "@/lib/adminShopStatus";
+import { organizationStatus, STATUS_META, type OrganizationStatus } from "@/lib/adminShopStatus";
 import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
@@ -16,34 +16,34 @@ export const Route = createFileRoute("/admin/boutiques")({
 });
 
 function AdminBoutiques() {
-  const { data: shops = [], isLoading } = useAdminShops();
+  const { data: organizations = [], isLoading } = useAdminOrganizations();
   const { data: subs = [] } = useAdminSubscriptions();
   const { data: plans = [] } = usePlans();
 
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"all" | ShopStatus>("all");
-  const [selected, setSelected] = useState<AdminShop | null>(null);
+  const [status, setStatus] = useState<"all" | OrganizationStatus>("all");
+  const [selected, setSelected] = useState<AdminOrganization | null>(null);
 
-  const subByShop = useMemo(() => {
+  const subByOrganization = useMemo(() => {
     const m = new Map<string, AdminSubscription>();
-    for (const s of subs) if (!m.has(s.shop_id)) m.set(s.shop_id, s); // subs déjà triées par created_at desc
+    for (const s of subs) if (!m.has(s.organization_id)) m.set(s.organization_id, s); // subs déjà triées par created_at desc
     return m;
   }, [subs]);
   const planById = useMemo(() => Object.fromEntries(plans.map((p) => [p.id, p])), [plans]);
 
-  const filtered = useMemo(() => shops.filter((s) => {
-    const st = shopStatus(s, subByShop.get(s.id));
+  const filtered = useMemo(() => organizations.filter((s) => {
+    const st = organizationStatus(s, subByOrganization.get(s.id));
     if (status !== "all" && st !== status) return false;
     if (!q.trim()) return true;
     const needle = q.toLowerCase();
     return s.name.toLowerCase().includes(needle)
       || (s.owner_profile?.full_name ?? "").toLowerCase().includes(needle)
       || (s.owner_email ?? "").toLowerCase().includes(needle);
-  }), [shops, subByShop, status, q]);
+  }), [organizations, subByOrganization, status, q]);
 
   return (
     <div>
-      <PageHeader title="Boutiques" subtitle={`${shops.length} boutique${shops.length > 1 ? "s" : ""} enregistrée${shops.length > 1 ? "s" : ""}`} />
+      <PageHeader title="Boutiques" subtitle={`${organizations.length} boutique${organizations.length > 1 ? "s" : ""} enregistrée${organizations.length > 1 ? "s" : ""}`} />
 
       <div className="space-y-4 p-5 sm:p-8">
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-3">
@@ -54,7 +54,7 @@ function AdminBoutiques() {
           </div>
           <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
             <option value="all">Tous statuts</option>
-            {(Object.keys(STATUS_META) as ShopStatus[]).map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+            {(Object.keys(STATUS_META) as OrganizationStatus[]).map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
           </select>
         </div>
 
@@ -76,8 +76,8 @@ function AdminBoutiques() {
             </thead>
             <tbody>
               {filtered.map((s) => {
-                const sub = subByShop.get(s.id);
-                const st = shopStatus(s, sub);
+                const sub = subByOrganization.get(s.id);
+                const st = organizationStatus(s, sub);
                 const mrr = st === "active" ? Number(sub?.amount ?? 0) : 0;
                 return (
                   <tr key={s.id} onClick={() => setSelected(s)} className="cursor-pointer border-t border-border/60 hover:bg-muted/40">
@@ -104,7 +104,7 @@ function AdminBoutiques() {
 
       <AnimatePresence>
         {selected && (
-          <Drawer shop={selected} sub={subByShop.get(selected.id)} plan={planById[selected.plan]}
+          <Drawer shop={selected} sub={subByOrganization.get(selected.id)} plan={planById[selected.plan]}
             onClose={() => setSelected(null)} />
         )}
       </AnimatePresence>
@@ -113,13 +113,13 @@ function AdminBoutiques() {
 }
 
 function Drawer({ shop, sub, plan, onClose }: {
-  shop: AdminShop; sub?: AdminSubscription; plan?: { name: string };
+  shop: AdminOrganization; sub?: AdminSubscription; plan?: { name: string };
   onClose: () => void;
 }) {
-  const status = shopStatus(shop, sub);
-  const suspend = useSuspendShop();
+  const status = organizationStatus(shop, sub);
+  const suspend = useSuspendOrganization();
   const extend = useExtendTrial();
-  const remove = useDeleteShop();
+  const remove = useDeleteOrganization();
   const impersonate = useImpersonate();
   const [extending, setExtending] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -128,7 +128,7 @@ function Drawer({ shop, sub, plan, onClose }: {
   const doImpersonate = async () => {
     setError(null);
     try {
-      const { action_link } = await impersonate.mutateAsync({ target_user_id: shop.owner_id, shop_id: shop.id });
+      const { action_link } = await impersonate.mutateAsync({ target_user_id: shop.owner_id, organization_id: shop.id });
       window.location.href = action_link;
     } catch (e: any) {
       setError(e?.message ?? "Impossible de générer le lien de connexion.");

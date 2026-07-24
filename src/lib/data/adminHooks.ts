@@ -1,11 +1,11 @@
-// Hooks Super Admin — cross-boutiques, distincts de hooks.ts (qui filtre
-// toujours par shop_id courant). La RLS (migration 005) fait l'essentiel du
-// travail de sécurité ici : ces requêtes ne renvoient quoi que ce soit que
-// si l'utilisateur connecté est dans public.super_admins.
+// Hooks Super Admin — cross-organisations, distincts de hooks.ts (qui
+// filtre toujours par organization_id courant). La RLS (migration 005)
+// fait l'essentiel du travail de sécurité ici : ces requêtes ne renvoient
+// quoi que ce soit que si l'utilisateur connecté est dans public.super_admins.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { invokeFn } from "@/lib/data/invokeFn";
 
 export function useIsSuperAdmin() {
@@ -77,14 +77,14 @@ export function useUpsertPlan() {
   });
 }
 
-// Formule de la boutique courante (recherchée dans plans par shops.plan) —
-// null tant que non chargée ou si le plan n'existe plus. Base commune pour
-// useCurrentPlanModules (nav) et l'enforcement du nombre de comptes max
-// (Équipe), Bloc 27.
+// Formule de l'organisation courante (recherchée dans plans par
+// organizations.plan) — null tant que non chargée ou si le plan n'existe
+// plus. Base commune pour useCurrentPlanModules (nav) et l'enforcement du
+// nombre de comptes max (Équipe), Bloc 27.
 export function useCurrentPlan(): Plan | null {
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: plans = [] } = usePlans();
-  return plans.find((p) => p.id === currentShop?.plan) ?? null;
+  return plans.find((p) => p.id === currentOrganization?.plan) ?? null;
 }
 
 // Modules inclus dans la formule de la boutique courante — null = aucune
@@ -112,7 +112,7 @@ export function useDeletePlan() {
 // ============ BRANDING GLOBAL (logo/favicon plateforme) ============
 // Table singleton (migration 019) — lecture publique (anon inclus : landing,
 // connexion, inscription), écriture réservée au Super Admin. Distinct de
-// shops.logo_url (propre à chaque boutique).
+// organizations.logo_url (propre à chaque organisation).
 export type AppSettings = { logo_url: string | null; favicon_url: string | null };
 
 export function useAppSettings() {
@@ -156,8 +156,8 @@ export function useUploadBrandingAsset() {
   });
 }
 
-// ============ BOUTIQUES (toutes, cross-tenant) ============
-export type AdminShop = {
+// ============ ORGANISATIONS (toutes, cross-tenant) ============
+export type AdminOrganization = {
   id: string; name: string; slug: string; owner_id: string;
   country: string; currency: string; plan: string;
   trial_ends_at: string | null; suspended: boolean; created_at: string;
@@ -165,14 +165,14 @@ export type AdminShop = {
   owner_email: string | null;
 };
 
-export function useAdminShops() {
+export function useAdminOrganizations() {
   return useQuery({
-    queryKey: ["admin_shops"],
-    queryFn: async (): Promise<AdminShop[]> => {
-      const { data: shops, error } = await supabase.from("shops")
+    queryKey: ["admin_organizations"],
+    queryFn: async (): Promise<AdminOrganization[]> => {
+      const { data: organizations, error } = await supabase.from("organizations")
         .select("*").order("created_at", { ascending: false });
       if (error) throw error;
-      const ownerIds = [...new Set((shops ?? []).map((s: any) => s.owner_id))];
+      const ownerIds = [...new Set((organizations ?? []).map((o: any) => o.owner_id))];
       let profiles: Record<string, any> = {};
       let emails: Record<string, string> = {};
       if (ownerIds.length) {
@@ -184,23 +184,23 @@ export function useAdminShops() {
         const { data: emailRows } = await supabase.rpc("admin_get_user_emails", { _user_ids: ownerIds });
         emails = Object.fromEntries((emailRows ?? []).map((r: any) => [r.user_id, r.email]));
       }
-      return (shops ?? []).map((s: any) => ({
-        ...s,
-        owner_profile: profiles[s.owner_id] ?? null,
-        owner_email: emails[s.owner_id] ?? null,
+      return (organizations ?? []).map((o: any) => ({
+        ...o,
+        owner_profile: profiles[o.owner_id] ?? null,
+        owner_email: emails[o.owner_id] ?? null,
       }));
     },
   });
 }
 
-export function useSuspendShop() {
+export function useSuspendOrganization() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, suspended }: { id: string; suspended: boolean }) => {
-      const { error } = await supabase.from("shops").update({ suspended }).eq("id", id);
+      const { error } = await supabase.from("organizations").update({ suspended }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_shops"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_organizations"] }),
   });
 }
 
@@ -208,28 +208,28 @@ export function useExtendTrial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, days }: { id: string; days: number }) => {
-      const { data: shop, error: shopErr } = await supabase.from("shops")
+      const { data: organization, error: orgErr } = await supabase.from("organizations")
         .select("trial_ends_at").eq("id", id).single();
-      if (shopErr) throw shopErr;
+      if (orgErr) throw orgErr;
       const now = new Date();
-      const base = shop.trial_ends_at && new Date(shop.trial_ends_at) > now ? new Date(shop.trial_ends_at) : now;
+      const base = organization.trial_ends_at && new Date(organization.trial_ends_at) > now ? new Date(organization.trial_ends_at) : now;
       base.setDate(base.getDate() + days);
-      const { error } = await supabase.from("shops")
+      const { error } = await supabase.from("organizations")
         .update({ trial_ends_at: base.toISOString(), plan: "trial" }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_shops"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_organizations"] }),
   });
 }
 
-export function useDeleteShop() {
+export function useDeleteOrganization() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("shops").delete().eq("id", id);
+      const { error } = await supabase.from("organizations").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_shops"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_organizations"] }),
   });
 }
 
@@ -241,16 +241,16 @@ export function useDeleteShop() {
 // reconnecter (limite acceptée, pas de multi-session dans ce navigateur).
 export function useImpersonate() {
   return useMutation({
-    mutationFn: async (input: { target_user_id: string; shop_id?: string }) =>
+    mutationFn: async (input: { target_user_id: string; organization_id?: string }) =>
       invokeFn<{ action_link: string }>("admin-impersonate", input),
   });
 }
 
 // ============ ABONNEMENTS / FACTURATION (cross-tenant) ============
 export type AdminSubscription = {
-  id: string; shop_id: string; plan: string; status: string;
+  id: string; organization_id: string; plan: string; status: string;
   amount: number; currency: string; current_period_end: string | null;
-  created_at: string; shops: { name: string } | null;
+  created_at: string; organizations: { name: string } | null;
 };
 
 export function useAdminSubscriptions() {
@@ -258,7 +258,7 @@ export function useAdminSubscriptions() {
     queryKey: ["admin_subscriptions"],
     queryFn: async (): Promise<AdminSubscription[]> => {
       const { data, error } = await supabase.from("subscriptions")
-        .select("*, shops(name)").order("created_at", { ascending: false });
+        .select("*, organizations(name)").order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as AdminSubscription[];
     },
@@ -266,10 +266,10 @@ export function useAdminSubscriptions() {
 }
 
 export type AdminPayment = {
-  id: string; shop_id: string; subscription_id: string;
+  id: string; organization_id: string; subscription_id: string;
   amount: number; currency: string; method: string; status: string;
   provider: string | null; paid_at: string | null; created_at: string;
-  metadata: Record<string, any>; shops: { name: string } | null;
+  metadata: Record<string, any>; organizations: { name: string } | null;
 };
 
 export function useAdminPayments(limit = 300) {
@@ -277,32 +277,32 @@ export function useAdminPayments(limit = 300) {
     queryKey: ["admin_payments", limit],
     queryFn: async (): Promise<AdminPayment[]> => {
       const { data, error } = await supabase.from("subscription_payments")
-        .select("*, shops(name)").order("created_at", { ascending: false }).limit(limit);
+        .select("*, organizations(name)").order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []) as AdminPayment[];
     },
   });
 }
 
-// ============ SUPPORT (partagé boutique + admin) ============
+// ============ SUPPORT (partagé organisation + admin) ============
 export type SupportTicket = {
-  id: string; shop_id: string; created_by: string; subject: string;
+  id: string; organization_id: string; created_by: string; subject: string;
   status: "open" | "in_progress" | "resolved" | "closed";
   created_at: string; updated_at: string;
-  shops?: { name: string } | null;
+  organizations?: { name: string } | null;
 };
 export type SupportMessage = {
   id: string; ticket_id: string; author_id: string; is_admin: boolean;
   body: string; created_at: string;
 };
 
-export function useSupportTickets(scope: "mine" | "all", shopId?: string | null) {
+export function useSupportTickets(scope: "mine" | "all", organizationId?: string | null) {
   return useQuery({
-    queryKey: ["support_tickets", scope, shopId],
-    enabled: scope === "all" || !!shopId,
+    queryKey: ["support_tickets", scope, organizationId],
+    enabled: scope === "all" || !!organizationId,
     queryFn: async (): Promise<SupportTicket[]> => {
-      let q = supabase.from("support_tickets").select("*, shops(name)").order("created_at", { ascending: false });
-      if (scope === "mine" && shopId) q = q.eq("shop_id", shopId);
+      let q = supabase.from("support_tickets").select("*, organizations(name)").order("created_at", { ascending: false });
+      if (scope === "mine" && organizationId) q = q.eq("organization_id", organizationId);
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as SupportTicket[];
@@ -327,10 +327,10 @@ export function useCreateSupportTicket() {
   const qc = useQueryClient();
   const { user } = useAuth();
   return useMutation({
-    mutationFn: async ({ shopId, subject, message }: { shopId: string; subject: string; message: string }): Promise<SupportTicket> => {
+    mutationFn: async ({ organizationId, subject, message }: { organizationId: string; subject: string; message: string }): Promise<SupportTicket> => {
       if (!user) throw new Error("Non authentifié");
       const { data: ticket, error } = await supabase.from("support_tickets")
-        .insert({ shop_id: shopId, created_by: user.id, subject }).select().single();
+        .insert({ organization_id: organizationId, created_by: user.id, subject }).select().single();
       if (error) throw error;
       const { error: msgErr } = await supabase.from("support_messages")
         .insert({ ticket_id: ticket.id, author_id: user.id, is_admin: false, body: message });

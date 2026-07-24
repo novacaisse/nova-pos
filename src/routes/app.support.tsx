@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Plus, Send, Loader2, MessageSquare, ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import {
   useSupportTickets, useSupportMessages, useCreateSupportTicket, useSendSupportMessage,
   type SupportTicket,
@@ -21,8 +21,8 @@ const STATUS: Record<SupportTicket["status"], { label: string; color: string }> 
 };
 
 function AppSupport() {
-  const { currentShop } = useShop();
-  const { data: tickets = [], isLoading } = useSupportTickets("mine", currentShop?.id ?? null);
+  const { currentOrganization } = useOrganization();
+  const { data: tickets = [], isLoading } = useSupportTickets("mine", currentOrganization?.id ?? null);
   const [selected, setSelected] = useState<SupportTicket | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -38,7 +38,7 @@ function AppSupport() {
 
       <div className="p-5 sm:p-8">
         {creating ? (
-          <NewTicketForm shopId={currentShop?.id ?? null}
+          <NewTicketForm organizationId={currentOrganization?.id ?? null}
             onDone={(t) => { setCreating(false); if (t) setSelected(t); }} />
         ) : selected ? (
           <TicketThread ticket={selected} onBack={() => setSelected(null)} />
@@ -70,17 +70,17 @@ function AppSupport() {
   );
 }
 
-function NewTicketForm({ shopId, onDone }: { shopId: string | null; onDone: (ticket: SupportTicket | null) => void }) {
+function NewTicketForm({ organizationId, onDone }: { organizationId: string | null; onDone: (ticket: SupportTicket | null) => void }) {
   const create = useCreateSupportTicket();
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!shopId || !subject.trim() || !message.trim()) return;
+    if (!organizationId || !subject.trim() || !message.trim()) return;
     setError(null);
     try {
-      const ticket = await create.mutateAsync({ shopId, subject: subject.trim(), message: message.trim() });
+      const ticket = await create.mutateAsync({ organizationId, subject: subject.trim(), message: message.trim() });
       onDone(ticket);
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer le ticket.");

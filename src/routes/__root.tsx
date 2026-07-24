@@ -12,7 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth/AuthProvider";
-import { ShopProvider } from "@/lib/auth/ShopProvider";
+import { OrganizationProvider } from "@/lib/auth/OrganizationProvider";
 import { ThemeProvider } from "@/lib/theme";
 import { DynamicFavicon } from "@/components/app/DynamicFavicon";
 
@@ -133,11 +133,11 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <ShopProvider>
+          <OrganizationProvider>
             <DynamicFavicon />
             {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
             <Outlet />
-          </ShopProvider>
+          </OrganizationProvider>
         </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>

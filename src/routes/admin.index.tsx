@@ -3,8 +3,8 @@ import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { Store, TrendingUp, TrendingDown, Wallet, Activity, AlertTriangle, ArrowRight, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useAdminShops, useAdminSubscriptions, useAdminPayments, usePlans } from "@/lib/data/adminHooks";
-import { shopStatus, STATUS_META } from "@/lib/adminShopStatus";
+import { useAdminOrganizations, useAdminSubscriptions, useAdminPayments, usePlans } from "@/lib/data/adminHooks";
+import { organizationStatus, STATUS_META } from "@/lib/adminShopStatus";
 import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
@@ -13,36 +13,36 @@ export const Route = createFileRoute("/admin/")({
 });
 
 function AdminDashboard() {
-  const { data: shops = [], isLoading } = useAdminShops();
+  const { data: organizations = [], isLoading } = useAdminOrganizations();
   const { data: subs = [] } = useAdminSubscriptions();
   const { data: payments = [] } = useAdminPayments();
   const { data: plans = [] } = usePlans();
 
-  const subByShop = useMemo(() => {
+  const subByOrganization = useMemo(() => {
     const m = new Map<string, (typeof subs)[number]>();
-    for (const s of subs) if (!m.has(s.shop_id)) m.set(s.shop_id, s);
+    for (const s of subs) if (!m.has(s.organization_id)) m.set(s.organization_id, s);
     return m;
   }, [subs]);
   const planById = useMemo(() => Object.fromEntries(plans.map((p) => [p.id, p])), [plans]);
 
-  const withStatus = useMemo(() => shops.map((s) => ({ shop: s, status: shopStatus(s, subByShop.get(s.id)) })), [shops, subByShop]);
+  const withStatus = useMemo(() => organizations.map((s) => ({ shop: s, status: organizationStatus(s, subByOrganization.get(s.id)) })), [organizations, subByOrganization]);
 
-  const total = shops.length;
+  const total = organizations.length;
   const active = withStatus.filter((s) => s.status === "active").length;
   const trial = withStatus.filter((s) => s.status === "essai").length;
   const expired = withStatus.filter((s) => s.status === "expiree" || s.status === "suspendue").length;
-  const mrr = withStatus.reduce((sum, s) => sum + (s.status === "active" ? Number(subByShop.get(s.shop.id)?.amount ?? 0) : 0), 0);
+  const mrr = withStatus.reduce((sum, s) => sum + (s.status === "active" ? Number(subByOrganization.get(s.shop.id)?.amount ?? 0) : 0), 0);
   const churn = total > 0 ? ((expired / total) * 100).toFixed(1) : "0.0";
 
   const byPlan = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const p of plans) counts[p.id] = 0;
-    for (const s of shops) if (s.plan !== "trial") counts[s.plan] = (counts[s.plan] ?? 0) + 1;
+    for (const s of organizations) if (s.plan !== "trial") counts[s.plan] = (counts[s.plan] ?? 0) + 1;
     return counts;
-  }, [shops, plans]);
+  }, [organizations, plans]);
   const planColors = ["var(--primary)", "hsl(var(--muted-foreground))", "var(--accent-foreground)", "hsl(var(--warning))"];
 
-  const recent = useMemo(() => [...shops].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5), [shops]);
+  const recent = useMemo(() => [...organizations].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5), [organizations]);
   const alerts = useMemo(() => withStatus.filter((s) => s.status === "essai" || s.status === "expiree").slice(0, 4), [withStatus]);
 
   const signups30d = useMemo(() => {
@@ -50,11 +50,11 @@ function AdminDashboard() {
     for (let i = 29; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
-      const count = shops.filter((s) => s.created_at.slice(0, 10) === key).length;
+      const count = organizations.filter((s) => s.created_at.slice(0, 10) === key).length;
       days.push({ day: `${d.getDate()}/${d.getMonth() + 1}`, count });
     }
     return days;
-  }, [shops]);
+  }, [organizations]);
 
   const monthlyRevenue = useMemo(() => {
     const months: { month: string; amount: number }[] = [];
@@ -115,7 +115,7 @@ function AdminDashboard() {
             <div className="mt-3 space-y-2">
               {recent.length === 0 && <div className="text-sm text-muted-foreground">Aucune boutique pour l'instant.</div>}
               {recent.map((s) => {
-                const st = shopStatus(s, subByShop.get(s.id));
+                const st = organizationStatus(s, subByOrganization.get(s.id));
                 return (
                   <div key={s.id} className="flex items-center justify-between rounded-xl border border-border/60 p-3 text-sm">
                     <div>

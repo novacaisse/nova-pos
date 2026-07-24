@@ -9,7 +9,7 @@ import {
   useCreateSale, useCustomers, useProducts, useMyRole, useShopSettings, useFormatMoney,
   type QuoteWithItems, type QuoteStatus,
 } from "@/lib/data/hooks";
-import { useShop } from "@/lib/auth/ShopProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +24,7 @@ const QUOTE_STATUS_LABEL: Record<QuoteStatus, string> = {
 
 function DevisPage() {
   const formatXOF = useFormatMoney();
-  const { currentShop } = useShop();
+  const { currentOrganization } = useOrganization();
   const { data: settings } = useShopSettings();
   const [period, setPeriod] = useState<Period>("month");
   const [customFrom, setCustomFrom] = useState("");
@@ -74,8 +74,8 @@ function DevisPage() {
       docNumber: q.reference,
       docDate: new Date(q.created_at).toLocaleDateString("fr-FR"),
       shop: {
-        shopName: currentShop?.name ?? "Boutique",
-        logoUrl: currentShop?.logo_url,
+        shopName: currentOrganization?.name ?? "Boutique",
+        logoUrl: currentOrganization?.logo_url,
         address: settings?.data.address,
         phone: settings?.data.phone,
         ifu: settings?.data.ifu,
