@@ -64,10 +64,16 @@ begin
   end if;
 end $$;
 
-create or replace function public.has_organization_access(_organization_id uuid)
+-- Les noms de paramètres ci-dessous restent _shop_id (pas _organization_id) :
+-- CREATE OR REPLACE FUNCTION interdit de changer le nom d'un paramètre
+-- d'entrée (erreur 42P13) — seul un DROP FUNCTION le permettrait, ce qui
+-- casserait en cascade les ~111 policies RLS qui dépendent de ces
+-- fonctions. Détail purement interne : tous les appels existants sont
+-- positionnels (ex. has_shop_access(shop_id)), jamais par nom de paramètre.
+create or replace function public.has_organization_access(_shop_id uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.organization_members
-    where organization_id = _organization_id and user_id = auth.uid());
+    where organization_id = _shop_id and user_id = auth.uid());
 $$;
 
 create or replace function public.current_user_organizations()
@@ -75,21 +81,21 @@ returns setof uuid language sql stable security definer set search_path = public
   select organization_id from public.organization_members where user_id = auth.uid();
 $$;
 
-create or replace function public.has_role_in_organization(_organization_id uuid, _role public.app_role)
+create or replace function public.has_role_in_organization(_shop_id uuid, _role public.app_role)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.organization_members
-    where organization_id = _organization_id and user_id = auth.uid() and role = _role);
+    where organization_id = _shop_id and user_id = auth.uid() and role = _role);
 $$;
 
-create or replace function public.has_any_role_in_organization(_organization_id uuid, _roles public.app_role[])
+create or replace function public.has_any_role_in_organization(_shop_id uuid, _roles public.app_role[])
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.organization_members
-    where organization_id = _organization_id and user_id = auth.uid() and role = any(_roles));
+    where organization_id = _shop_id and user_id = auth.uid() and role = any(_roles));
 $$;
 
-create or replace function public.is_organization_owner(_organization_id uuid)
+create or replace function public.is_organization_owner(_shop_id uuid)
 returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.organizations where id = _organization_id and owner_id = auth.uid());
+  select exists (select 1 from public.organizations where id = _shop_id and owner_id = auth.uid());
 $$;
 
 -- =============== 2. complete_signup (même nom, corps corrigé) ===============
