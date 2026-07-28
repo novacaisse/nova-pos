@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { BrandLogo } from "@/components/app/BrandLogo";
 
 export const Route = createFileRoute("/inscription")({
-  head: () => ({ meta: [{ title: "Créer un compte — NovaCaisse" }] }),
+  head: () => ({ meta: [{ title: "Créer un compte — ZegCaisse" }] }),
   component: InscriptionPage,
 });
 

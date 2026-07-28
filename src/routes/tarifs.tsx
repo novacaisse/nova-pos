@@ -3,14 +3,15 @@ import { useState } from "react";
 import { ArrowRight, Check, Sparkles, Loader2 } from "lucide-react";
 import { usePlans } from "@/lib/data/adminHooks";
 import { formatMoney } from "@/lib/data/hooks";
-import { BrandLogo } from "@/components/app/BrandLogo";
+import { PublicHeader } from "@/components/app/PublicHeader";
+import { PublicFooter } from "@/components/app/PublicFooter";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/tarifs")({
   head: () => ({
     meta: [
-      { title: "Tarifs — NovaCaisse" },
-      { name: "description", content: "Choisissez la formule NovaCaisse adaptée à votre commerce. Starter, Pro ou Business — mensuel ou annuel." },
+      { title: "Tarifs — ZegCaisse" },
+      { name: "description", content: "Choisissez la formule ZegCaisse adaptée à votre commerce. Starter, Pro ou Business — mensuel ou annuel, sans engagement." },
     ],
   }),
   component: TarifsPage,
@@ -31,15 +32,7 @@ function TarifsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
-          <Link to="/" className="flex items-center gap-2.5">
-            <BrandLogo className="h-10 w-10 shadow-glow" iconClassName="h-5 w-5" />
-            <span className="font-display text-xl font-bold">NovaCaisse</span>
-          </Link>
-          <Link to="/connexion" className="text-sm font-medium text-muted-foreground hover:text-foreground">Connexion</Link>
-        </div>
-      </header>
+      <PublicHeader />
 
       <section className="py-16">
         <div className="mx-auto max-w-6xl px-5 text-center">
@@ -129,6 +122,8 @@ function TarifsPage() {
           </div>
         </div>
       </section>
+
+      <PublicFooter />
     </div>
   );
 }

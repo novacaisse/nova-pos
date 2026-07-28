@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 type SouscriptionSearch = { plan?: string };
 
 export const Route = createFileRoute("/souscription/")({
-  head: () => ({ meta: [{ title: "Souscription — NovaCaisse" }] }),
+  head: () => ({ meta: [{ title: "Souscription — ZegCaisse" }] }),
   validateSearch: (search: Record<string, unknown>): SouscriptionSearch => ({
     plan: typeof search.plan === "string" ? search.plan : undefined,
   }),

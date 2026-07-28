@@ -10,7 +10,7 @@ import { useSubscriptionPayment, useCheckSubscriptionPayment } from "@/lib/data/
 type ConfirmationSearch = { payment_id?: string };
 
 export const Route = createFileRoute("/souscription/confirmation")({
-  head: () => ({ meta: [{ title: "Confirmation de paiement — NovaCaisse" }] }),
+  head: () => ({ meta: [{ title: "Confirmation de paiement — ZegCaisse" }] }),
   validateSearch: (search: Record<string, unknown>): ConfirmationSearch => ({
     payment_id: typeof search.payment_id === "string" ? search.payment_id : undefined,
   }),
