@@ -32,7 +32,7 @@ export function PublicFooter() {
         </div>
       </div>
       <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-        © 2026 NovaCaisse · Tous droits réservés · <Link to="/admins" className="hover:text-foreground hover:underline">Administration</Link>
+        © 2026 ZegOS · Tous droits réservés · <Link to="/admins" className="hover:text-foreground hover:underline">Administration</Link>
       </div>
     </footer>
   );
