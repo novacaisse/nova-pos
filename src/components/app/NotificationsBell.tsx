@@ -58,7 +58,7 @@ export function NotificationsBell() {
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <div className="font-display text-sm font-bold">Notifications</div>
-            <div className="text-[11px] text-muted-foreground">Événements de votre boutique</div>
+            <div className="text-[11px] text-muted-foreground">Événements de votre organisation</div>
           </div>
           {unread > 0 && (
             <button

@@ -28,7 +28,7 @@ function NovaPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const ctx: NovaContext = useMemo(() => ({
-    shopName: currentOrganization?.name ?? "votre boutique",
+    shopName: currentOrganization?.name ?? "votre organisation",
     currency: currentOrganization?.currency,
     sales, products, customers, expenses,
   }), [currentOrganization, sales, products, customers, expenses]);
@@ -72,7 +72,7 @@ function NovaPage() {
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-xl font-bold tracking-tight">Nova</h1>
-          <p className="truncate text-xs text-muted-foreground">Assistant de {currentOrganization?.name ?? "votre boutique"}</p>
+          <p className="truncate text-xs text-muted-foreground">Assistant de {currentOrganization?.name ?? "votre organisation"}</p>
         </div>
         {messages.length > 0 && (
           <button
@@ -89,7 +89,7 @@ function NovaPage() {
           {messages.length === 0 && (
             <div>
               <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm text-foreground">
-                Bonjour 👋 Je suis Nova, l'assistant IA de {currentOrganization?.name ?? "votre boutique"}. Posez-moi une question sur vos ventes, produits, stock, clients ou dépenses.
+                Bonjour 👋 Je suis Nova, l'assistant IA de {currentOrganization?.name ?? "votre organisation"}. Posez-moi une question sur vos ventes, produits, stock, clients ou dépenses.
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {NOVA_SUGGESTIONS.map((s) => (

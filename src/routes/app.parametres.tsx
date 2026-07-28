@@ -74,7 +74,7 @@ function ParametresPage() {
       await updateShop.mutateAsync({ name });
       await updateSettings.mutateAsync({ data: { ...(settings?.data ?? {}), ...shopExtra, ticket } });
     } catch (e: any) {
-      alert("Erreur enregistrement boutique : " + (e?.message ?? "inconnue"));
+      alert("Erreur enregistrement organisation : " + (e?.message ?? "inconnue"));
     }
   };
 
@@ -109,18 +109,18 @@ function ParametresPage() {
   };
 
   if (!currentOrganization) {
-    return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une boutique.</div>;
+    return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une organisation.</div>;
   }
 
   return (
     <div>
-      <PageHeader title="Paramètres" subtitle="Configuration de votre boutique" />
+      <PageHeader title="Paramètres" subtitle="Configuration de votre organisation" />
 
       <div className="grid gap-6 p-5 sm:p-8 lg:grid-cols-4">
         <div className="lg:col-span-1">
           <div className="space-y-1 rounded-2xl border border-border bg-card p-2">
             {([
-              { k: "shop", label: "Boutique", icon: Store },
+              { k: "shop", label: "Organisation", icon: Store },
               { k: "currency", label: "Devise", icon: Coins },
               { k: "taxes", label: "Taxes", icon: Receipt },
               { k: "ticket", label: "Ticket de caisse", icon: FileText },
@@ -138,7 +138,7 @@ function ParametresPage() {
         <div className="lg:col-span-3 space-y-4">
           {tab === "shop" && (
             <div className="rounded-2xl border border-border bg-card p-6">
-              <h2 className="mb-4 font-display text-lg font-bold">Informations de la boutique</h2>
+              <h2 className="mb-4 font-display text-lg font-bold">Informations de l'organisation</h2>
 
               <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-border p-4">
                 <div className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl bg-muted">
@@ -147,7 +147,7 @@ function ParametresPage() {
                     : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold">Logo de la boutique</div>
+                  <div className="font-semibold">Logo de l'organisation</div>
                   <p className="mb-2 text-xs text-muted-foreground">Appliqué automatiquement sur les reçus, factures et devis (PNG/JPG, max 1 Mo).</p>
                   {canManage && (
                     <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted">
@@ -172,7 +172,7 @@ function ParametresPage() {
 
               <div className="mt-6">
                 <div className="mb-2 flex items-center justify-between">
-                  <div className="font-semibold">Boutiques multiples</div>
+                  <div className="font-semibold">Organisations multiples</div>
                   {myRole === "owner" && (
                     <button onClick={() => setShowAddShop(true)} className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-muted"><Plus className="h-3 w-3" /> Ajouter</button>
                   )}
@@ -203,7 +203,7 @@ function ParametresPage() {
             <div className="rounded-2xl border border-border bg-card p-6">
               <h2 className="mb-4 font-display text-lg font-bold">Devise</h2>
               <p className="mb-4 text-xs text-muted-foreground">
-                Devise utilisée pour l'abonnement et affichée à côté du nom de la boutique dans le sélecteur.
+                Devise utilisée pour l'abonnement et affichée à côté du nom de l'organisation dans le sélecteur.
                 Les montants dans l'app restent formatés en F (XOF) partout — changer la devise ici ne reformate pas
                 encore l'affichage des montants dans toute l'application.
               </p>
@@ -379,12 +379,12 @@ function AddShopDialog({ onClose, onCreate, pending }: {
     <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md overflow-hidden rounded-2xl bg-card shadow-elegant">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <div className="font-display text-lg font-bold">Ajouter une boutique</div>
+          <div className="font-display text-lg font-bold">Ajouter une organisation</div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
         <div className="space-y-3 p-5">
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom de la boutique *</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom de l'organisation *</span>
             <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
           </label>
@@ -405,14 +405,14 @@ function AddShopDialog({ onClose, onCreate, pending }: {
             </label>
           </div>
           <p className="text-xs text-muted-foreground">
-            Nouvelle boutique en période d'essai, avec son propre abonnement — comme à l'inscription.
+            Nouvelle organisation en période d'essai, avec son propre abonnement — comme à l'inscription.
           </p>
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
             <button onClick={submit} disabled={!name.trim() || pending}
               className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer la boutique
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer l'organisation
             </button>
           </div>
         </div>
@@ -445,7 +445,7 @@ function TransferPanel({ organizations, currentOrganizationId, currentOrganizati
 
   const submit = async () => {
     setError(null); setResult(null);
-    if (!toOrganizationId) { setError("Sélectionnez une boutique de destination."); return; }
+    if (!toOrganizationId) { setError("Sélectionnez une organisation de destination."); return; }
     const payload = lines.map(([productId, quantity]) => {
       const p = products.find((x) => x.id === productId)!;
       return { product_id: p.id, sku: p.sku, name: p.name, quantity };
@@ -462,16 +462,16 @@ function TransferPanel({ organizations, currentOrganizationId, currentOrganizati
   if (otherOrganizations.length === 0) {
     return (
       <div className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
-        Ajoutez une deuxième boutique (onglet Boutique) pour pouvoir transférer du stock entre elles.
+        Ajoutez une deuxième organisation (onglet Organisation) pour pouvoir transférer du stock entre elles.
       </div>
     );
   }
 
   return (
     <div className="rounded-2xl border border-border bg-card p-6">
-      <h2 className="mb-1 font-display text-lg font-bold">Transfert de stock entre boutiques</h2>
+      <h2 className="mb-1 font-display text-lg font-bold">Transfert de stock entre organisations</h2>
       <p className="mb-4 text-xs text-muted-foreground">
-        Envoie du stock de « {currentOrganizationName} » vers une autre boutique. La correspondance des produits se fait par
+        Envoie du stock de « {currentOrganizationName} » vers une autre organisation. La correspondance des produits se fait par
         SKU (ou par nom si le SKU est vide) : un article introuvable dans le catalogue de destination sera signalé,
         pas transféré automatiquement.
       </p>
@@ -516,7 +516,7 @@ function TransferPanel({ organizations, currentOrganizationId, currentOrganizati
           {result.transferred} article{result.transferred > 1 ? "s" : ""} transféré{result.transferred > 1 ? "s" : ""}.
           {result.unmatched.length > 0 && (
             <div className="mt-1 text-warning-foreground">
-              Non transféré (aucune correspondance dans la boutique de destination) : {result.unmatched.join(", ")}
+              Non transféré (aucune correspondance dans l'organisation de destination) : {result.unmatched.join(", ")}
             </div>
           )}
         </div>

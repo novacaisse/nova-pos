@@ -70,7 +70,7 @@ function AdminParametres() {
               </div>
             </div>
             <div className="grid gap-4 opacity-60">
-              <TextField label="Titre principal (Hero)" defaultValue="La caisse moderne pour vos boutiques." />
+              <TextField label="Titre principal (Hero)" defaultValue="La caisse moderne pour vos organisations." />
               <TextField label="Sous-titre" defaultValue="Point de vente tactile, stock intelligent, rapports IA et paiement mobile money — tout dans une seule application, pensée pour les commerçants d'Afrique de l'Ouest." multiline />
               <TextField label="CTA principal" defaultValue="Essayer 3 jours gratuits" />
               <TextField label="Email de contact" defaultValue="contact@novacaisse.bj" />
@@ -276,8 +276,8 @@ function BrandingTab() {
       <div className="mb-4">
         <div className="font-display text-lg font-bold">Marque de la plateforme</div>
         <div className="text-xs text-muted-foreground">
-          Logo et favicon affichés sur les pages publiques et l'espace boutique (landing, tarifs, connexion,
-          inscription, souscription, sidebar) — distinct du logo propre à chaque boutique.
+          Logo et favicon affichés sur les pages publiques et l'espace organisation (landing, tarifs, connexion,
+          inscription, souscription, sidebar) — distinct du logo propre à chaque organisation.
         </div>
       </div>
       {error && <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}

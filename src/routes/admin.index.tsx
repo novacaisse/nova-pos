@@ -82,7 +82,7 @@ function AdminDashboard() {
 
       <div className="space-y-4 p-5 sm:p-8">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <StatCard label="Boutiques totales" value={String(total)} icon={<Store className="h-5 w-5" />} accent="primary" />
+          <StatCard label="Organisations totales" value={String(total)} icon={<Store className="h-5 w-5" />} accent="primary" />
           <StatCard label="Actives" value={String(active)} icon={<Activity className="h-5 w-5" />} accent="success" />
           <StatCard label="En essai" value={String(trial)} icon={<TrendingUp className="h-5 w-5" />} accent="accent" />
           <StatCard label="Expirées/suspendues" value={String(expired)} icon={<TrendingDown className="h-5 w-5" />} accent="destructive" />
@@ -113,7 +113,7 @@ function AdminDashboard() {
           <div className="rounded-2xl border border-border bg-card p-5 lg:col-span-2">
             <div className="font-display text-base font-bold">Dernières inscriptions</div>
             <div className="mt-3 space-y-2">
-              {recent.length === 0 && <div className="text-sm text-muted-foreground">Aucune boutique pour l'instant.</div>}
+              {recent.length === 0 && <div className="text-sm text-muted-foreground">Aucune organisation pour l'instant.</div>}
               {recent.map((s) => {
                 const st = organizationStatus(s, subByOrganization.get(s.id));
                 return (
@@ -151,7 +151,7 @@ function AdminDashboard() {
             <AlertTriangle className="h-4 w-4 text-destructive" />
             <div className="font-display text-base font-bold">Alertes</div>
             <Link to="/admin/boutiques" className="ml-auto flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
-              Voir toutes les boutiques <ArrowRight className="h-3.5 w-3.5" />
+              Voir toutes les organisations <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">

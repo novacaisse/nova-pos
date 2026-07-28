@@ -3,7 +3,7 @@
 // de passe ou Google), puisque l'inscription ne fait plus que créer le
 // compte utilisateur (voir inscription.tsx). Deux étapes : choix de
 // l'application ZegOS, puis configuration spécifique à l'application
-// choisie (pour ZegCaisse : boutique + gérant, comme avant migration 020d).
+// choisie (pour ZegCaisse : organisation + gérant, comme avant migration 020d).
 //
 // Seul ZegCaisse est réellement fonctionnel aujourd'hui — les autres
 // applications sont visibles (vision du produit ZegOS) mais désactivées.
@@ -109,11 +109,11 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
         ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
-      setError(e?.message ?? "Impossible de créer la boutique.");
+      setError(e?.message ?? "Impossible de créer l'organisation.");
       return;
     }
 
-    // Logo (Supabase Storage — bucket "shop-logos"), au mieux : la boutique
+    // Logo (Supabase Storage — bucket "shop-logos"), au mieux : l'organisation
     // est déjà pleinement fonctionnelle sans logo si ça échoue.
     if (logoFile) {
       const path = `${organization.id}/logo`;
@@ -136,7 +136,7 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
           <ArrowLeft className="h-3.5 w-3.5" /> Changer d'application
         </button>
 
-        <h1 className="mb-1 font-display text-2xl font-bold">Configurez votre boutique ZegCaisse</h1>
+        <h1 className="mb-1 font-display text-2xl font-bold">Configurez votre organisation ZegCaisse</h1>
         <p className="mb-5 text-sm text-muted-foreground">3 jours d'essai gratuit. Ces informations peuvent être modifiées plus tard.</p>
 
         <div className="mb-5 flex items-center gap-4 rounded-2xl border border-dashed border-border p-3">
@@ -144,7 +144,7 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
             {logoPreview ? <img src={logoPreview} alt="" className="h-full w-full object-contain" /> : <ImageIcon className="h-6 w-6 text-muted-foreground" />}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold">Logo de la boutique (optionnel)</div>
+            <div className="text-sm font-semibold">Logo de l'organisation (optionnel)</div>
             <label className="mt-1 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted">
               <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogo(e.target.files?.[0])} />
               Choisir un fichier
@@ -153,10 +153,10 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        <div className="mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Votre boutique</div>
+        <div className="mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Votre organisation</div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Nom de la boutique *" value={form.shop} onChange={set("shop")} placeholder="Ex : Chez Aïcha" />
-          <Field label="Téléphone boutique *" value={form.phone} onChange={set("phone")} placeholder="+229 …" />
+          <Field label="Nom de l'organisation *" value={form.shop} onChange={set("shop")} placeholder="Ex : Chez Aïcha" />
+          <Field label="Téléphone de l'organisation *" value={form.phone} onChange={set("phone")} placeholder="+229 …" />
           <SelectField label="Secteur" value={form.sector} onChange={set("sector")} options={SECTORS} />
           <SelectField label="Pays" value={form.country} onChange={set("country")} options={COUNTRIES} />
           <Field label="Ville *" value={form.city} onChange={set("city")} placeholder="Ex : Cotonou" />

@@ -92,7 +92,7 @@ function EquipePage() {
                     <MemberRow key={m.id} member={m} isOwner={isOwner} isSelf={m.user_id === user?.id}
                       onRoleChange={(role) => updateRole.mutate({ memberId: m.id, role })}
                       onRemove={() => {
-                        if (confirm("Retirer ce membre de l'équipe ? Son accès à la boutique sera coupé immédiatement.")) {
+                        if (confirm("Retirer ce membre de l'équipe ? Son accès à l'organisation sera coupé immédiatement.")) {
                           removeMember.mutate(m.id);
                         }
                       }}
@@ -281,7 +281,7 @@ function CreateMemberModal({ onClose }: { onClose: () => void }) {
           <p className="text-xs text-muted-foreground">
             Créez directement le compte de cette personne. Communiquez-lui ensuite l'email et le mot de passe pour
             qu'elle se connecte — si un compte existe déjà avec cet email, il sera simplement rattaché à cette
-            boutique (aucun mot de passe requis dans ce cas).
+            organisation (aucun mot de passe requis dans ce cas).
           </p>
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom complet *</span>

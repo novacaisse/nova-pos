@@ -21,9 +21,9 @@ export const Route = createFileRoute("/")({
 
 const MODULES = [
   { icon: ScanBarcode, name: "Point de vente", desc: "Caisse tactile ultra-rapide avec scanner et paiement mobile money." },
-  { icon: Warehouse, name: "Stock intelligent", desc: "Alertes de rupture, mouvements, inventaire multi-boutique." },
+  { icon: Warehouse, name: "Stock intelligent", desc: "Alertes de rupture, mouvements, inventaire multi-organisation." },
   { icon: BarChart3, name: "Rapports IA", desc: "Tableaux de bord et insights automatiques par période." },
-  { icon: Store, name: "Multi-boutique", desc: "Gérez toutes vos boutiques depuis une seule interface." },
+  { icon: Store, name: "Multi-organisation", desc: "Gérez toutes vos organisations depuis une seule interface." },
   { icon: Users, name: "Équipe & rôles", desc: "Permissions fines par utilisateur et journal d'activité." },
   { icon: Truck, name: "Fournisseurs", desc: "Bons de commande, réceptions, historique d'achats." },
   { icon: Wallet, name: "Dépenses", desc: "Suivi des charges par catégorie avec justificatifs." },
@@ -41,7 +41,7 @@ const WHY = [
 const TESTIMONIALS = [
   { name: "Aïcha K.", shop: "Boutique Cotonou Centre", quote: "Depuis NovaCaisse, je ferme ma caisse en 2 minutes le soir. L'IA me dit même quoi recommander.", rating: 5 },
   { name: "Kwame A.", shop: "Marché Dantokpa", quote: "Simple, rapide, et mes vendeurs n'ont eu besoin d'aucune formation. Le stock est enfin fiable.", rating: 5 },
-  { name: "Yao N.", shop: "Superette Abidjan", quote: "4 boutiques synchronisées en temps réel, avec Wave et Orange Money. Rien de comparable sur le marché.", rating: 5 },
+  { name: "Yao N.", shop: "Superette Abidjan", quote: "4 organisations synchronisées en temps réel, avec Wave et Orange Money. Rien de comparable sur le marché.", rating: 5 },
 ];
 
 function Landing() {
@@ -97,7 +97,7 @@ function Hero() {
             <Sparkles className="h-3.5 w-3.5" /> Nouveau · Assistant IA Nova
           </span>
           <h1 className="mt-5 font-display text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl">
-            La caisse <span className="bg-gradient-to-r from-primary to-primary-glow bg-clip-text text-transparent">moderne</span> pour vos boutiques.
+            La caisse <span className="bg-gradient-to-r from-primary to-primary-glow bg-clip-text text-transparent">moderne</span> pour vos organisations.
           </h1>
           <p className="mt-5 max-w-lg text-base text-muted-foreground sm:text-lg">
             Point de vente tactile, stock intelligent, rapports IA et paiement mobile money — tout dans une seule application, pensée pour les commerçants d'Afrique de l'Ouest.

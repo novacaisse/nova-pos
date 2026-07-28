@@ -74,7 +74,7 @@ function DevisPage() {
       docNumber: q.reference,
       docDate: new Date(q.created_at).toLocaleDateString("fr-FR"),
       shop: {
-        shopName: currentOrganization?.name ?? "Boutique",
+        shopName: currentOrganization?.name ?? "Organisation",
         logoUrl: currentOrganization?.logo_url,
         address: settings?.data.address,
         phone: settings?.data.phone,

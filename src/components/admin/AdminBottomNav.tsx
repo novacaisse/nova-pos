@@ -7,14 +7,14 @@ import {
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { cn } from "@/lib/utils";
 
-// Même pattern que BottomNav (espace boutique, Bloc 26) : 4 sections
+// Même pattern que BottomNav (espace organisation, Bloc 26) : 4 sections
 // principales + un tiroir "Plus" pour le reste, plutôt que de laisser le
 // panneau latéral comme seul accès sur mobile.
 type Item = { label: string; to: string; icon: React.ComponentType<{ className?: string }> };
 
 const PRIMARY: Item[] = [
   { label: "Bord", to: "/admin", icon: LayoutDashboard },
-  { label: "Boutiques", to: "/admin/boutiques", icon: Store },
+  { label: "Organisations", to: "/admin/boutiques", icon: Store },
   { label: "Abonnés", to: "/admin/abonnements", icon: CreditCard },
   { label: "Support", to: "/admin/support", icon: LifeBuoy },
 ];

@@ -43,13 +43,13 @@ function AdminBoutiques() {
 
   return (
     <div>
-      <PageHeader title="Boutiques" subtitle={`${organizations.length} boutique${organizations.length > 1 ? "s" : ""} enregistrée${organizations.length > 1 ? "s" : ""}`} />
+      <PageHeader title="Organisations" subtitle={`${organizations.length} organisation${organizations.length > 1 ? "s" : ""} enregistrée${organizations.length > 1 ? "s" : ""}`} />
 
       <div className="space-y-4 p-5 sm:p-8">
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-3">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher boutique, gérant, email…"
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher organisation, gérant, email…"
               className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
           </div>
           <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
@@ -65,7 +65,7 @@ function AdminBoutiques() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40">
               <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-3">Boutique</th>
+                <th className="px-4 py-3">Organisation</th>
                 <th className="px-4 py-3">Gérant</th>
                 <th className="px-4 py-3">Pays</th>
                 <th className="px-4 py-3">Formule</th>
@@ -94,7 +94,7 @@ function AdminBoutiques() {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">Aucune boutique ne correspond</td></tr>
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">Aucune organisation ne correspond</td></tr>
               )}
             </tbody>
           </table>
@@ -250,7 +250,7 @@ function DeleteConfirm({ shopName, onCancel, onConfirm }: { shopName: string; on
   return (
     <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3">
       <div className="mb-2 text-xs text-destructive">
-        Action irréversible — supprime la boutique et toutes ses données (ventes, stock, clients…).
+        Action irréversible — supprime l'organisation et toutes ses données (ventes, stock, clients…).
         Tapez <b>{shopName}</b> pour confirmer.
       </div>
       <div className="flex gap-2">

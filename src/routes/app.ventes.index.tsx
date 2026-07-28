@@ -48,7 +48,7 @@ function VentesPage() {
   const { user } = useAuth();
   const perms = useTeamPermissions();
   // Bascule Bloc 15 : un caissier ne voit que ses propres tickets si la
-  // boutique a activé cette restriction — le reste de l'équipe (et un
+  // organisation a activé cette restriction — le reste de l'équipe (et un
   // caissier si la bascule est désactivée, comportement par défaut) voit
   // toute la période comme avant.
   const sales = useMemo(() => {
@@ -247,7 +247,7 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
       docDate: new Date(sale.created_at).toLocaleString("fr-FR"),
       banner: "Document non fiscal — proforma",
       shop: {
-        shopName: currentOrganization?.name ?? "Boutique",
+        shopName: currentOrganization?.name ?? "Organisation",
         logoUrl: currentOrganization?.logo_url,
         address: extra.address,
         phone: extra.phone,
@@ -344,7 +344,7 @@ function DetailDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void }
             {ticket.showLogo && currentOrganization?.logo_url && (
               <img src={currentOrganization.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />
             )}
-            <div className="b text-base font-bold">{currentOrganization?.name ?? "Boutique"}</div>
+            <div className="b text-base font-bold">{currentOrganization?.name ?? "Organisation"}</div>
             {ticket.showAddress && extra.address && <div className="text-xs">{extra.address}</div>}
             {ticket.showPhone && extra.phone && <div className="text-xs">{extra.phone}</div>}
             {ticket.showFiscal && extra.ifu && <div className="text-xs">IFU {extra.ifu}</div>}

@@ -90,7 +90,7 @@ function SouscriptionPage() {
       <div className="grid min-h-screen place-items-center bg-background px-5 text-center">
         <div>
           <AlertTriangle className="mx-auto h-10 w-10 text-destructive" />
-          <p className="mt-3 text-sm text-muted-foreground">Aucune boutique associée à votre compte.</p>
+          <p className="mt-3 text-sm text-muted-foreground">Aucune organisation associée à votre compte.</p>
           <Link to="/app" className="mt-4 inline-block text-sm font-semibold text-primary hover:underline">Retour à l'application</Link>
         </div>
       </div>

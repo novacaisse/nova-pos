@@ -45,7 +45,7 @@ function ConnexionPage() {
           className="mt-8 w-full rounded-3xl border border-border bg-card p-7 shadow-elegant"
         >
           <h1 className="font-display text-2xl font-black tracking-tight">Bon retour 👋</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Connectez-vous à votre espace boutique.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Connectez-vous à votre espace organisation.</p>
 
           {error && (
             <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">

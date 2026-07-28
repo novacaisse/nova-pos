@@ -189,7 +189,7 @@ function CaissePage() {
   }
 
   if (!currentOrganization) {
-    return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une boutique.</div>;
+    return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une organisation.</div>;
   }
 
   return (
@@ -758,7 +758,7 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
   const { data: settings } = useShopSettings();
   const { data: profile } = useProfile();
   const ref = useRef<HTMLDivElement>(null);
-  const shopName = currentOrganization?.name ?? "Boutique";
+  const shopName = currentOrganization?.name ?? "Organisation";
   const ticket = { ...DEFAULT_TICKET_CONFIG, ...(settings?.data.ticket ?? {}) };
   const extra = settings?.data ?? {};
   const thanks = ticket.thanks || DEFAULT_TICKET_CONFIG.thanks;

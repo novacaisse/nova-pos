@@ -135,7 +135,7 @@ function NoShopScreen({ onRetry, onSignOut, error }: { onRetry: () => Promise<vo
         </div>
         <h1 className="mt-4 font-display text-xl font-bold">Impossible de récupérer vos organisations</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          La récupération de vos boutiques a échoué ({error}) — ce n'est probablement pas lié à votre compte,
+          La récupération de vos organisations a échoué ({error}) — ce n'est probablement pas lié à votre compte,
           réessayez ci-dessous.
         </p>
 

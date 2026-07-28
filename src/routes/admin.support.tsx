@@ -30,7 +30,7 @@ function AdminSupport() {
 
   return (
     <div>
-      <PageHeader title="Support" subtitle="Tickets et demandes des boutiques" />
+      <PageHeader title="Support" subtitle="Tickets et demandes des organisations" />
 
       <div className="space-y-4 p-5 sm:p-8">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -46,7 +46,7 @@ function AdminSupport() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40">
               <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-3">Boutique</th>
+                <th className="px-4 py-3">Organisation</th>
                 <th className="px-4 py-3">Sujet</th>
                 <th className="px-4 py-3">Statut</th>
                 <th className="px-4 py-3">Créé le</th>

@@ -72,7 +72,7 @@ function AdminAbonnements() {
             <thead className="bg-muted/40">
               <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-3">Réf</th>
-                <th className="px-4 py-3">Boutique</th>
+                <th className="px-4 py-3">Organisation</th>
                 <th className="px-4 py-3">Méthode</th>
                 <th className="px-4 py-3">Statut</th>
                 <th className="px-4 py-3">Date</th>

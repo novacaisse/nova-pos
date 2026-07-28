@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const ITEMS = [
   { title: "Vue d'ensemble", url: "/admin", icon: LayoutDashboard },
-  { title: "Boutiques", url: "/admin/boutiques", icon: Store },
+  { title: "Organisations", url: "/admin/boutiques", icon: Store },
   { title: "Abonnements", url: "/admin/abonnements", icon: CreditCard },
   { title: "Facturation", url: "/admin/facturation", icon: Receipt },
   { title: "Support", url: "/admin/support", icon: LifeBuoy },

@@ -13,7 +13,7 @@ export function TrialBanner() {
   // Double vérification : organizations.plan !== 'trial' (mis à jour par le
   // webhook/la vérification de paiement) ET subscriptions.status - au cas
   // où l'un des deux resterait désynchronisé (ex. webhook manqué avant le
-  // fix du Bloc 16), la boutique ne doit jamais voir le bandeau d'essai
+  // fix du Bloc 16), l'organisation ne doit jamais voir le bandeau d'essai
   // une fois réellement abonnée.
   if (!info.onTrial || info.expired || subscription?.status === "active") return null;
 

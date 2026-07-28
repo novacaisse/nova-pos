@@ -2,7 +2,7 @@ import { Zap } from "lucide-react";
 import { useAppSettings } from "@/lib/data/adminHooks";
 import { cn } from "@/lib/utils";
 
-// Logo affiché sur les pages publiques/boutique — reflète app_settings.logo_url
+// Logo affiché sur les pages publiques/organisation — reflète app_settings.logo_url
 // (Bloc 25, mini-CMS Super Admin) une fois défini, quel que soit `brand`.
 //
 // brand="novacaisse" (défaut) : badge Zap dégradé — utilisé par les pages

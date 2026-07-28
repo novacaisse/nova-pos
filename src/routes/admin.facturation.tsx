@@ -96,7 +96,7 @@ function AdminFacturation() {
             <div key={p.id} className="rounded-2xl border border-border bg-card p-5">
               <div className="font-display text-sm font-bold text-muted-foreground">{p.name}</div>
               <div className="mt-2 tabular font-display text-2xl font-black text-primary">{formatXOF(byPlan[p.id]?.mrr ?? 0)}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{byPlan[p.id]?.active ?? 0} boutiques actives</div>
+              <div className="mt-1 text-xs text-muted-foreground">{byPlan[p.id]?.active ?? 0} organisations actives</div>
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
                 <motion.div initial={{ width: 0 }} animate={{ width: `${totalMRR ? ((byPlan[p.id]?.mrr ?? 0) / totalMRR) * 100 : 0}%` }}
                   className="h-full bg-gradient-to-r from-primary to-primary-glow" />

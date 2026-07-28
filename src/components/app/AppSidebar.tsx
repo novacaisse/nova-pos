@@ -168,7 +168,7 @@ export function AppSidebar() {
               <div className="min-w-0 leading-tight">
                 <BrandLogo className="h-9 w-9 shadow-glow" textClassName="text-base text-sidebar-foreground" variant="sidebar" brand="zegcaisse" />
                 <div className="mt-0.5 text-[10px] uppercase tracking-widest text-sidebar-foreground/50">
-                  Espace boutique
+                  Espace organisation
                 </div>
               </div>
             )}

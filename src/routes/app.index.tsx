@@ -110,7 +110,7 @@ function DashboardPage() {
 
   return (
     <div>
-      <PageHeader title="Tableau de bord" subtitle={customers.length ? `${customers.length} clients · ${products.length} produits` : "Vue d'ensemble de votre boutique"}
+      <PageHeader title="Tableau de bord" subtitle={customers.length ? `${customers.length} clients · ${products.length} produits` : "Vue d'ensemble de votre organisation"}
         actions={
           <PeriodSelector period={period} onChange={setPeriod}
             customFrom={customFrom} customTo={customTo}

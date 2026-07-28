@@ -28,7 +28,7 @@ function ProduitsPage() {
   const canManage = myRole === "owner" || myRole === "manager" || myRole === "stock"; // cashier/accountant : lecture seule
   const perms = useTeamPermissions();
   // Bascule Bloc 15 : masque prix d'achat / marge au rôle Caissier si la
-  // boutique l'a désactivé (activé par défaut, comportement inchangé).
+  // organisation l'a désactivé (activé par défaut, comportement inchangé).
   const canSeeCostMargin = myRole !== "cashier" || perms.cashier_view_cost_margin;
 
   const [query, setQuery] = useState(q ?? "");
