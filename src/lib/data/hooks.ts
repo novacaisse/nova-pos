@@ -1201,24 +1201,31 @@ export function useUpdateShop() {
   });
 }
 
-// Ajout d'une boutique supplémentaire par un owner déjà existant (migration
-// 015) — respecte plans.limits.shops côté serveur (RPC security definer,
-// clé JSON encore nommée "shops" dans plans.limits — pas renommée par la
-// migration 020a, qui n'a touché qu'aux tables/colonnes), jamais
-// uniquement côté UI.
-export function useCreateAdditionalShop() {
+// Crée une organisation pour une application ZegOS donnée ('pos' pour
+// ZegCaisse aujourd'hui) — utilisé à la fois par l'onboarding (1ère
+// organisation d'un compte fraîchement créé) et par "+ Ajouter une
+// boutique" en Paramètres (organisations suivantes). Même RPC serveur pour
+// les deux cas depuis la migration 020d (provision_organization) : la
+// distinction 1ère/suivante et la vérification de plans.limits.shops sont
+// gérées côté fonction, jamais côté UI. Clé JSON encore nommée "shops"
+// dans plans.limits — pas renommée par 020a/020c/020d (donnée, pas schéma).
+export function useProvisionOrganization() {
   const { refresh, setCurrentOrganizationId } = useOrganization();
   return useMutation({
-    mutationFn: async (input: { name: string; country: string; currency: string }) => {
-      const { data, error } = await supabase.rpc("create_additional_shop", {
-        p_name: input.name, p_country: input.country, p_currency: input.currency,
+    mutationFn: async (input: {
+      app: string; name: string; country: string; currency: string;
+      phone?: string; address?: string; ownerPhone?: string;
+    }) => {
+      const { data, error } = await supabase.rpc("provision_organization", {
+        p_app: input.app, p_name: input.name, p_country: input.country, p_currency: input.currency,
+        p_phone: input.phone ?? null, p_address: input.address ?? null, p_owner_phone: input.ownerPhone ?? null,
       });
       if (error) throw error;
       return data as { id: string };
     },
-    onSuccess: async (shop) => {
+    onSuccess: async (organization) => {
       await refresh();
-      setCurrentOrganizationId(shop.id);
+      setCurrentOrganizationId(organization.id);
     },
   });
 }

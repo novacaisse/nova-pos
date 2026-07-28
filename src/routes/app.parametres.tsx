@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
-  useCreateAdditionalShop, useTransferStock, useProducts,
+  useProvisionOrganization, useTransferStock, useProducts,
   DEFAULT_TICKET_CONFIG, useFormatMoney, type TicketConfig, type TaxRate, type ProductWithStock,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,7 @@ function ParametresPage() {
   const [taxIncluded, setTaxIncluded] = useState(true);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [showAddShop, setShowAddShop] = useState(false);
-  const createShop = useCreateAdditionalShop();
+  const createShop = useProvisionOrganization();
 
   useEffect(() => {
     if (currentOrganization) { setName(currentOrganization.name); setCurrency(currentOrganization.currency); }
@@ -339,7 +339,7 @@ function ParametresPage() {
       {showAddShop && (
         <AddShopDialog
           onClose={() => setShowAddShop(false)}
-          onCreate={async (input) => { await createShop.mutateAsync(input); setShowAddShop(false); }}
+          onCreate={async (input) => { await createShop.mutateAsync({ app: "pos", ...input }); setShowAddShop(false); }}
           pending={createShop.isPending}
         />
       )}

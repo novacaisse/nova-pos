@@ -13,6 +13,7 @@ import { UserMenu } from "@/components/app/UserMenu";
 import { BottomNav } from "@/components/app/BottomNav";
 import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
+import { OnboardingFlow } from "@/components/app/OnboardingFlow";
 import { getTrialInfo } from "@/lib/trial";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -52,12 +53,15 @@ function AppLayout() {
     );
   }
 
-  // Garde-fou : un utilisateur authentifié sans aucune boutique (ex.
-  // inscription interrompue avant la création de organizations/
-  // organization_members) ne doit jamais atterrir silencieusement sur des
-  // écrans vides/désactivés — un état clair vaut mieux qu'un silence déroutant.
+  // Un utilisateur authentifié sans aucune organisation ne doit jamais
+  // atterrir silencieusement sur des écrans vides/désactivés. Deux cas :
+  // une vraie erreur de récupération (réessayer/support), ou — le cas
+  // normal depuis que l'inscription ne crée plus que le compte utilisateur
+  // (voir inscription.tsx) — un compte tout juste créé qui doit encore
+  // choisir son application ZegOS et la configurer (OnboardingFlow.tsx).
   if (!shopLoading && organizations.length === 0) {
-    return <NoShopScreen onRetry={refresh} onSignOut={signOut} error={shopError} />;
+    if (shopError) return <NoShopScreen onRetry={refresh} onSignOut={signOut} error={shopError} />;
+    return <OnboardingFlow onSignOut={signOut} />;
   }
 
   return (
@@ -105,6 +109,9 @@ function AppLayout() {
   );
 }
 
+// N'est plus affiché que sur une vraie erreur de récupération des
+// organisations (shopError truthy) — le cas "compte sans organisation"
+// normal (inscription tout juste terminée) passe par OnboardingFlow.
 function NoShopScreen({ onRetry, onSignOut, error }: { onRetry: () => Promise<void>; onSignOut: () => Promise<void>; error: string | null }) {
   const navigate = useNavigate();
   const [retrying, setRetrying] = useState(false);
@@ -126,20 +133,11 @@ function NoShopScreen({ onRetry, onSignOut, error }: { onRetry: () => Promise<vo
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
           <Store className="h-7 w-7" />
         </div>
-        <h1 className="mt-4 font-display text-xl font-bold">Aucune boutique associée à votre compte</h1>
-        {error ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            La récupération de vos boutiques a échoué ({error}) — ce n'est probablement pas lié à votre compte,
-            réessayez ci-dessous.
-          </p>
-        ) : (
-          <p className="mt-2 text-sm text-muted-foreground">
-            Deux cas possibles : si vous venez de créer votre compte pour <b>rejoindre une équipe existante</b>,
-            c'est normal — communiquez votre email au propriétaire ou gérant de la boutique, il doit vous ajouter
-            depuis l'écran Équipe. Si vous venez de <b>créer votre propre boutique</b> et vous attendiez à la
-            retrouver ici, quelque chose s'est mal passé pendant l'inscription.
-          </p>
-        )}
+        <h1 className="mt-4 font-display text-xl font-bold">Impossible de récupérer vos organisations</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          La récupération de vos boutiques a échoué ({error}) — ce n'est probablement pas lié à votre compte,
+          réessayez ci-dessous.
+        </p>
 
         <div className="mt-6 flex flex-col items-center gap-2">
           <button onClick={retry} disabled={retrying}
