@@ -42,9 +42,8 @@ function InscriptionPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
-        <Link to="/" className="mx-auto flex items-center gap-2.5">
-          <BrandLogo className="h-11 w-11 shadow-glow" iconClassName="h-5 w-5" />
-          <span className="font-display text-2xl font-bold">NovaCaisse</span>
+        <Link to="/" className="mx-auto flex items-center">
+          <BrandLogo className="h-10" />
         </Link>
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}

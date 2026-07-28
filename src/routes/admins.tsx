@@ -1,8 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Shield, Lock, Mail, ArrowRight, Loader2, AlertCircle } from "lucide-react";
+import { Lock, Mail, ArrowRight, Loader2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { supabase } from "@/integrations/supabase/client";
+import { BrandLogo } from "@/components/app/BrandLogo";
 
 export const Route = createFileRoute("/admins")({
   head: () => ({ meta: [{ title: "Administration — ZegCaisse" }] }),
@@ -47,14 +48,9 @@ function AdminsLogin() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-foreground/5">
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-5 py-10">
-        <div className="flex items-center gap-2.5">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-foreground to-foreground/70 text-background shadow-elegant">
-            <Shield className="h-5 w-5" strokeWidth={2.5} />
-          </div>
-          <div className="leading-tight">
-            <div className="font-display text-lg font-bold">ZegCaisse</div>
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Back-office</div>
-          </div>
+        <div className="flex flex-col items-center gap-2">
+          <BrandLogo className="h-10" />
+          <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Back-office</div>
         </div>
 
         <form

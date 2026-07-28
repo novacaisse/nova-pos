@@ -1,56 +1,33 @@
-import { Zap } from "lucide-react";
 import { useAppSettings } from "@/lib/data/adminHooks";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
-// Logo affiché sur les pages publiques/organisation — reflète app_settings.logo_url
-// (Bloc 25, mini-CMS Super Admin) une fois défini, quel que soit `brand`.
+// Logo réel de la plateforme ZegOS (fourni par l'utilisateur — plus aucun
+// texte stylé ni icône générique de secours). Deux variantes thème
+// (logo-light.png / logo-dark.png, wordmark complet) + une variante icône
+// seule (icon.png, carré, déjà un badge autonome) pour les espaces
+// restreints (sidebar repliée). app_settings.logo_url (Bloc 25, upload
+// Super Admin) reste prioritaire si défini, quel que soit le thème.
 //
-// brand="novacaisse" (défaut) : badge Zap dégradé — utilisé par les pages
-// publiques (landing, tarifs, inscription, souscription), volontairement
-// inchangées lors du rebranding ZegCaisse (hors périmètre, Chantier 1).
-//
-// brand="zegcaisse" : le badge Zap est remplacé par le mot "ZegCaisse" en
-// toutes lettres (aucun vrai logo n'existe encore, texte simple en
-// attendant) — utilisé par l'espace connecté (/app/*, /admin/*) et les
-// pages de connexion (/connexion, /admins).
-//
-// compact=true : variante étroite (sidebar repliée) où le mot complet ne
-// tiendrait pas — un monogramme "Z" dans le même badge que l'ancien Zap.
+// variant="sidebar" force la variante sombre : le fond de la sidebar
+// (--sidebar) reste toujours sombre, y compris en thème clair — le
+// logo doit donc toujours y être la version pensée pour fond sombre,
+// indépendamment du thème global de la page.
 export function BrandLogo({
-  className, iconClassName, textClassName, variant = "default", brand = "novacaisse", compact = false,
+  className, compact = false, variant = "auto",
 }: {
   className?: string;
-  iconClassName?: string;
-  textClassName?: string;
-  variant?: "default" | "sidebar";
-  brand?: "novacaisse" | "zegcaisse";
   compact?: boolean;
+  variant?: "auto" | "sidebar";
 }) {
   const { data } = useAppSettings();
-  const alt = brand === "zegcaisse" ? "ZegCaisse" : "NovaCaisse";
+  const { isDark } = useTheme();
 
   if (data?.logo_url) {
-    return (
-      <div className={cn("grid shrink-0 place-items-center overflow-hidden rounded-xl bg-muted", className)}>
-        <img src={data.logo_url} alt={alt} className="h-full w-full object-cover" />
-      </div>
-    );
+    return <img src={data.logo_url} alt="ZegOS" className={cn("object-contain", className)} />;
   }
 
-  if (brand === "zegcaisse" && !compact) {
-    return <span className={cn("font-display font-bold tracking-tight", textClassName)}>ZegCaisse</span>;
-  }
-
-  const badgeGradient = variant === "sidebar" ? "from-sidebar-primary to-primary-glow" : "from-primary to-primary-glow text-primary-foreground";
-  const badgeTextColor = variant === "sidebar" && "text-sidebar-primary-foreground";
-
-  return (
-    <div className={cn("grid shrink-0 place-items-center rounded-xl bg-gradient-to-br", badgeGradient, className)}>
-      {brand === "zegcaisse" ? (
-        <span className={cn("font-display font-bold", badgeTextColor, iconClassName)}>Z</span>
-      ) : (
-        <Zap className={cn(badgeTextColor, iconClassName)} strokeWidth={2.5} />
-      )}
-    </div>
-  );
+  const useDarkVariant = variant === "sidebar" || isDark;
+  const src = compact ? "/icon.png" : useDarkVariant ? "/logo-dark.png" : "/logo-light.png";
+  return <img src={src} alt="ZegOS" className={cn("object-contain", className)} />;
 }

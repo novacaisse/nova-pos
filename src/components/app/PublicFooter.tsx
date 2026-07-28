@@ -11,10 +11,7 @@ export function PublicFooter() {
     <footer className="border-t border-border bg-card">
       <div className="mx-auto grid max-w-6xl gap-8 px-5 py-12 sm:grid-cols-4">
         <div className="sm:col-span-2">
-          <div className="flex items-center gap-2.5">
-            <BrandLogo className="h-9 w-9" iconClassName="h-4 w-4" />
-            <span className="font-display text-lg font-bold">NovaCaisse</span>
-          </div>
+          <BrandLogo className="h-8" />
           <p className="mt-3 max-w-sm text-xs text-muted-foreground">La première application de la plateforme ZegOS — pensée pour les commerçants d'Afrique de l'Ouest. Édité par Digitorizon.</p>
         </div>
         <div>

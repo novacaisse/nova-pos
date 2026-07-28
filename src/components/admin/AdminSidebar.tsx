@@ -1,9 +1,10 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Store, CreditCard, Receipt, LifeBuoy, Settings, Shield, UserCircle } from "lucide-react";
+import { LayoutDashboard, Store, CreditCard, Receipt, LifeBuoy, Settings, UserCircle } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, useSidebar,
 } from "@/components/ui/sidebar";
+import { BrandLogo } from "@/components/app/BrandLogo";
 import { cn } from "@/lib/utils";
 
 const ITEMS = [
@@ -25,13 +26,12 @@ export function AdminSidebar() {
     <Sidebar collapsible="icon" className="border-r border-border">
       <SidebarHeader className="border-b border-border">
         <Link to="/admin" className="flex items-center gap-2.5 px-2 py-2">
-          <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-gradient-to-br from-foreground to-foreground/70 text-background">
-            <Shield className="h-4 w-4" strokeWidth={2.5} />
-          </div>
-          {!collapsed && (
+          {collapsed ? (
+            <BrandLogo className="h-9 w-9" variant="sidebar" compact />
+          ) : (
             <div className="min-w-0">
-              <div className="truncate font-display text-sm font-bold">ZegCaisse</div>
-              <div className="truncate text-[10px] uppercase tracking-widest text-muted-foreground">Back-office</div>
+              <BrandLogo className="h-6" variant="sidebar" />
+              <div className="mt-1 truncate text-[10px] uppercase tracking-widest text-sidebar-foreground/50">Back-office</div>
             </div>
           )}
         </Link>

@@ -163,11 +163,11 @@ export function AppSidebar() {
         <div className="flex items-center gap-2 px-2 py-3">
           <Link to="/app" onClick={handleNavClick} className="flex min-w-0 flex-1 items-center gap-2.5">
             {collapsed ? (
-              <BrandLogo className="h-9 w-9 shadow-glow" iconClassName="h-4.5 w-4.5" variant="sidebar" brand="zegcaisse" compact />
+              <BrandLogo className="h-9 w-9" variant="sidebar" compact />
             ) : (
               <div className="min-w-0 leading-tight">
-                <BrandLogo className="h-9 w-9 shadow-glow" textClassName="text-base text-sidebar-foreground" variant="sidebar" brand="zegcaisse" />
-                <div className="mt-0.5 text-[10px] uppercase tracking-widest text-sidebar-foreground/50">
+                <BrandLogo className="h-7" variant="sidebar" />
+                <div className="mt-1 text-[10px] uppercase tracking-widest text-sidebar-foreground/50">
                   Espace organisation
                 </div>
               </div>

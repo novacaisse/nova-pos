@@ -34,8 +34,8 @@ function ConnexionPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/10">
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-5 py-10">
-        <Link to="/" className="flex items-center gap-2.5">
-          <BrandLogo className="h-11 w-11 shadow-glow" textClassName="text-2xl" brand="zegcaisse" />
+        <Link to="/" className="flex items-center">
+          <BrandLogo className="h-10" />
         </Link>
 
         <motion.form
