@@ -5,7 +5,7 @@ import { Search, X, LogIn, Pause, Play, Trash2, Clock, Store, User, Mail, Phone,
 import { PageHeader } from "@/components/app/PageHeader";
 import {
   useAdminOrganizations, useAdminSubscriptions, useSuspendOrganization, useExtendTrial, useDeleteOrganization, useImpersonate,
-  usePlans, type AdminOrganization, type AdminSubscription,
+  useChangeOrganizationPlan, usePlans, type AdminOrganization, type AdminSubscription, type Plan,
 } from "@/lib/data/adminHooks";
 import { organizationStatus, STATUS_META, type OrganizationStatus } from "@/lib/adminShopStatus";
 import { formatXOF } from "@/lib/mock/catalog";
@@ -104,7 +104,7 @@ function AdminBoutiques() {
 
       <AnimatePresence>
         {selected && (
-          <Drawer shop={selected} sub={subByOrganization.get(selected.id)} plan={planById[selected.plan]}
+          <Drawer shop={selected} sub={subByOrganization.get(selected.id)} plan={planById[selected.plan]} plans={plans}
             onClose={() => setSelected(null)} />
         )}
       </AnimatePresence>
@@ -112,8 +112,8 @@ function AdminBoutiques() {
   );
 }
 
-function Drawer({ shop, sub, plan, onClose }: {
-  shop: AdminOrganization; sub?: AdminSubscription; plan?: { name: string };
+function Drawer({ shop, sub, plan, plans, onClose }: {
+  shop: AdminOrganization; sub?: AdminSubscription; plan?: { name: string }; plans: Plan[];
   onClose: () => void;
 }) {
   const status = organizationStatus(shop, sub);
@@ -121,6 +121,7 @@ function Drawer({ shop, sub, plan, onClose }: {
   const extend = useExtendTrial();
   const remove = useDeleteOrganization();
   const impersonate = useImpersonate();
+  const changePlan = useChangeOrganizationPlan();
   const [extending, setExtending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +133,36 @@ function Drawer({ shop, sub, plan, onClose }: {
       window.location.href = action_link;
     } catch (e: any) {
       setError(e?.message ?? "Impossible de générer le lien de connexion.");
+    }
+  };
+
+  const doSuspend = async () => {
+    setError(null);
+    try {
+      await suspend.mutateAsync({ id: shop.id, suspended: !shop.suspended });
+    } catch (e: any) {
+      setError(e?.message ?? "Impossible de mettre à jour le statut de l'organisation.");
+    }
+  };
+
+  const doDelete = async () => {
+    setError(null);
+    try {
+      await remove.mutateAsync(shop.id);
+      setDeleting(false);
+      onClose();
+    } catch (e: any) {
+      setError(e?.message ?? "Impossible de supprimer cette organisation.");
+    }
+  };
+
+  const doChangePlan = async (planId: string) => {
+    if (planId === shop.plan) return;
+    setError(null);
+    try {
+      await changePlan.mutateAsync({ id: shop.id, plan: planId });
+    } catch (e: any) {
+      setError(e?.message ?? "Impossible de changer la formule.");
     }
   };
 
@@ -187,15 +218,31 @@ function Drawer({ shop, sub, plan, onClose }: {
             </div>
           )}
 
+          <section>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Formule</div>
+            <select value={shop.plan} onChange={(e) => doChangePlan(e.target.value)} disabled={changePlan.isPending}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-60">
+              <option value="trial">Essai</option>
+              {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </section>
+
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
 
           {extending && (
             <ExtendForm onCancel={() => setExtending(false)}
-              onConfirm={async (days) => { await extend.mutateAsync({ id: shop.id, days }); setExtending(false); }} />
+              onConfirm={async (days) => {
+                setError(null);
+                try {
+                  await extend.mutateAsync({ id: shop.id, days });
+                  setExtending(false);
+                } catch (e: any) {
+                  setError(e?.message ?? "Impossible de prolonger l'essai.");
+                }
+              }} />
           )}
           {deleting && (
-            <DeleteConfirm shopName={shop.name} onCancel={() => setDeleting(false)}
-              onConfirm={async () => { await remove.mutateAsync(shop.id); setDeleting(false); onClose(); }} />
+            <DeleteConfirm shopName={shop.name} onCancel={() => setDeleting(false)} onConfirm={doDelete} />
           )}
         </div>
 
@@ -208,11 +255,11 @@ function Drawer({ shop, sub, plan, onClose }: {
             className="flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2.5 text-xs font-semibold hover:bg-muted">
             <Clock className="h-3.5 w-3.5" /> Prolonger essai
           </button>
-          <button onClick={() => suspend.mutate({ id: shop.id, suspended: !shop.suspended })} disabled={suspend.isPending}
-            className={cn("flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-semibold",
+          <button onClick={doSuspend} disabled={suspend.isPending}
+            className={cn("flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-semibold disabled:opacity-50",
               shop.suspended ? "border-success/40 bg-success/10 text-success hover:bg-success/20"
                 : "border-warning/40 bg-warning/10 text-warning-foreground hover:bg-warning/20")}>
-            {shop.suspended ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+            {suspend.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : shop.suspended ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
             {shop.suspended ? "Réactiver" : "Suspendre"}
           </button>
           <button onClick={() => setDeleting((v) => !v)}
@@ -235,7 +282,7 @@ function ExtendForm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: 
         <input type="number" min={1} value={days} onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 1))}
           className="h-9 w-24 rounded-lg border border-border bg-background px-2 text-sm" />
         <button onClick={onCancel} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">Annuler</button>
-        <button onClick={async () => { setBusy(true); await onConfirm(days); setBusy(false); }} disabled={busy}
+        <button onClick={async () => { setBusy(true); try { await onConfirm(days); } finally { setBusy(false); } }} disabled={busy}
           className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50">
           {busy && <Loader2 className="h-3 w-3 animate-spin" />} Confirmer
         </button>
@@ -257,7 +304,7 @@ function DeleteConfirm({ shopName, onCancel, onConfirm }: { shopName: string; on
         <input value={typed} onChange={(e) => setTyped(e.target.value)}
           className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-sm" />
         <button onClick={onCancel} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">Annuler</button>
-        <button onClick={async () => { setBusy(true); await onConfirm(); setBusy(false); }}
+        <button onClick={async () => { setBusy(true); try { await onConfirm(); } finally { setBusy(false); } }}
           disabled={typed !== shopName || busy}
           className="flex items-center gap-1 rounded-lg bg-destructive px-3 py-1.5 text-xs font-bold text-destructive-foreground disabled:opacity-40">
           {busy && <Loader2 className="h-3 w-3 animate-spin" />} Supprimer définitivement

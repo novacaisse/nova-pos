@@ -359,6 +359,56 @@ create table if not exists public.subscription_payments (
 create index if not exists idx_sub_payments_shop on public.subscription_payments(organization_id);
 create index if not exists idx_sub_payments_subscription on public.subscription_payments(subscription_id);
 
+-- Validation manuelle d'un paiement par le Super Admin (migration 020e) —
+-- filet de sécurité si la vérification automatique MoneyFusion (Edge
+-- Function check-subscription-payment) reste bloquée. Même logique que
+-- la branche paid/failed de verifyAndApplyPayment côté Deno.
+create or replace function public.admin_set_payment_status(p_payment_id uuid, p_status text)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_payment public.subscription_payments;
+  v_period_days integer;
+  v_current_period_end timestamptz;
+  v_plan_id text;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Accès réservé au Super Admin.';
+  end if;
+  if p_status not in ('paid', 'failed') then
+    raise exception 'Statut invalide : % (attendu paid ou failed).', p_status;
+  end if;
+
+  select * into v_payment from public.subscription_payments where id = p_payment_id;
+  if not found then
+    raise exception 'Paiement introuvable.';
+  end if;
+
+  if p_status = 'failed' then
+    update public.subscription_payments set status = 'failed' where id = p_payment_id;
+    return;
+  end if;
+
+  update public.subscription_payments
+  set status = 'paid', paid_at = now()
+  where id = p_payment_id;
+
+  v_plan_id := v_payment.metadata ->> 'plan_id';
+  v_period_days := case when v_payment.metadata ->> 'period' = 'year' then 365 else 30 end;
+  v_current_period_end := now() + (v_period_days || ' days')::interval;
+
+  if v_plan_id is not null then
+    update public.subscriptions
+    set status = 'active', plan = v_plan_id, current_period_end = v_current_period_end
+    where id = v_payment.subscription_id;
+
+    update public.organizations set plan = v_plan_id where id = v_payment.organization_id;
+  end if;
+end;
+$$;
+revoke all on function public.admin_set_payment_status(uuid, text) from public;
+grant execute on function public.admin_set_payment_status(uuid, text) to authenticated;
+
 create table if not exists public.organization_settings (
   organization_id uuid primary key references public.organizations(id) on delete cascade,
   receipt_header text, receipt_footer text, receipt_logo_url text,

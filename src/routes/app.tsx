@@ -64,6 +64,14 @@ function AppLayout() {
     return <OnboardingFlow onSignOut={signOut} />;
   }
 
+  // organizations.suspended (Super Admin, bouton "Suspendre") n'avait
+  // jusqu'ici aucun effet réel — la colonne était mise à jour mais jamais
+  // vérifiée côté application. Bloque l'accès comme le fait déjà
+  // l'expiration d'essai ci-dessus.
+  if (currentOrganization?.suspended) {
+    return <SuspendedScreen onSignOut={signOut} />;
+  }
+
   return (
     <SidebarProvider defaultOpen>
       <div className="flex min-h-screen w-full bg-background">
@@ -110,6 +118,36 @@ function AppLayout() {
 }
 
 // N'est plus affiché que sur une vraie erreur de récupération des
+function SuspendedScreen({ onSignOut }: { onSignOut: () => Promise<void> }) {
+  const navigate = useNavigate();
+  const logout = async () => {
+    await onSignOut();
+    navigate({ to: "/connexion" });
+  };
+  return (
+    <div className="grid min-h-screen place-items-center bg-background px-5">
+      <div className="max-w-md text-center">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-destructive/10 text-destructive">
+          <Store className="h-7 w-7" />
+        </div>
+        <h1 className="mt-4 font-display text-xl font-bold">Organisation suspendue</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          L'accès à cette organisation a été suspendu par l'administration. Contactez le support si vous pensez
+          qu'il s'agit d'une erreur.
+        </p>
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <a href="mailto:contact@novacaisse.bj" className="flex h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground shadow-elegant hover:opacity-90">
+            <Mail className="h-4 w-4" /> Contacter le support
+          </a>
+          <button onClick={logout} className="flex h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl text-sm font-semibold text-muted-foreground hover:text-foreground">
+            <LogOut className="h-4 w-4" /> Se déconnecter
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // organisations (shopError truthy) — le cas "compte sans organisation"
 // normal (inscription tout juste terminée) passe par OnboardingFlow.
 function NoShopScreen({ onRetry, onSignOut, error }: { onRetry: () => Promise<void>; onSignOut: () => Promise<void>; error: string | null }) {

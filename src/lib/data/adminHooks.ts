@@ -233,6 +233,20 @@ export function useDeleteOrganization() {
   });
 }
 
+// Changement de formule forcé par le Super Admin (ex. downgrade manuel,
+// correction après un paiement validé à la main) — même colonne que
+// l'auto-service (souscription), même policy shops_update_admin.
+export function useChangeOrganizationPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, plan }: { id: string; plan: string }) => {
+      const { error } = await supabase.from("organizations").update({ plan }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_organizations"] }),
+  });
+}
+
 // "Se connecter en tant que" — passe par l'Edge Function admin-impersonate
 // (vérifie is_super_admin server-side, journalise dans admin_impersonations,
 // génère un lien de connexion via le service role). Après avoir suivi le
@@ -280,6 +294,25 @@ export function useAdminPayments(limit = 300) {
         .select("*, organizations(name)").order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []) as AdminPayment[];
+    },
+  });
+}
+
+// Validation manuelle par le Super Admin (RPC admin_set_payment_status,
+// migration 020e) — filet de sécurité si la vérification automatique
+// MoneyFusion reste bloquée sur "pending" (proxy/API jamais indéfiniment
+// fiable). Répercute côté abonnement/organisation exactement comme le
+// ferait la vérification automatique.
+export function useAdminSetPaymentStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "paid" | "failed" }) => {
+      const { error } = await supabase.rpc("admin_set_payment_status", { p_payment_id: id, p_status: status });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin_payments"] });
+      qc.invalidateQueries({ queryKey: ["admin_organizations"] });
     },
   });
 }

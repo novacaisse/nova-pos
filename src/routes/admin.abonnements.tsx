@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { CreditCard, CheckCircle2, XCircle, Clock, RefreshCcw, Receipt, Loader2 } from "lucide-react";
+import { CreditCard, CheckCircle2, XCircle, Clock, RefreshCcw, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useAdminPayments } from "@/lib/data/adminHooks";
+import { useAdminPayments, useAdminSetPaymentStatus, type AdminPayment } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 import { cn } from "@/lib/utils";
 
@@ -21,8 +21,23 @@ const PERIOD_DAYS: Record<string, number | null> = { "7j": 7, "30j": 30, "90j": 
 
 function AdminAbonnements() {
   const { data: payments = [], isLoading } = useAdminPayments();
+  const setPaymentStatus = useAdminSetPaymentStatus();
   const [status, setStatus] = useState<"all" | keyof typeof STATUS_META>("all");
   const [period, setPeriod] = useState<keyof typeof PERIOD_DAYS>("30j");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const setStatusManually = async (payment: AdminPayment, newStatus: "paid" | "failed") => {
+    setError(null);
+    setBusyId(payment.id);
+    try {
+      await setPaymentStatus.mutateAsync({ id: payment.id, status: newStatus });
+    } catch (e: any) {
+      setError(e?.message ?? "Impossible de mettre à jour ce paiement.");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const rows = useMemo(() => {
     const days = PERIOD_DAYS[period];
@@ -50,6 +65,8 @@ function AdminAbonnements() {
           <StatCard label="Échoués" value={String(failed)} icon={<XCircle className="h-5 w-5" />} accent="destructive" />
           <StatCard label="En attente" value={String(pending)} icon={<Clock className="h-5 w-5" />} accent="accent" />
         </div>
+
+        {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
 
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-3">
           <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
@@ -100,8 +117,20 @@ function AdminAbonnements() {
                     <td className="tabular px-4 py-3 text-right font-bold">{formatXOF(Number(p.amount))}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button disabled title="Bientôt disponible" className="grid h-8 w-8 cursor-not-allowed place-items-center rounded-lg border border-border opacity-40"><RefreshCcw className="h-3.5 w-3.5" /></button>
-                        <button disabled title="Bientôt disponible" className="grid h-8 w-8 cursor-not-allowed place-items-center rounded-lg border border-border opacity-40"><Receipt className="h-3.5 w-3.5" /></button>
+                        {(p.status === "pending" || p.status === "failed") && (
+                          <button onClick={() => setStatusManually(p, "paid")} disabled={busyId === p.id}
+                            title="Valider manuellement (marquer payé)"
+                            className="grid h-8 w-8 place-items-center rounded-lg border border-success/40 text-success hover:bg-success/10 disabled:opacity-40">
+                            {busyId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
+                        {(p.status === "pending" || p.status === "paid") && (
+                          <button onClick={() => setStatusManually(p, "failed")} disabled={busyId === p.id}
+                            title="Marquer échoué"
+                            className="grid h-8 w-8 place-items-center rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-40">
+                            {busyId === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

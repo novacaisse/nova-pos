@@ -11,6 +11,7 @@ export type Organization = {
   logo_url: string | null;
   plan: string;
   trial_ends_at: string | null;
+  suspended: boolean;
 };
 
 type OrganizationCtx = {
@@ -50,7 +51,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     setError(null);
     const { data, error: fetchErr } = await supabase
       .from("organizations")
-      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at")
+      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at,suspended")
       .order("created_at", { ascending: true });
     if (fetchErr) {
       setError(fetchErr.message);

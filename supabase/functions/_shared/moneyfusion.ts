@@ -47,9 +47,25 @@ export async function verifyAndApplyPayment(
     const res = await fetch(`https://www.pay.moneyfusion.net/paiementNotif/${payment.provider_ref}`, {
       client: proxyClient,
     });
-    statusData = await res.json();
+    // Le corps est loggé même sur un statut HTTP non-2xx : un paiement qui
+    // reste "pending" indéfiniment est le symptôme visible côté client,
+    // mais la cause (proxy down, réponse MoneyFusion inattendue, format
+    // de réponse différent de celui documenté) n'est visible que dans ces
+    // logs — jamais vérifié en conditions réelles avant ce déploiement
+    // (voir db/AUDIT-SECURITE.md §12).
+    const rawBody = await res.text();
+    if (!res.ok) {
+      console.error(`verifyAndApplyPayment: MoneyFusion a répondu ${res.status} pour le paiement ${payment.id}`, rawBody);
+      return payment.status;
+    }
+    try {
+      statusData = JSON.parse(rawBody);
+    } catch {
+      console.error(`verifyAndApplyPayment: réponse MoneyFusion non-JSON pour le paiement ${payment.id}`, rawBody);
+      return payment.status;
+    }
   } catch (e) {
-    console.error("verifyAndApplyPayment: vérification MoneyFusion échouée", e);
+    console.error(`verifyAndApplyPayment: appel MoneyFusion (fetch/proxy) échoué pour le paiement ${payment.id}`, e);
     return payment.status;
   } finally {
     proxyClient.close();
@@ -57,6 +73,10 @@ export async function verifyAndApplyPayment(
 
   const realStatus = statusData?.data?.statut as string | undefined; // "pending" | "failure" | "no paid" | "paid"
   const meta = payment.metadata ?? {};
+
+  if (realStatus !== "paid" && realStatus !== "failure" && realStatus !== "no paid" && realStatus !== "pending") {
+    console.error(`verifyAndApplyPayment: statut MoneyFusion inattendu pour le paiement ${payment.id}`, statusData);
+  }
 
   if (realStatus === "paid") {
     await admin.from("subscription_payments")

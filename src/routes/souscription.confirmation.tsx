@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Loader2, CircleCheck, XCircle, Check } from "lucide-react";
@@ -25,6 +25,7 @@ function ConfirmationPage() {
   const { data: payment, isLoading, isError } = useSubscriptionPayment(payment_id ?? null);
   const checkPayment = useCheckSubscriptionPayment();
   const checkingRef = useRef(false);
+  const [attempts, setAttempts] = useState(0);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/connexion" });
@@ -49,6 +50,7 @@ function ConfirmationPage() {
         // parallèle, et le webhook peut encore résoudre le paiement lui-même.
       } finally {
         checkingRef.current = false;
+        if (!cancelled) setAttempts((n) => n + 1);
       }
     };
     runCheck();
@@ -113,11 +115,27 @@ function ConfirmationPage() {
       </>
     );
   } else {
+    // Après ~1 min de vérification sans résolution, on arrête de faire
+    // comme si tout allait se résoudre tout seul : le paiement a peut-être
+    // bien abouti côté MoneyFusion sans que la vérification automatique
+    // n'ait pu le confirmer (proxy/API) — mieux vaut orienter vers le
+    // support avec la référence que laisser tourner un spinner indéfiniment.
+    const stuck = attempts >= 15;
     content = (
       <>
         <Loader2 className="mx-auto h-14 w-14 animate-spin text-primary" />
         <h2 className="mt-5 font-display text-xl font-bold">En attente de confirmation…</h2>
         <p className="mt-2 text-sm text-muted-foreground">Validez la transaction sur votre téléphone si ce n'est pas déjà fait. Cette page se met à jour automatiquement.</p>
+        {stuck && (
+          <div className="mt-5 rounded-xl border border-border bg-muted/50 p-4 text-left text-xs text-muted-foreground">
+            <p>La vérification prend plus longtemps que prévu. Si vous avez bien validé le paiement sur votre téléphone, contactez le support avec la référence ci-dessous — il pourra confirmer votre paiement manuellement.</p>
+            <p className="mt-2 font-mono text-[11px] text-foreground">Réf. {payment_id}</p>
+            <a href={`mailto:contact@novacaisse.bj?subject=Paiement%20bloqué%20-%20${payment_id}`}
+              className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:opacity-90">
+              Contacter le support
+            </a>
+          </div>
+        )}
       </>
     );
   }
