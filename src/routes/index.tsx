@@ -1,34 +1,57 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import {
-  Zap, ArrowRight, ScanBarcode, Warehouse, BarChart3, Users, Store,
-  Sparkles, Truck, Wallet, Bell, Smartphone, Bot, Check, Star, Menu,
+  Zap, ArrowRight, ScanBarcode, Warehouse, Users, Building2, Boxes,
+  Sparkles, Smartphone, Bot, Check, Star, Clock,
 } from "lucide-react";
 import { usePlans } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
 import { formatMoney } from "@/lib/data/hooks";
-import { BrandLogo } from "@/components/app/BrandLogo";
+import { PublicHeader } from "@/components/app/PublicHeader";
+import { PublicFooter } from "@/components/app/PublicFooter";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "NovaCaisse — Logiciel de caisse pour commerçants d'Afrique de l'Ouest" },
-      { name: "description", content: "Point de vente tactile, gestion de stock, rapports IA, mobile money. Pensé pour les commerçants du Bénin, du Togo, du Burkina et au-delà." },
+      { title: "NovaCaisse — ZegCaisse, la caisse pensée pour l'Afrique de l'Ouest" },
+      { name: "description", content: "ZegCaisse : point de vente tactile, stock intelligent, rapports pilotés par IA et Mobile Money natif. La première application de la plateforme ZegOS." },
     ],
   }),
   component: Landing,
 });
 
-const MODULES = [
-  { icon: ScanBarcode, name: "Point de vente", desc: "Caisse tactile ultra-rapide avec scanner et paiement mobile money." },
-  { icon: Warehouse, name: "Stock intelligent", desc: "Alertes de rupture, mouvements, inventaire multi-organisation." },
-  { icon: BarChart3, name: "Rapports IA", desc: "Tableaux de bord et insights automatiques par période." },
-  { icon: Store, name: "Multi-organisation", desc: "Gérez toutes vos organisations depuis une seule interface." },
-  { icon: Users, name: "Équipe & rôles", desc: "Permissions fines par utilisateur et journal d'activité." },
-  { icon: Truck, name: "Fournisseurs", desc: "Bons de commande, réceptions, historique d'achats." },
-  { icon: Wallet, name: "Dépenses", desc: "Suivi des charges par catégorie avec justificatifs." },
-  { icon: Bot, name: "Assistant Nova IA", desc: "Posez vos questions, obtenez des réponses métier instantanées." },
-  { icon: Bell, name: "Notifications temps réel", desc: "Alertes stock, paiements et objectifs de vente." },
+// Regroupé en 4 piliers (plutôt qu'une grille plate de 9 tuiles) pour
+// raconter le produit par bénéfice plutôt que par liste de fonctionnalités.
+const PILLARS = [
+  {
+    icon: ScanBarcode, title: "Vendez, à tout moment",
+    desc: "Une caisse tactile pensée pour la réalité du terrain : scanner, Mobile Money, connexion instable.",
+    items: ["Caisse tactile ultra-rapide", "Scanner code-barres", "Mobile Money natif (Wave, Orange, MTN, Moov)", "Fonctionne hors ligne"],
+  },
+  {
+    icon: Warehouse, title: "Gérez le stock sans surprise",
+    desc: "Chaque mouvement tracé, chaque rupture anticipée — sur une ou plusieurs organisations.",
+    items: ["Alertes de rupture automatiques", "Mouvements de stock détaillés", "Fournisseurs & bons de commande", "Multi-organisation"],
+  },
+  {
+    icon: Bot, title: "Pilotez avec l'IA",
+    desc: "Nova lit vos données de vente et répond en langage naturel, comme un comptable disponible 24/7.",
+    items: ["Assistant Nova IA", "Rapports automatiques par période", "Objectifs de vente suivis", "Notifications en temps réel"],
+  },
+  {
+    icon: Users, title: "Gardez le contrôle",
+    desc: "Une équipe, des rôles précis, des charges suivies — la structure d'une vraie entreprise.",
+    items: ["Équipe & permissions fines", "Devis convertis en vente", "Fiches clients détaillées", "Dépenses catégorisées"],
+  },
+];
+
+// Vision plateforme : liste encodée en dur pour l'instant, sera unifiée
+// avec le futur catalogue admin (table `apps`, Chantier B) pour ne plus
+// dupliquer avec la même liste dans OnboardingFlow.tsx.
+const ZEGOS_APPS = [
+  { icon: ScanBarcode, name: "ZegCaisse", desc: "Point de vente & gestion commerciale", available: true },
+  { icon: Building2, name: "ZegHotel", desc: "Gestion hôtelière & réservations", available: false },
+  { icon: Boxes, name: "ZegERP", desc: "Gestion d'entreprise étendue", available: false },
 ];
 
 const WHY = [
@@ -47,42 +70,17 @@ const TESTIMONIALS = [
 function Landing() {
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <PublicHeader />
       <Hero />
-      <Modules />
+      <Pillars />
+      <VisionZegOS />
       <Why />
       <AiShowcase />
       <Testimonials />
       <PricingPreview />
       <FinalCta />
-      <Footer />
+      <PublicFooter />
     </div>
-  );
-}
-
-function Header() {
-  return (
-    <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
-        <Link to="/" className="flex items-center gap-2.5">
-          <BrandLogo className="h-10 w-10 shadow-glow" iconClassName="h-5 w-5" />
-          <span className="font-display text-xl font-bold tracking-tight">NovaCaisse</span>
-        </Link>
-        <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
-          <a href="#modules" className="hover:text-foreground">Fonctionnalités</a>
-          <Link to="/tarifs" className="hover:text-foreground">Tarifs</Link>
-          <Link to="/connexion" className="hover:text-foreground">Connexion</Link>
-        </nav>
-        <div className="flex items-center gap-2">
-          <Link to="/inscription" className="hidden h-10 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90 sm:inline-flex">
-            Essayer gratuitement <ArrowRight className="h-4 w-4" />
-          </Link>
-          <button className="grid h-10 w-10 place-items-center rounded-xl border border-border text-foreground md:hidden" aria-label="Menu">
-            <Menu className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-    </header>
   );
 }
 
@@ -94,13 +92,13 @@ function Hero() {
       <div className="mx-auto grid max-w-6xl gap-10 px-5 py-20 lg:grid-cols-2 lg:py-28">
         <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
           <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/5 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-primary">
-            <Sparkles className="h-3.5 w-3.5" /> Nouveau · Assistant IA Nova
+            <Sparkles className="h-3.5 w-3.5" /> ZegCaisse · Première application ZegOS
           </span>
           <h1 className="mt-5 font-display text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl">
-            La caisse <span className="bg-gradient-to-r from-primary to-primary-glow bg-clip-text text-transparent">moderne</span> pour vos organisations.
+            Encaissez en <span className="bg-gradient-to-r from-primary to-primary-glow bg-clip-text text-transparent">5 secondes</span>. Même hors ligne. Même en Mobile Money.
           </h1>
           <p className="mt-5 max-w-lg text-base text-muted-foreground sm:text-lg">
-            Point de vente tactile, stock intelligent, rapports IA et paiement mobile money — tout dans une seule application, pensée pour les commerçants d'Afrique de l'Ouest.
+            ZegCaisse encaisse, gère le stock et pilote votre activité avec l'IA — opérationnel en quelques minutes, pensé pour les réalités du commerce en Afrique de l'Ouest.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link to="/inscription" className="inline-flex h-12 items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-primary-glow px-6 font-display font-bold text-primary-foreground shadow-elegant">
@@ -171,24 +169,60 @@ function Hero() {
   );
 }
 
-function Modules() {
+function Pillars() {
   return (
-    <section id="modules" className="border-t border-border bg-muted/30 py-20">
+    <section id="produit" className="border-t border-border bg-muted/30 py-20">
       <div className="mx-auto max-w-6xl px-5">
         <div className="max-w-2xl">
-          <span className="text-xs font-semibold uppercase tracking-widest text-primary">Fonctionnalités</span>
-          <h2 className="mt-2 font-display text-3xl font-black tracking-tight sm:text-4xl">Tout ce qu'il vous faut, dans une seule app.</h2>
-          <p className="mt-3 text-muted-foreground">13 modules intégrés, conçus pour couvrir chaque geste de votre commerce, du comptoir à la comptabilité.</p>
+          <span className="text-xs font-semibold uppercase tracking-widest text-primary">ZegCaisse</span>
+          <h2 className="mt-2 font-display text-3xl font-black tracking-tight sm:text-4xl">Une seule application, quatre chantiers réglés.</h2>
+          <p className="mt-3 text-muted-foreground">Pas une liste de fonctionnalités — une manière de gérer un commerce, du comptoir à la comptabilité.</p>
         </div>
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {MODULES.map((m) => (
-            <motion.div key={m.name} whileHover={{ y: -4 }} className="rounded-2xl border border-border bg-card p-5">
-              <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-primary/15 to-accent/25 text-primary">
-                <m.icon className="h-5 w-5" />
+        <div className="mt-10 grid gap-5 sm:grid-cols-2">
+          {PILLARS.map((p) => (
+            <motion.div key={p.title} whileHover={{ y: -4 }} className="rounded-2xl border border-border bg-card p-6">
+              <div className="grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-primary/15 to-accent/25 text-primary">
+                <p.icon className="h-6 w-6" />
               </div>
-              <div className="mt-3 font-display text-base font-bold">{m.name}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{m.desc}</div>
+              <div className="mt-4 font-display text-lg font-bold">{p.title}</div>
+              <div className="mt-1 text-sm text-muted-foreground">{p.desc}</div>
+              <ul className="mt-4 space-y-1.5 text-sm">
+                {p.items.map((i) => (
+                  <li key={i} className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" /> {i}</li>
+                ))}
+              </ul>
             </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function VisionZegOS() {
+  return (
+    <section className="py-20">
+      <div className="mx-auto max-w-6xl px-5">
+        <div className="max-w-2xl">
+          <span className="text-xs font-semibold uppercase tracking-widest text-primary">La plateforme ZegOS</span>
+          <h2 className="mt-2 font-display text-3xl font-black tracking-tight sm:text-4xl">ZegCaisse est le premier maillon.</h2>
+          <p className="mt-3 text-muted-foreground">D'autres métiers rejoindront la même plateforme, sous le même compte — sans jamais avoir à migrer vos données.</p>
+        </div>
+        <div className="mt-10 grid gap-4 sm:grid-cols-3">
+          {ZEGOS_APPS.map((a) => (
+            <div key={a.name} className={`relative rounded-2xl border p-6 ${a.available ? "border-primary/30 bg-card shadow-elegant" : "border-border bg-muted/30 opacity-70"}`}>
+              {!a.available && (
+                <span className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                  <Clock className="h-2.5 w-2.5" /> À venir
+                </span>
+              )}
+              <div className={`grid h-12 w-12 place-items-center rounded-xl ${a.available ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
+                <a.icon className="h-6 w-6" />
+              </div>
+              <div className="mt-4 font-display text-lg font-bold">{a.name}</div>
+              <div className="mt-1 text-sm text-muted-foreground">{a.desc}</div>
+              {a.available && <span className="mt-3 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">Disponible aujourd'hui</span>}
+            </div>
           ))}
         </div>
       </div>
@@ -201,7 +235,7 @@ function Why() {
     <section className="py-20">
       <div className="mx-auto max-w-6xl px-5">
         <div className="text-center">
-          <span className="text-xs font-semibold uppercase tracking-widest text-primary">Pourquoi NovaCaisse</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-primary">Pourquoi ZegCaisse</span>
           <h2 className="mt-2 font-display text-3xl font-black tracking-tight sm:text-4xl">Fait pour les commerçants d'ici.</h2>
         </div>
         <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -334,37 +368,3 @@ function FinalCta() {
   );
 }
 
-function Footer() {
-  return (
-    <footer className="border-t border-border bg-card">
-      <div className="mx-auto grid max-w-6xl gap-8 px-5 py-12 sm:grid-cols-4">
-        <div className="sm:col-span-2">
-          <div className="flex items-center gap-2.5">
-            <BrandLogo className="h-9 w-9" iconClassName="h-4 w-4" />
-            <span className="font-display text-lg font-bold">NovaCaisse</span>
-          </div>
-          <p className="mt-3 max-w-sm text-xs text-muted-foreground">La caisse moderne pour les commerçants d'Afrique de l'Ouest. Édité par Digitorizon.</p>
-        </div>
-        <div>
-          <div className="font-display text-sm font-bold">Produit</div>
-          <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-            <li><a href="#modules" className="hover:text-foreground">Fonctionnalités</a></li>
-            <li><Link to="/tarifs" className="hover:text-foreground">Tarifs</Link></li>
-            <li><Link to="/connexion" className="hover:text-foreground">Connexion</Link></li>
-          </ul>
-        </div>
-        <div>
-          <div className="font-display text-sm font-bold">Contact</div>
-          <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-            <li>contact@novacaisse.bj</li>
-            <li>+229 97 00 00 00</li>
-            <li>Cotonou, Bénin</li>
-          </ul>
-        </div>
-      </div>
-      <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-        © 2026 NovaCaisse · Tous droits réservés
-      </div>
-    </footer>
-  );
-}
