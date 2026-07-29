@@ -8,6 +8,7 @@ import {
   type ShopMember, type TeamPermissions,
 } from "@/lib/data/hooks";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useCurrentPlan } from "@/lib/data/adminHooks";
 import { ROLE_LABEL, type AppRole } from "@/lib/roles";
 import { PERMISSIONS_MATRIX } from "@/lib/permissionsMatrix";
@@ -17,7 +18,16 @@ export const Route = createFileRoute("/app/equipe")({
   component: EquipePage,
 });
 
-const ALL_ROLES: AppRole[] = ["owner", "manager", "cashier", "stock", "accountant"];
+// front_desk/housekeeping (ZegHotel) et cashier/stock (ZegCaisse) ne sont
+// proposés que si l'application correspondante est active sur
+// l'organisation — le tableau "Permissions" reste spécifique à ZegCaisse
+// (les rôles hôtel n'y ont naturellement aucun droit).
+const SHARED_ROLES: AppRole[] = ["owner", "manager", "accountant"];
+const POS_ONLY_ROLES: AppRole[] = ["cashier", "stock"];
+const HOTEL_ONLY_ROLES: AppRole[] = ["front_desk", "housekeeping"];
+// Fixe (pas per-app) : PERMISSIONS_MATRIX ne documente que ZegCaisse,
+// front_desk/housekeeping n'y ont par nature aucune entrée.
+const MATRIX_ROLES: AppRole[] = [...SHARED_ROLES, ...POS_ONLY_ROLES];
 
 function initials(name: string | null | undefined) {
   const src = (name?.trim() || "?").trim();
@@ -29,11 +39,19 @@ function initials(name: string | null | undefined) {
 function EquipePage() {
   const [tab, setTab] = useState<"members" | "perms">("members");
   const { user } = useAuth();
+  const { currentOrganization } = useOrganization();
   const { data: myRole } = useMyRole();
   const { data: members = [], isLoading } = useShopMembers();
   const updateRole = useUpdateMemberRole();
   const removeMember = useRemoveMember();
   const [inviting, setInviting] = useState(false);
+
+  const activeApps = currentOrganization?.active_apps ?? ["pos"];
+  const ALL_ROLES: AppRole[] = [
+    ...SHARED_ROLES,
+    ...(activeApps.includes("pos") ? POS_ONLY_ROLES : []),
+    ...(activeApps.includes("hotel") ? HOTEL_ONLY_ROLES : []),
+  ];
 
   const isOwner = myRole === "owner";
   const roleCounts = new Set(members.map((m) => m.role)).size;
@@ -89,7 +107,7 @@ function EquipePage() {
                 </thead>
                 <tbody>
                   {members.map((m) => (
-                    <MemberRow key={m.id} member={m} isOwner={isOwner} isSelf={m.user_id === user?.id}
+                    <MemberRow key={m.id} member={m} isOwner={isOwner} isSelf={m.user_id === user?.id} roles={ALL_ROLES}
                       onRoleChange={(role) => updateRole.mutate({ memberId: m.id, role })}
                       onRemove={() => {
                         if (confirm("Retirer ce membre de l'équipe ? Son accès à l'organisation sera coupé immédiatement.")) {
@@ -117,7 +135,7 @@ function EquipePage() {
                 <thead>
                   <tr className="border-b border-border">
                     <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Donnée</th>
-                    {ALL_ROLES.map((r) => (
+                    {MATRIX_ROLES.map((r) => (
                       <th key={r} className="px-3 py-2 text-center text-xs font-semibold text-muted-foreground">{ROLE_LABEL[r]}</th>
                     ))}
                   </tr>
@@ -126,8 +144,8 @@ function EquipePage() {
                   {PERMISSIONS_MATRIX.map((row) => (
                     <tr key={row.table} className="border-b border-border/60">
                       <td className="px-3 py-2 font-medium">{row.label}</td>
-                      {ALL_ROLES.map((r) => (
-                        <td key={r} className="px-3 py-2 text-center font-mono text-xs">{row.cells[r]}</td>
+                      {MATRIX_ROLES.map((r) => (
+                        <td key={r} className="px-3 py-2 text-center font-mono text-xs">{row.cells[r] ?? "—"}</td>
                       ))}
                     </tr>
                   ))}
@@ -142,7 +160,7 @@ function EquipePage() {
         )}
       </div>
 
-      {inviting && <CreateMemberModal onClose={() => setInviting(false)} />}
+      {inviting && <CreateMemberModal onClose={() => setInviting(false)} roles={ALL_ROLES} />}
     </div>
   );
 }
@@ -203,8 +221,8 @@ function TogglesPanel({ isOwner }: { isOwner: boolean }) {
   );
 }
 
-function MemberRow({ member, isOwner, isSelf, onRoleChange, onRemove }: {
-  member: ShopMember; isOwner: boolean; isSelf: boolean;
+function MemberRow({ member, isOwner, isSelf, roles, onRoleChange, onRemove }: {
+  member: ShopMember; isOwner: boolean; isSelf: boolean; roles: AppRole[];
   onRoleChange: (role: AppRole) => void; onRemove: () => void;
 }) {
   const canEdit = isOwner && !isSelf;
@@ -226,7 +244,7 @@ function MemberRow({ member, isOwner, isSelf, onRoleChange, onRemove }: {
         {canEdit ? (
           <select value={member.role} onChange={(e) => onRoleChange(e.target.value as AppRole)}
             className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
-            {ALL_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+            {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
           </select>
         ) : (
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{ROLE_LABEL[member.role]}</span>
@@ -245,14 +263,14 @@ function MemberRow({ member, isOwner, isSelf, onRoleChange, onRemove }: {
   );
 }
 
-function CreateMemberModal({ onClose }: { onClose: () => void }) {
+function CreateMemberModal({ onClose, roles }: { onClose: () => void; roles: AppRole[] }) {
   const create = useCreateTeamMember();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
-  const [role, setRole] = useState<AppRole>("cashier");
+  const [role, setRole] = useState<AppRole>(() => (roles.includes("cashier") ? "cashier" : roles[0]));
   const [error, setError] = useState<string | null>(null);
 
   const inp = "w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
@@ -303,7 +321,7 @@ function CreateMemberModal({ onClose }: { onClose: () => void }) {
             <label className="block">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Rôle</span>
               <select value={role} onChange={(e) => setRole(e.target.value as AppRole)} className={inp}>
-                {ALL_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
               </select>
             </label>
           </div>

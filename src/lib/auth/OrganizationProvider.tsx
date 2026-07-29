@@ -12,6 +12,8 @@ export type Organization = {
   plan: string;
   trial_ends_at: string | null;
   suspended: boolean;
+  // Applications ZegOS actives ('pos', 'hotel'…) — migration 020c/020g.
+  active_apps: string[];
 };
 
 type OrganizationCtx = {
@@ -51,7 +53,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     setError(null);
     const { data, error: fetchErr } = await supabase
       .from("organizations")
-      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at,suspended")
+      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at,suspended,active_apps")
       .order("created_at", { ascending: true });
     if (fetchErr) {
       setError(fetchErr.message);

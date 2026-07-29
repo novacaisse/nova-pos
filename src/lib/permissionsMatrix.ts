@@ -5,7 +5,9 @@ import type { AppRole } from "./roles";
 // configurable côté Supabase — ces droits sont fixés par les policies RLS,
 // identiques pour toutes les boutiques. À maintenir en synchronisation
 // manuelle avec ces deux sources si une future migration change la matrice.
-export type PermRow = { table: string; label: string; cells: Record<AppRole, string> };
+// Spécifique à ZegCaisse — front_desk/housekeeping (ZegHotel) n'ont
+// naturellement aucune entrée ici (Partial : absent = "—", pas d'accès).
+export type PermRow = { table: string; label: string; cells: Partial<Record<AppRole, string>> };
 
 export const PERMISSIONS_MATRIX: PermRow[] = [
   { table: "categories", label: "Catégories", cells: { owner: "SIUD", manager: "SIUD", cashier: "S", stock: "SIUD", accountant: "S" } },

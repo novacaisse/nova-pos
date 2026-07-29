@@ -23,7 +23,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-const VALID_ROLES = ["owner", "manager", "cashier", "stock", "accountant"];
+const VALID_ROLES = ["owner", "manager", "cashier", "stock", "accountant", "front_desk", "housekeeping"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
