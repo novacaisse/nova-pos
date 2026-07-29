@@ -23,6 +23,7 @@ import {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  LayoutGrid,
 } from "lucide-react";
 import {
   Sidebar,
@@ -58,6 +59,7 @@ const ICONS = {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  LayoutGrid,
 } as const;
 
 type NavItem = {
@@ -95,6 +97,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
   ],
   admin: [
+    { title: "Applications", url: "/app/applications", icon: "LayoutGrid" },
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
   ],
@@ -123,6 +126,9 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/hotel/reservations": ["housekeeping"],
   "/app/hotel/rapports": ["housekeeping"],
   "/app/hotel/housekeeping": ["accountant"],
+  // Activer/désactiver une application change ce que voit toute l'équipe —
+  // réservé au propriétaire (voir app.applications.tsx).
+  "/app/applications": ["manager", "cashier", "stock", "accountant", "front_desk", "housekeeping"],
 };
 
 export function AppSidebar() {

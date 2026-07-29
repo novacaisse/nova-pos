@@ -37,6 +37,7 @@ import { Route as AppDevisRouteImport } from './routes/app.devis'
 import { Route as AppDepensesRouteImport } from './routes/app.depenses'
 import { Route as AppClientsRouteImport } from './routes/app.clients'
 import { Route as AppCaisseRouteImport } from './routes/app.caisse'
+import { Route as AppApplicationsRouteImport } from './routes/app.applications'
 import { Route as AppAbonnementRouteImport } from './routes/app.abonnement'
 import { Route as AdminSupportRouteImport } from './routes/admin.support'
 import { Route as AdminProfilRouteImport } from './routes/admin.profil'
@@ -196,6 +197,11 @@ const AppCaisseRoute = AppCaisseRouteImport.update({
   path: '/caisse',
   getParentRoute: () => AppRoute,
 } as any)
+const AppApplicationsRoute = AppApplicationsRouteImport.update({
+  id: '/applications',
+  path: '/applications',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAbonnementRoute = AppAbonnementRouteImport.update({
   id: '/abonnement',
   path: '/abonnement',
@@ -298,6 +304,7 @@ export interface FileRoutesByFullPath {
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
+  '/app/applications': typeof AppApplicationsRoute
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
   '/app/depenses': typeof AppDepensesRoute
@@ -342,6 +349,7 @@ export interface FileRoutesByTo {
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
+  '/app/applications': typeof AppApplicationsRoute
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
   '/app/depenses': typeof AppDepensesRoute
@@ -387,6 +395,7 @@ export interface FileRoutesById {
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
+  '/app/applications': typeof AppApplicationsRoute
   '/app/caisse': typeof AppCaisseRoute
   '/app/clients': typeof AppClientsRoute
   '/app/depenses': typeof AppDepensesRoute
@@ -436,6 +445,7 @@ export interface FileRouteTypes {
     | '/admin/profil'
     | '/admin/support'
     | '/app/abonnement'
+    | '/app/applications'
     | '/app/caisse'
     | '/app/clients'
     | '/app/depenses'
@@ -480,6 +490,7 @@ export interface FileRouteTypes {
     | '/admin/profil'
     | '/admin/support'
     | '/app/abonnement'
+    | '/app/applications'
     | '/app/caisse'
     | '/app/clients'
     | '/app/depenses'
@@ -524,6 +535,7 @@ export interface FileRouteTypes {
     | '/admin/profil'
     | '/admin/support'
     | '/app/abonnement'
+    | '/app/applications'
     | '/app/caisse'
     | '/app/clients'
     | '/app/depenses'
@@ -765,6 +777,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCaisseRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/applications': {
+      id: '/app/applications'
+      path: '/applications'
+      fullPath: '/app/applications'
+      preLoaderRoute: typeof AppApplicationsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/abonnement': {
       id: '/app/abonnement'
       path: '/abonnement'
@@ -961,6 +980,7 @@ const AppVentesRouteWithChildren = AppVentesRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAbonnementRoute: typeof AppAbonnementRoute
+  AppApplicationsRoute: typeof AppApplicationsRoute
   AppCaisseRoute: typeof AppCaisseRoute
   AppClientsRoute: typeof AppClientsRoute
   AppDepensesRoute: typeof AppDepensesRoute
@@ -982,6 +1002,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAbonnementRoute: AppAbonnementRoute,
+  AppApplicationsRoute: AppApplicationsRoute,
   AppCaisseRoute: AppCaisseRoute,
   AppClientsRoute: AppClientsRoute,
   AppDepensesRoute: AppDepensesRoute,

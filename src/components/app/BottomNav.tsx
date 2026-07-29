@@ -18,6 +18,7 @@ import {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  LayoutGrid,
   X,
 } from "lucide-react";
 import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
@@ -79,13 +80,18 @@ export function BottomNav() {
   const isGatableModule = (to: string) => PLAN_MODULES.some((m) => m.url === to);
   const included = (item: Item) => !planModules || !isGatableModule(item.to) || planModules.includes(item.to);
 
+  const isOwner = myRole === "owner";
+  // Réservé au propriétaire (voir app.applications.tsx) — change ce que
+  // voit toute l'équipe, jamais proposé aux autres rôles.
+  const applicationsItem: Item[] = isOwner ? [{ label: "Apps", to: "/app/applications", icon: LayoutGrid }] : [];
+
   const isHotelOnlyRole = myRole === "housekeeping" || myRole === "front_desk";
   const primary = isHotelOnlyRole
     ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY)
     : PRIMARY.filter(included);
   const more = isHotelOnlyRole
     ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : HOTEL_MORE)
-    : [...MORE.filter(included), ...(activeApps.includes("hotel") ? [{ label: "Hôtel", to: "/app/hotel", icon: BedDouble }] : [])];
+    : [...MORE.filter(included), ...(activeApps.includes("hotel") ? [{ label: "Hôtel", to: "/app/hotel", icon: BedDouble }] : []), ...applicationsItem];
 
   return (
     <>
