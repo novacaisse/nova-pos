@@ -7,7 +7,13 @@
 create extension if not exists "pgcrypto";
 
 -- =============== ENUMS ===============
-do $$ begin create type public.app_role as enum ('owner','manager','cashier','stock','accountant');
+-- front_desk/housekeeping (migration 020f, ZegHotel) — owner/manager/accountant
+-- sont partagés entre ZegCaisse et ZegHotel, cashier/stock restent spécifiques
+-- ZegCaisse. Une instance fraîche crée directement l'enum complet ; une
+-- instance existante doit passer par ALTER TYPE ... ADD VALUE (020f), qui ne
+-- peut pas être exécuté dans la même transaction qu'un usage de la nouvelle
+-- valeur — voir 020f_hotel_roles.sql.
+do $$ begin create type public.app_role as enum ('owner','manager','cashier','stock','accountant','front_desk','housekeeping');
 exception when duplicate_object then null; end $$;
 do $$ begin create type public.sale_status as enum ('draft','completed','refunded','partially_refunded','cancelled');
 exception when duplicate_object then null; end $$;
@@ -1306,15 +1312,563 @@ drop policy if exists app_branding_delete on storage.objects;
 create policy app_branding_delete on storage.objects for delete to authenticated
   using (bucket_id = 'app-branding' and public.is_super_admin());
 
+-- =============== ZEGHOTEL (migrations 020f-020j) ===============
+-- Regroupé ici en un seul bloc par module plutôt qu'éclaté dans les
+-- sections ENUMS/TABLES/RLS/TRIGGERS ci-dessus (qui restent, elles,
+-- spécifiques à ZegCaisse) : plus simple à auditer et à faire évoluer
+-- comme un tout cohérent. Le type app_role ci-dessus a déjà été mis à
+-- jour avec front_desk/housekeeping pour qu'une instance fraîche crée
+-- l'enum complet directement.
+
+-- Migration 020f — ZegHotel, étape 1/4 : ajoute les rôles hôteliers à
+-- l'enum app_role existant (owner/manager/accountant déjà présents et
+-- couvrent Owner/Manager/Comptable ; il manque Réceptionniste et
+-- Gouvernante).
+--
+-- IMPORTANT — à exécuter SEULE, dans sa propre exécution, avant les
+-- migrations 020g/020h/020i/020j : Postgres interdit d'utiliser une
+-- nouvelle valeur d'enum dans la même transaction que celle qui l'a
+-- ajoutée (erreur "unsafe use of new value of enum type"). Si le SQL
+-- Editor Supabase exécute tout le collage en une seule transaction
+-- implicite, coller ce fichier seul, valider, PUIS coller les suivants.
+
+alter type public.app_role add value if not exists 'front_desk';
+alter type public.app_role add value if not exists 'housekeeping';
+
+-- Migration 020g — ZegHotel, étape 2/4 : tables de configuration
+-- (chambres, tarification, comptes corporate, réglages, canaux).
+-- À exécuter après 020f (rôles front_desk/housekeeping déjà commités).
+--
+-- Convention RLS : chaque policy réutilise has_organization_access() /
+-- has_role_in_organization() / has_any_role_in_organization() — mêmes
+-- fonctions que ZegCaisse, aucune nouvelle fonction de sécurité créée
+-- pour ce module. Owner et manager ont un accès équivalent partout
+-- (comme sur ZegCaisse) ; les policies ci-dessous ne les distinguent
+-- donc pas sauf mention contraire.
+
+create extension if not exists "btree_gist";
+
+-- =============== room_types ===============
+create table if not exists public.hotel_room_types (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  description text,
+  capacity_adults integer not null default 2,
+  capacity_children integer not null default 0,
+  amenities jsonb not null default '[]'::jsonb,
+  base_price numeric(14,2) not null,
+  image_url text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_room_types_org on public.hotel_room_types(organization_id);
+alter table public.hotel_room_types enable row level security;
+
+-- Lecture : tout membre (nécessaire pour la réservation/le calendrier).
+-- Écriture (tarifs de base) : owner/manager uniquement — la page
+-- Paramètres > Tarification demandée doit rester pilotable par eux seuls,
+-- pas par front_desk/housekeeping.
+drop policy if exists hotel_room_types_select on public.hotel_room_types;
+create policy hotel_room_types_select on public.hotel_room_types for select to authenticated
+  using (public.has_organization_access(organization_id));
+drop policy if exists hotel_room_types_write on public.hotel_room_types;
+create policy hotel_room_types_write on public.hotel_room_types for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== rooms ===============
+create table if not exists public.hotel_rooms (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  room_type_id uuid not null references public.hotel_room_types(id) on delete restrict,
+  number text not null,
+  floor text,
+  housekeeping_status text not null default 'clean'
+    check (housekeeping_status in ('clean','dirty','inspected','out_of_service')),
+  notes text,
+  created_at timestamptz not null default now(),
+  unique (organization_id, number)
+);
+create index if not exists idx_hotel_rooms_org on public.hotel_rooms(organization_id);
+create index if not exists idx_hotel_rooms_type on public.hotel_rooms(room_type_id);
+alter table public.hotel_rooms enable row level security;
+
+-- Lecture : tout membre. Écriture "structurelle" (numéro, type, étage) :
+-- owner/manager. Statut housekeeping : la gouvernante doit pouvoir le
+-- changer — accès étendu à toute la ligne pour rester simple en RLS
+-- (Postgres ne permet pas de restreindre une policy UPDATE à une seule
+-- colonne sans trigger dédié) ; l'UI ne lui expose que le changement de
+-- statut, mais un accès API direct pourrait théoriquement modifier numéro/
+-- étage — simplification V1 assumée, à durcir plus tard si besoin réel.
+drop policy if exists hotel_rooms_select on public.hotel_rooms;
+create policy hotel_rooms_select on public.hotel_rooms for select to authenticated
+  using (public.has_organization_access(organization_id));
+drop policy if exists hotel_rooms_insert on public.hotel_rooms;
+create policy hotel_rooms_insert on public.hotel_rooms for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+drop policy if exists hotel_rooms_update on public.hotel_rooms;
+create policy hotel_rooms_update on public.hotel_rooms for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]));
+drop policy if exists hotel_rooms_delete on public.hotel_rooms;
+create policy hotel_rooms_delete on public.hotel_rooms for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== rate_plans ===============
+create table if not exists public.hotel_rate_plans (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  room_type_id uuid not null references public.hotel_room_types(id) on delete cascade,
+  name text not null,
+  includes_breakfast boolean not null default false,
+  refundable boolean not null default true,
+  price_adjustment_pct numeric(5,2) not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_rate_plans_org on public.hotel_rate_plans(organization_id);
+alter table public.hotel_rate_plans enable row level security;
+drop policy if exists hotel_rate_plans_select on public.hotel_rate_plans;
+create policy hotel_rate_plans_select on public.hotel_rate_plans for select to authenticated
+  using (public.has_organization_access(organization_id));
+drop policy if exists hotel_rate_plans_write on public.hotel_rate_plans;
+create policy hotel_rate_plans_write on public.hotel_rate_plans for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== seasonal_rates ===============
+create table if not exists public.hotel_seasonal_rates (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  room_type_id uuid not null references public.hotel_room_types(id) on delete cascade,
+  name text,
+  start_date date not null,
+  end_date date not null,
+  price_override numeric(14,2),
+  days_of_week integer[],
+  created_at timestamptz not null default now(),
+  check (end_date >= start_date)
+);
+create index if not exists idx_hotel_seasonal_rates_org on public.hotel_seasonal_rates(organization_id);
+create index if not exists idx_hotel_seasonal_rates_type on public.hotel_seasonal_rates(room_type_id);
+alter table public.hotel_seasonal_rates enable row level security;
+drop policy if exists hotel_seasonal_rates_select on public.hotel_seasonal_rates;
+create policy hotel_seasonal_rates_select on public.hotel_seasonal_rates for select to authenticated
+  using (public.has_organization_access(organization_id));
+drop policy if exists hotel_seasonal_rates_write on public.hotel_seasonal_rates;
+create policy hotel_seasonal_rates_write on public.hotel_seasonal_rates for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== rate_restrictions ===============
+create table if not exists public.hotel_rate_restrictions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  room_type_id uuid references public.hotel_room_types(id) on delete cascade,
+  start_date date not null,
+  end_date date not null,
+  min_stay integer,
+  stop_sell boolean not null default false,
+  closed_to_arrival boolean not null default false,
+  created_at timestamptz not null default now(),
+  check (end_date >= start_date)
+);
+create index if not exists idx_hotel_rate_restrictions_org on public.hotel_rate_restrictions(organization_id);
+alter table public.hotel_rate_restrictions enable row level security;
+drop policy if exists hotel_rate_restrictions_select on public.hotel_rate_restrictions;
+create policy hotel_rate_restrictions_select on public.hotel_rate_restrictions for select to authenticated
+  using (public.has_organization_access(organization_id));
+drop policy if exists hotel_rate_restrictions_write on public.hotel_rate_restrictions;
+create policy hotel_rate_restrictions_write on public.hotel_rate_restrictions for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== corporate_accounts ===============
+create table if not exists public.hotel_corporate_accounts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  contact_name text,
+  contact_email text,
+  contact_phone text,
+  negotiated_discount_pct numeric(5,2) not null default 0,
+  billing_terms text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_corporate_org on public.hotel_corporate_accounts(organization_id);
+alter table public.hotel_corporate_accounts enable row level security;
+-- Lecture étendue à accountant/front_desk (besoin de facturer/reconnaître
+-- un compte entreprise au moment de la réservation) ; écriture (tarif
+-- négocié, conditions de facturation) réservée à owner/manager.
+drop policy if exists hotel_corporate_select on public.hotel_corporate_accounts;
+create policy hotel_corporate_select on public.hotel_corporate_accounts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+drop policy if exists hotel_corporate_write on public.hotel_corporate_accounts;
+create policy hotel_corporate_write on public.hotel_corporate_accounts for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== hotel_settings ===============
+create table if not exists public.hotel_settings (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  secondary_currency text,
+  city_tax_enabled boolean not null default false,
+  city_tax_amount numeric(14,2) not null default 0,
+  default_cancellation_policy text,
+  occupancy_pricing_enabled boolean not null default false,
+  occupancy_pricing_threshold_pct numeric(5,2) not null default 80,
+  occupancy_pricing_adjustment_pct numeric(5,2) not null default 10,
+  updated_at timestamptz not null default now()
+);
+alter table public.hotel_settings enable row level security;
+-- Lecture étendue (front_desk/accountant peuvent avoir besoin de
+-- connaître la politique d'annulation ou la taxe de séjour active) ;
+-- écriture strictement owner/manager (page Paramètres > Tarification).
+drop policy if exists hotel_settings_select on public.hotel_settings;
+create policy hotel_settings_select on public.hotel_settings for select to authenticated
+  using (public.has_organization_access(organization_id));
+drop policy if exists hotel_settings_write on public.hotel_settings;
+create policy hotel_settings_write on public.hotel_settings for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== channels (structure seule, hors scope V1) ===============
+-- Aucune logique de synchronisation — juste la table pour ne pas avoir à
+-- migrer le schéma quand cette intégration sera vraiment développée.
+create table if not exists public.hotel_channels (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  is_active boolean not null default false,
+  external_id text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_channels_org on public.hotel_channels(organization_id);
+alter table public.hotel_channels enable row level security;
+drop policy if exists hotel_channels_all on public.hotel_channels;
+create policy hotel_channels_all on public.hotel_channels for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Migration 020h — ZegHotel, étape 3/4 : clients, réservations et
+-- attribution des chambres, avec protection anti-double-réservation au
+-- niveau base (contrainte d'exclusion Postgres, pas seulement côté client).
+-- À exécuter après 020f et 020g.
+
+-- =============== guests ===============
+create table if not exists public.hotel_guests (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  full_name text not null,
+  email text,
+  phone text,
+  id_document_type text,
+  id_document_number text,
+  nationality text,
+  address text,
+  notes text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_guests_org on public.hotel_guests(organization_id);
+alter table public.hotel_guests enable row level security;
+-- Housekeeping exclu délibérément (rôle scopé "statuts chambres et
+-- tâches de nettoyage uniquement", voir 020g) — aucune donnée client/
+-- financière ne doit lui être accessible.
+drop policy if exists hotel_guests_select on public.hotel_guests;
+create policy hotel_guests_select on public.hotel_guests for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+drop policy if exists hotel_guests_write on public.hotel_guests;
+create policy hotel_guests_write on public.hotel_guests for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+
+-- =============== reservations ===============
+create table if not exists public.hotel_reservations (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  guest_id uuid not null references public.hotel_guests(id) on delete restrict,
+  corporate_account_id uuid references public.hotel_corporate_accounts(id) on delete set null,
+  check_in date not null,
+  check_out date not null,
+  status text not null default 'pending'
+    check (status in ('pending','confirmed','checked_in','checked_out','cancelled','no_show')),
+  rate_plan_id uuid references public.hotel_rate_plans(id) on delete set null,
+  channel text not null default 'direct',
+  adults integer not null default 1,
+  children integer not null default 0,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  cancelled_at timestamptz,
+  cancellation_reason text,
+  check (check_out > check_in)
+);
+create index if not exists idx_hotel_reservations_org on public.hotel_reservations(organization_id);
+create index if not exists idx_hotel_reservations_guest on public.hotel_reservations(guest_id);
+create index if not exists idx_hotel_reservations_dates on public.hotel_reservations(organization_id, check_in, check_out);
+alter table public.hotel_reservations enable row level security;
+drop policy if exists hotel_reservations_select on public.hotel_reservations;
+create policy hotel_reservations_select on public.hotel_reservations for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+drop policy if exists hotel_reservations_insert on public.hotel_reservations;
+create policy hotel_reservations_insert on public.hotel_reservations for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+drop policy if exists hotel_reservations_update on public.hotel_reservations;
+create policy hotel_reservations_update on public.hotel_reservations for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+-- Suppression définitive (hors annulation, qui est un changement de
+-- statut) réservée à owner/manager — conserve l'historique par défaut.
+drop policy if exists hotel_reservations_delete on public.hotel_reservations;
+create policy hotel_reservations_delete on public.hotel_reservations for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== reservation_rooms ===============
+-- check_in/check_out/status sont dénormalisés depuis hotel_reservations
+-- et synchronisés par trigger (jamais écrits directement par le client) :
+-- une contrainte d'exclusion ne peut porter que sur des colonnes de cette
+-- même table, impossible de contraindre directement via une jointure.
+create table if not exists public.hotel_reservation_rooms (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reservation_id uuid not null references public.hotel_reservations(id) on delete cascade,
+  room_id uuid not null references public.hotel_rooms(id) on delete restrict,
+  rate_amount numeric(14,2) not null,
+  check_in date not null,
+  check_out date not null,
+  status text not null,
+  created_at timestamptz not null default now(),
+  unique (reservation_id, room_id),
+  -- Bloque tout chevauchement de dates sur la même chambre tant que la
+  -- réservation est "active" (pending/confirmed/checked_in) — cancelled/
+  -- no_show/checked_out libèrent la chambre pour de nouvelles réservations
+  -- sur les mêmes dates.
+  exclude using gist (
+    room_id with =,
+    daterange(check_in, check_out) with &&
+  ) where (status in ('pending','confirmed','checked_in'))
+);
+create index if not exists idx_hotel_resv_rooms_org on public.hotel_reservation_rooms(organization_id);
+create index if not exists idx_hotel_resv_rooms_reservation on public.hotel_reservation_rooms(reservation_id);
+create index if not exists idx_hotel_resv_rooms_room on public.hotel_reservation_rooms(room_id);
+alter table public.hotel_reservation_rooms enable row level security;
+drop policy if exists hotel_resv_rooms_select on public.hotel_reservation_rooms;
+create policy hotel_resv_rooms_select on public.hotel_reservation_rooms for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+drop policy if exists hotel_resv_rooms_write on public.hotel_reservation_rooms;
+create policy hotel_resv_rooms_write on public.hotel_reservation_rooms for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+
+-- Remplit automatiquement check_in/check_out/status à l'insertion depuis
+-- la réservation parente — le client n'a jamais à les fournir ni à les
+-- tenir synchronisés lui-même.
+create or replace function public.hotel_sync_reservation_room_on_insert()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_reservation public.hotel_reservations;
+begin
+  select * into v_reservation from public.hotel_reservations where id = new.reservation_id;
+  if not found then
+    raise exception 'Réservation introuvable.';
+  end if;
+  new.check_in := v_reservation.check_in;
+  new.check_out := v_reservation.check_out;
+  new.status := v_reservation.status;
+  return new;
+end;
+$$;
+drop trigger if exists trg_hotel_resv_room_insert on public.hotel_reservation_rooms;
+create trigger trg_hotel_resv_room_insert
+  before insert on public.hotel_reservation_rooms
+  for each row execute function public.hotel_sync_reservation_room_on_insert();
+
+-- Répercute tout changement de dates/statut de la réservation sur les
+-- lignes hotel_reservation_rooms existantes (ex. annulation : libère la
+-- chambre pour de nouvelles réservations ; changement de dates : la
+-- contrainte d'exclusion protège aussi contre un nouveau chevauchement).
+create or replace function public.hotel_sync_reservation_room_on_update()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.check_in is distinct from old.check_in
+     or new.check_out is distinct from old.check_out
+     or new.status is distinct from old.status then
+    update public.hotel_reservation_rooms
+    set check_in = new.check_in, check_out = new.check_out, status = new.status
+    where reservation_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_hotel_reservations_sync on public.hotel_reservations;
+create trigger trg_hotel_reservations_sync
+  after update on public.hotel_reservations
+  for each row execute function public.hotel_sync_reservation_room_on_update();
+
+-- Migration 020i — ZegHotel, étape 4/4 (partie facturation) : folios,
+-- charges et paiements. À exécuter après 020f/020g/020h.
+--
+-- Un seul folio par réservation en V1 (pas de folio par chambre pour un
+-- séjour multi-chambres) — correspond à "dossier de charges actif d'un
+-- séjour" au singulier dans la demande initiale.
+
+create table if not exists public.hotel_folios (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reservation_id uuid not null references public.hotel_reservations(id) on delete cascade,
+  status text not null default 'open' check (status in ('open','closed')),
+  opened_at timestamptz not null default now(),
+  closed_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (reservation_id)
+);
+create index if not exists idx_hotel_folios_org on public.hotel_folios(organization_id);
+alter table public.hotel_folios enable row level security;
+drop policy if exists hotel_folios_select on public.hotel_folios;
+create policy hotel_folios_select on public.hotel_folios for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+drop policy if exists hotel_folios_write on public.hotel_folios;
+create policy hotel_folios_write on public.hotel_folios for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+
+create table if not exists public.hotel_folio_charges (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  folio_id uuid not null references public.hotel_folios(id) on delete cascade,
+  kind text not null check (kind in ('room','extra','penalty','tax','discount')),
+  description text not null,
+  amount numeric(14,2) not null,
+  quantity integer not null default 1,
+  charge_date date not null default current_date,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_folio_charges_org on public.hotel_folio_charges(organization_id);
+create index if not exists idx_hotel_folio_charges_folio on public.hotel_folio_charges(folio_id);
+alter table public.hotel_folio_charges enable row level security;
+drop policy if exists hotel_folio_charges_select on public.hotel_folio_charges;
+create policy hotel_folio_charges_select on public.hotel_folio_charges for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+drop policy if exists hotel_folio_charges_write on public.hotel_folio_charges;
+create policy hotel_folio_charges_write on public.hotel_folio_charges for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+
+-- Nommée hotel_payments (pas payments) : public.payments existe déjà
+-- côté ZegCaisse (paiements de vente) — collision directe évitée.
+create table if not exists public.hotel_payments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  folio_id uuid not null references public.hotel_folios(id) on delete cascade,
+  amount numeric(14,2) not null,
+  method text not null check (method in ('cash','mobile_money','card','bank_transfer')),
+  kind text not null default 'payment' check (kind in ('deposit','payment','refund')),
+  reference text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_payments_org on public.hotel_payments(organization_id);
+create index if not exists idx_hotel_payments_folio on public.hotel_payments(folio_id);
+alter table public.hotel_payments enable row level security;
+drop policy if exists hotel_payments_select on public.hotel_payments;
+create policy hotel_payments_select on public.hotel_payments for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+drop policy if exists hotel_payments_insert on public.hotel_payments;
+create policy hotel_payments_insert on public.hotel_payments for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+-- Modifier/supprimer un paiement déjà enregistré est réservé à
+-- owner/manager (intégrité financière — un front_desk qui se trompe
+-- doit faire corriger par son responsable, pas éditer directement).
+drop policy if exists hotel_payments_update on public.hotel_payments;
+create policy hotel_payments_update on public.hotel_payments for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+drop policy if exists hotel_payments_delete on public.hotel_payments;
+create policy hotel_payments_delete on public.hotel_payments for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Migration 020j — ZegHotel, étape finale : tâches de ménage et
+-- incidents de maintenance. À exécuter après 020f/020g/020h/020i.
+
+create table if not exists public.hotel_housekeeping_tasks (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  room_id uuid not null references public.hotel_rooms(id) on delete cascade,
+  task_date date not null default current_date,
+  kind text not null default 'cleaning' check (kind in ('cleaning','turnover','inspection')),
+  status text not null default 'pending' check (status in ('pending','in_progress','done')),
+  assigned_to uuid references auth.users(id) on delete set null,
+  notes text,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+create index if not exists idx_hotel_housekeeping_org on public.hotel_housekeeping_tasks(organization_id);
+create index if not exists idx_hotel_housekeeping_room on public.hotel_housekeeping_tasks(room_id);
+create index if not exists idx_hotel_housekeeping_date on public.hotel_housekeeping_tasks(organization_id, task_date);
+alter table public.hotel_housekeeping_tasks enable row level security;
+-- Génération des tâches (owner/manager/front_desk, typiquement depuis un
+-- bouton "générer les tâches du jour") ; la gouvernante lit et met à jour
+-- le statut de ses tâches, jamais n'en crée ni n'en supprime.
+drop policy if exists hotel_housekeeping_select on public.hotel_housekeeping_tasks;
+create policy hotel_housekeeping_select on public.hotel_housekeeping_tasks for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+drop policy if exists hotel_housekeeping_insert on public.hotel_housekeeping_tasks;
+create policy hotel_housekeeping_insert on public.hotel_housekeeping_tasks for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+drop policy if exists hotel_housekeeping_update on public.hotel_housekeeping_tasks;
+create policy hotel_housekeeping_update on public.hotel_housekeeping_tasks for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+drop policy if exists hotel_housekeeping_delete on public.hotel_housekeeping_tasks;
+create policy hotel_housekeeping_delete on public.hotel_housekeeping_tasks for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.hotel_maintenance_tickets (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  room_id uuid not null references public.hotel_rooms(id) on delete cascade,
+  title text not null,
+  description text,
+  status text not null default 'open' check (status in ('open','in_progress','resolved')),
+  priority text not null default 'normal' check (priority in ('low','normal','high','urgent')),
+  reported_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+create index if not exists idx_hotel_maintenance_org on public.hotel_maintenance_tickets(organization_id);
+create index if not exists idx_hotel_maintenance_room on public.hotel_maintenance_tickets(room_id);
+alter table public.hotel_maintenance_tickets enable row level security;
+-- Tout le monde qui peut voir une chambre peut signaler un incident
+-- (housekeeping/front_desk en particulier) ; suivi/résolution réservé à
+-- owner/manager/housekeeping (souvent la gouvernante qui gère aussi la
+-- coordination avec un technicien).
+drop policy if exists hotel_maintenance_select on public.hotel_maintenance_tickets;
+create policy hotel_maintenance_select on public.hotel_maintenance_tickets for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+drop policy if exists hotel_maintenance_insert on public.hotel_maintenance_tickets;
+create policy hotel_maintenance_insert on public.hotel_maintenance_tickets for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+drop policy if exists hotel_maintenance_update on public.hotel_maintenance_tickets;
+create policy hotel_maintenance_update on public.hotel_maintenance_tickets for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]));
+drop policy if exists hotel_maintenance_delete on public.hotel_maintenance_tickets;
+create policy hotel_maintenance_delete on public.hotel_maintenance_tickets for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
 -- =============== FIN ===============
--- Rappel: RLS activé sur les 25 tables (19 + super_admins, plans,
--- admin_impersonations, support_tickets, support_messages).
+-- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
+-- admin_impersonations, support_tickets, support_messages) + les 15 tables
+-- ZegHotel (hotel_*, migrations 020f-020j).
 -- Aucune policy USING (true) — seule "plans" a une lecture ouverte à
 -- "anon" (formules publiques), volontairement et limitée à is_active=true.
 -- Permissions différenciées par app_role sur 14 des 15 tables métier
--- (notifications reste ouverte à tout membre ; stock_levels est en lecture
--- seule pour tous — voir db/AUDIT-SECURITE.md pour la matrice complète).
+-- ZegCaisse (notifications reste ouverte à tout membre ; stock_levels est en
+-- lecture seule pour tous — voir db/AUDIT-SECURITE.md pour la matrice
+-- complète) et sur les 15 tables ZegHotel (front_desk/housekeeping scopés
+-- comme documenté dans ARCHITECTURE.md).
 -- Super Admin (is_super_admin()) : accès étendu strictement limité à
 -- organizations, subscriptions, subscription_payments, profiles, plans,
 -- admin_impersonations, support_tickets, support_messages — jamais aux
--- données opérationnelles des boutiques (sales/stock/customers/etc.).
+-- données opérationnelles des boutiques (sales/stock/customers/etc.) ni aux
+-- tables ZegHotel.
