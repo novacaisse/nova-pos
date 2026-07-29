@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useMyRole } from "@/lib/data/hooks";
 import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import type { AppRole } from "@/lib/roles";
 import {
   LayoutDashboard,
@@ -18,6 +19,10 @@ import {
   FileText,
   Sparkles,
   X,
+  BedDouble,
+  CalendarRange,
+  DoorClosed,
+  Sparkle,
 } from "lucide-react";
 import {
   Sidebar,
@@ -49,6 +54,10 @@ const ICONS = {
   Settings,
   FileText,
   Sparkles,
+  BedDouble,
+  CalendarRange,
+  DoorClosed,
+  Sparkle,
 } as const;
 
 type NavItem = {
@@ -78,6 +87,13 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Stock", url: "/app/stock", icon: "Warehouse" },
     { title: "Fournisseurs", url: "/app/fournisseurs", icon: "Truck" },
   ],
+  hotel: [
+    { title: "Tableau de bord", url: "/app/hotel", icon: "BedDouble" },
+    { title: "Réservations", url: "/app/hotel/reservations", icon: "CalendarRange" },
+    { title: "Chambres", url: "/app/hotel/rooms", icon: "DoorClosed" },
+    { title: "Housekeeping", url: "/app/hotel/housekeeping", icon: "Sparkle" },
+    { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
+  ],
   admin: [
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
@@ -87,13 +103,26 @@ const NAV: Record<string, NavItem[]> = {
 // Masque les liens vers un écran où le rôle courant n'a aucun droit de
 // lecture côté RLS (migration 002) — évite un écran vide/en erreur plutôt
 // qu'une restriction de sécurité (la RLS reste la seule barrière réelle).
+// front_desk/housekeeping (ZegHotel) n'ont RLS-wise aucun accès aux tables
+// ZegCaisse (policies antérieures à leur création, jamais mises à jour) —
+// masqué partout ici plutôt que de dupliquer la liste sur chaque ligne.
 const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
-  "/app/caisse": ["stock"],
-  "/app/ventes": ["stock"],
-  "/app/devis": ["stock"],
-  "/app/clients": ["stock"],
-  "/app/fournisseurs": ["cashier"],
-  "/app/depenses": ["cashier", "stock"],
+  "/app/caisse": ["stock", "front_desk", "housekeeping"],
+  "/app/ventes": ["stock", "front_desk", "housekeeping"],
+  "/app/devis": ["stock", "front_desk", "housekeeping"],
+  "/app/clients": ["stock", "front_desk", "housekeeping"],
+  "/app/produits": ["front_desk", "housekeeping"],
+  "/app/stock": ["front_desk", "housekeeping"],
+  "/app/fournisseurs": ["cashier", "front_desk", "housekeeping"],
+  "/app/depenses": ["cashier", "stock", "front_desk", "housekeeping"],
+  "/app/rapports": ["front_desk", "housekeeping"],
+  // Hôtel : housekeeping n'a RLS-wise aucun accès aux réservations/clients
+  // (données financières/personnelles hors de son périmètre, cf. 020h/020g) ;
+  // accountant n'a pas accès aux tâches de ménage (020j).
+  "/app/hotel": ["housekeeping"],
+  "/app/hotel/reservations": ["housekeeping"],
+  "/app/hotel/rapports": ["housekeeping"],
+  "/app/hotel/housekeeping": ["accountant"],
 };
 
 export function AppSidebar() {
@@ -102,6 +131,8 @@ export function AppSidebar() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { data: myRole } = useMyRole();
   const planModules = useCurrentPlanModules();
+  const { currentOrganization } = useOrganization();
+  const activeApps = currentOrganization?.active_apps ?? ["pos"];
 
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
@@ -186,9 +217,10 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="gap-1 px-2 py-3">
-        {renderGroup("Pilotage", NAV.pilotage)}
-        {renderGroup("Opération", NAV.operation)}
-        {renderGroup("Catalogue", NAV.catalogue)}
+        {activeApps.includes("pos") && renderGroup("Pilotage", NAV.pilotage)}
+        {activeApps.includes("pos") && renderGroup("Opération", NAV.operation)}
+        {activeApps.includes("pos") && renderGroup("Catalogue", NAV.catalogue)}
+        {activeApps.includes("hotel") && renderGroup("Hôtel", NAV.hotel)}
         {renderGroup("Administration", NAV.admin)}
       </SidebarContent>
 

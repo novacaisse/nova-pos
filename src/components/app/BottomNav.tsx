@@ -14,9 +14,15 @@ import {
   UsersRound,
   Settings,
   FileText,
+  BedDouble,
+  CalendarRange,
+  DoorClosed,
+  Sparkle,
   X,
 } from "lucide-react";
 import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
+import { useMyRole } from "@/lib/data/hooks";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { cn } from "@/lib/utils";
 
 type Item = { label: string; to: string; icon: React.ComponentType<{ className?: string }> };
@@ -39,16 +45,47 @@ const MORE: Item[] = [
   { label: "Paramètres", to: "/app/parametres", icon: Settings },
 ];
 
+// front_desk/housekeeping n'ont RLS-wise aucun accès aux tables ZegCaisse
+// (cf. AppSidebar.tsx) — la nav mobile principale de ces rôles doit être
+// celle de ZegHotel, pas celle héritée de ZegCaisse.
+const HOTEL_PRIMARY: Item[] = [
+  { label: "Bord", to: "/app/hotel", icon: BedDouble },
+  { label: "Résa.", to: "/app/hotel/reservations", icon: CalendarRange },
+  { label: "Chambres", to: "/app/hotel/rooms", icon: DoorClosed },
+  { label: "Ménage", to: "/app/hotel/housekeeping", icon: Sparkle },
+];
+const HOTEL_MORE: Item[] = [
+  { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
+  { label: "Équipe", to: "/app/equipe", icon: UsersRound },
+  { label: "Paramètres", to: "/app/parametres", icon: Settings },
+];
+// Housekeeping n'a accès ni aux réservations ni aux rapports (020h/020g,
+// données financières/clients hors de son périmètre) — mobile-first pour
+// ce rôle : juste ses chambres et ses tâches du jour.
+const HOUSEKEEPING_PRIMARY: Item[] = [
+  { label: "Chambres", to: "/app/hotel/rooms", icon: DoorClosed },
+  { label: "Ménage", to: "/app/hotel/housekeeping", icon: Sparkle },
+];
+
 export function BottomNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const isActive = (to: string) => (to === "/app" ? pathname === "/app" : pathname === to || pathname.startsWith(to + "/"));
 
   const planModules = useCurrentPlanModules();
+  const { data: myRole } = useMyRole();
+  const { currentOrganization } = useOrganization();
+  const activeApps = currentOrganization?.active_apps ?? ["pos"];
   const isGatableModule = (to: string) => PLAN_MODULES.some((m) => m.url === to);
   const included = (item: Item) => !planModules || !isGatableModule(item.to) || planModules.includes(item.to);
-  const primary = PRIMARY.filter(included);
-  const more = MORE.filter(included);
+
+  const isHotelOnlyRole = myRole === "housekeeping" || myRole === "front_desk";
+  const primary = isHotelOnlyRole
+    ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY)
+    : PRIMARY.filter(included);
+  const more = isHotelOnlyRole
+    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : HOTEL_MORE)
+    : [...MORE.filter(included), ...(activeApps.includes("hotel") ? [{ label: "Hôtel", to: "/app/hotel", icon: BedDouble }] : [])];
 
   return (
     <>

@@ -30,6 +30,7 @@ import { Route as AppProduitsRouteImport } from './routes/app.produits'
 import { Route as AppParametresRouteImport } from './routes/app.parametres'
 import { Route as AppNovaRouteImport } from './routes/app.nova'
 import { Route as AppNotificationsRouteImport } from './routes/app.notifications'
+import { Route as AppHotelRouteImport } from './routes/app.hotel'
 import { Route as AppFournisseursRouteImport } from './routes/app.fournisseurs'
 import { Route as AppEquipeRouteImport } from './routes/app.equipe'
 import { Route as AppDevisRouteImport } from './routes/app.devis'
@@ -45,9 +46,14 @@ import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
 import { Route as AdminAbonnementsRouteImport } from './routes/admin.abonnements'
 import { Route as AppVentesIndexRouteImport } from './routes/app.ventes.index'
 import { Route as AppProduitsIndexRouteImport } from './routes/app.produits.index'
+import { Route as AppHotelIndexRouteImport } from './routes/app.hotel.index'
 import { Route as AppVentesNouvelleRouteImport } from './routes/app.ventes.nouvelle'
 import { Route as AppProduitsNouveauRouteImport } from './routes/app.produits.nouveau'
 import { Route as AppProduitsProductIdRouteImport } from './routes/app.produits.$productId'
+import { Route as AppHotelRoomsRouteImport } from './routes/app.hotel.rooms'
+import { Route as AppHotelReservationsRouteImport } from './routes/app.hotel.reservations'
+import { Route as AppHotelRapportsRouteImport } from './routes/app.hotel.rapports'
+import { Route as AppHotelHousekeepingRouteImport } from './routes/app.hotel.housekeeping'
 
 const TarifsRoute = TarifsRouteImport.update({
   id: '/tarifs',
@@ -155,6 +161,11 @@ const AppNotificationsRoute = AppNotificationsRouteImport.update({
   path: '/notifications',
   getParentRoute: () => AppRoute,
 } as any)
+const AppHotelRoute = AppHotelRouteImport.update({
+  id: '/hotel',
+  path: '/hotel',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppFournisseursRoute = AppFournisseursRouteImport.update({
   id: '/fournisseurs',
   path: '/fournisseurs',
@@ -230,6 +241,11 @@ const AppProduitsIndexRoute = AppProduitsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppProduitsRoute,
 } as any)
+const AppHotelIndexRoute = AppHotelIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppHotelRoute,
+} as any)
 const AppVentesNouvelleRoute = AppVentesNouvelleRouteImport.update({
   id: '/nouvelle',
   path: '/nouvelle',
@@ -244,6 +260,26 @@ const AppProduitsProductIdRoute = AppProduitsProductIdRouteImport.update({
   id: '/$productId',
   path: '/$productId',
   getParentRoute: () => AppProduitsRoute,
+} as any)
+const AppHotelRoomsRoute = AppHotelRoomsRouteImport.update({
+  id: '/rooms',
+  path: '/rooms',
+  getParentRoute: () => AppHotelRoute,
+} as any)
+const AppHotelReservationsRoute = AppHotelReservationsRouteImport.update({
+  id: '/reservations',
+  path: '/reservations',
+  getParentRoute: () => AppHotelRoute,
+} as any)
+const AppHotelRapportsRoute = AppHotelRapportsRouteImport.update({
+  id: '/rapports',
+  path: '/rapports',
+  getParentRoute: () => AppHotelRoute,
+} as any)
+const AppHotelHousekeepingRoute = AppHotelHousekeepingRouteImport.update({
+  id: '/housekeeping',
+  path: '/housekeeping',
+  getParentRoute: () => AppHotelRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -268,6 +304,7 @@ export interface FileRoutesByFullPath {
   '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
+  '/app/hotel': typeof AppHotelRouteWithChildren
   '/app/notifications': typeof AppNotificationsRoute
   '/app/nova': typeof AppNovaRoute
   '/app/parametres': typeof AppParametresRoute
@@ -281,9 +318,14 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
+  '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
+  '/app/hotel/rapports': typeof AppHotelRapportsRoute
+  '/app/hotel/reservations': typeof AppHotelReservationsRoute
+  '/app/hotel/rooms': typeof AppHotelRoomsRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
   '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
+  '/app/hotel/': typeof AppHotelIndexRoute
   '/app/produits/': typeof AppProduitsIndexRoute
   '/app/ventes/': typeof AppVentesIndexRoute
 }
@@ -317,9 +359,14 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/souscription': typeof SouscriptionIndexRoute
+  '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
+  '/app/hotel/rapports': typeof AppHotelRapportsRoute
+  '/app/hotel/reservations': typeof AppHotelReservationsRoute
+  '/app/hotel/rooms': typeof AppHotelRoomsRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
   '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
+  '/app/hotel': typeof AppHotelIndexRoute
   '/app/produits': typeof AppProduitsIndexRoute
   '/app/ventes': typeof AppVentesIndexRoute
 }
@@ -346,6 +393,7 @@ export interface FileRoutesById {
   '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
+  '/app/hotel': typeof AppHotelRouteWithChildren
   '/app/notifications': typeof AppNotificationsRoute
   '/app/nova': typeof AppNovaRoute
   '/app/parametres': typeof AppParametresRoute
@@ -359,9 +407,14 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
+  '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
+  '/app/hotel/rapports': typeof AppHotelRapportsRoute
+  '/app/hotel/reservations': typeof AppHotelReservationsRoute
+  '/app/hotel/rooms': typeof AppHotelRoomsRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
   '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
+  '/app/hotel/': typeof AppHotelIndexRoute
   '/app/produits/': typeof AppProduitsIndexRoute
   '/app/ventes/': typeof AppVentesIndexRoute
 }
@@ -389,6 +442,7 @@ export interface FileRouteTypes {
     | '/app/devis'
     | '/app/equipe'
     | '/app/fournisseurs'
+    | '/app/hotel'
     | '/app/notifications'
     | '/app/nova'
     | '/app/parametres'
@@ -402,9 +456,14 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/souscription/'
+    | '/app/hotel/housekeeping'
+    | '/app/hotel/rapports'
+    | '/app/hotel/reservations'
+    | '/app/hotel/rooms'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
     | '/app/ventes/nouvelle'
+    | '/app/hotel/'
     | '/app/produits/'
     | '/app/ventes/'
   fileRoutesByTo: FileRoutesByTo
@@ -438,9 +497,14 @@ export interface FileRouteTypes {
     | '/admin'
     | '/app'
     | '/souscription'
+    | '/app/hotel/housekeeping'
+    | '/app/hotel/rapports'
+    | '/app/hotel/reservations'
+    | '/app/hotel/rooms'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
     | '/app/ventes/nouvelle'
+    | '/app/hotel'
     | '/app/produits'
     | '/app/ventes'
   id:
@@ -466,6 +530,7 @@ export interface FileRouteTypes {
     | '/app/devis'
     | '/app/equipe'
     | '/app/fournisseurs'
+    | '/app/hotel'
     | '/app/notifications'
     | '/app/nova'
     | '/app/parametres'
@@ -479,9 +544,14 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/souscription/'
+    | '/app/hotel/housekeeping'
+    | '/app/hotel/rapports'
+    | '/app/hotel/reservations'
+    | '/app/hotel/rooms'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
     | '/app/ventes/nouvelle'
+    | '/app/hotel/'
     | '/app/produits/'
     | '/app/ventes/'
   fileRoutesById: FileRoutesById
@@ -646,6 +716,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppNotificationsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/hotel': {
+      id: '/app/hotel'
+      path: '/hotel'
+      fullPath: '/app/hotel'
+      preLoaderRoute: typeof AppHotelRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/fournisseurs': {
       id: '/app/fournisseurs'
       path: '/fournisseurs'
@@ -751,6 +828,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProduitsIndexRouteImport
       parentRoute: typeof AppProduitsRoute
     }
+    '/app/hotel/': {
+      id: '/app/hotel/'
+      path: '/'
+      fullPath: '/app/hotel/'
+      preLoaderRoute: typeof AppHotelIndexRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
     '/app/ventes/nouvelle': {
       id: '/app/ventes/nouvelle'
       path: '/nouvelle'
@@ -771,6 +855,34 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/produits/$productId'
       preLoaderRoute: typeof AppProduitsProductIdRouteImport
       parentRoute: typeof AppProduitsRoute
+    }
+    '/app/hotel/rooms': {
+      id: '/app/hotel/rooms'
+      path: '/rooms'
+      fullPath: '/app/hotel/rooms'
+      preLoaderRoute: typeof AppHotelRoomsRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
+    '/app/hotel/reservations': {
+      id: '/app/hotel/reservations'
+      path: '/reservations'
+      fullPath: '/app/hotel/reservations'
+      preLoaderRoute: typeof AppHotelReservationsRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
+    '/app/hotel/rapports': {
+      id: '/app/hotel/rapports'
+      path: '/rapports'
+      fullPath: '/app/hotel/rapports'
+      preLoaderRoute: typeof AppHotelRapportsRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
+    '/app/hotel/housekeeping': {
+      id: '/app/hotel/housekeeping'
+      path: '/housekeeping'
+      fullPath: '/app/hotel/housekeeping'
+      preLoaderRoute: typeof AppHotelHousekeepingRouteImport
+      parentRoute: typeof AppHotelRoute
     }
   }
 }
@@ -796,6 +908,26 @@ const AdminRouteChildren: AdminRouteChildren = {
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface AppHotelRouteChildren {
+  AppHotelHousekeepingRoute: typeof AppHotelHousekeepingRoute
+  AppHotelRapportsRoute: typeof AppHotelRapportsRoute
+  AppHotelReservationsRoute: typeof AppHotelReservationsRoute
+  AppHotelRoomsRoute: typeof AppHotelRoomsRoute
+  AppHotelIndexRoute: typeof AppHotelIndexRoute
+}
+
+const AppHotelRouteChildren: AppHotelRouteChildren = {
+  AppHotelHousekeepingRoute: AppHotelHousekeepingRoute,
+  AppHotelRapportsRoute: AppHotelRapportsRoute,
+  AppHotelReservationsRoute: AppHotelReservationsRoute,
+  AppHotelRoomsRoute: AppHotelRoomsRoute,
+  AppHotelIndexRoute: AppHotelIndexRoute,
+}
+
+const AppHotelRouteWithChildren = AppHotelRoute._addFileChildren(
+  AppHotelRouteChildren,
+)
 
 interface AppProduitsRouteChildren {
   AppProduitsProductIdRoute: typeof AppProduitsProductIdRoute
@@ -835,6 +967,7 @@ interface AppRouteChildren {
   AppDevisRoute: typeof AppDevisRoute
   AppEquipeRoute: typeof AppEquipeRoute
   AppFournisseursRoute: typeof AppFournisseursRoute
+  AppHotelRoute: typeof AppHotelRouteWithChildren
   AppNotificationsRoute: typeof AppNotificationsRoute
   AppNovaRoute: typeof AppNovaRoute
   AppParametresRoute: typeof AppParametresRoute
@@ -855,6 +988,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDevisRoute: AppDevisRoute,
   AppEquipeRoute: AppEquipeRoute,
   AppFournisseursRoute: AppFournisseursRoute,
+  AppHotelRoute: AppHotelRouteWithChildren,
   AppNotificationsRoute: AppNotificationsRoute,
   AppNovaRoute: AppNovaRoute,
   AppParametresRoute: AppParametresRoute,
