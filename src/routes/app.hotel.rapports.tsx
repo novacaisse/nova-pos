@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { BarChart3, TrendingUp, Percent, Coins } from "lucide-react";
+import { BarChart3, TrendingUp, Percent, Coins, Moon, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useFormatMoney } from "@/lib/data/hooks";
-import { useHotelReservations, useHotelRooms } from "@/lib/data/hotelHooks";
+import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
+import { useHotelReservations, useHotelRooms, useRunNightAudit } from "@/lib/data/hotelHooks";
 
 export const Route = createFileRoute("/app/hotel/rapports")({
   component: HotelReportsPage,
@@ -34,6 +34,10 @@ function nightsInRange(reservations: ReturnType<typeof useHotelReservations>["da
 
 function HotelReportsPage() {
   const formatMoney = useFormatMoney();
+  const { data: myRole } = useMyRole();
+  const canRunAudit = myRole === "owner" || myRole === "manager";
+  const nightAudit = useRunNightAudit();
+  const [auditResult, setAuditResult] = useState<string | null>(null);
   const [period, setPeriod] = useState<7 | 30>(30);
   const rangeEnd = toISO(new Date());
   const rangeStart = addDays(rangeEnd, -period);
@@ -90,6 +94,33 @@ function HotelReportsPage() {
             <div className="mt-3 font-display text-2xl font-bold text-primary">{pickup30} <span className="text-sm font-normal text-muted-foreground">nuits</span></div>
           </div>
         </div>
+
+        {canRunAudit && (
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Moon className="h-4 w-4 text-primary" /> Audit de nuit</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Clôture la journée : les réservations attendues aujourd'hui et jamais arrivées passent en « no-show »,
+                  libérant leur chambre.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  if (!confirm("Clôturer la journée ? Les réservations en attente d'arrivée aujourd'hui non check-in passeront en no-show.")) return;
+                  nightAudit.mutate(rangeEnd, {
+                    onSuccess: (r) => setAuditResult(r.noShowCount > 0 ? `${r.noShowCount} réservation(s) marquée(s) no-show.` : "Aucun no-show à traiter — journée clôturée."),
+                    onError: (e: any) => setAuditResult(e?.message ?? "Erreur inconnue."),
+                  });
+                }}
+                disabled={nightAudit.isPending}
+                className="flex shrink-0 items-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-60">
+                {nightAudit.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Moon className="h-4 w-4" />} Clôturer la journée
+              </button>
+            </div>
+            {auditResult && <p className="mt-3 rounded-xl bg-muted p-3 text-xs">{auditResult}</p>}
+          </div>
+        )}
 
         {rooms.length === 0 && (
           <div className="rounded-2xl border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">

@@ -738,3 +738,33 @@ export function useHotelDashboardStats(today: string) {
     },
   });
 }
+
+// ============ AUDIT DE NUIT ============
+// Rollover de fin de journée : toute réservation encore "pending"/"confirmed"
+// dont l'arrivée était aujourd'hui et qui n'a jamais été check-in est
+// requalifiée "no_show" (la nuit est passée, la chambre n'a pas été prise) —
+// libère la contrainte d'exclusion pour de nouvelles réservations sur ces
+// dates. Le CA d'hébergement étant porté par hotel_reservation_rooms.rate_amount
+// (montant total du séjour, pas un montant par nuit), il n'y a pas de charge
+// "room" à re-poster jour par jour ici.
+export function useRunNightAudit() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (today: string) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data: noShows, error: selErr } = await supabase.from("hotel_reservations")
+        .select("id").eq("organization_id", organizationId).eq("check_in", today).in("status", ["pending", "confirmed"]);
+      if (selErr) throw selErr;
+      const ids = (noShows ?? []).map((r: any) => r.id);
+      if (ids.length) {
+        const { error: updErr } = await supabase.from("hotel_reservations")
+          .update({ status: "no_show" }).in("id", ids);
+        if (updErr) throw updErr;
+      }
+      return { noShowCount: ids.length };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_reservations" || q.queryKey[0] === "hotel_dashboard" });
+    },
+  });
+}

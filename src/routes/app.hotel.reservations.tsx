@@ -2,16 +2,19 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ChevronLeft, ChevronRight, Plus, X, Loader2, User, LogIn, LogOut, Ban, CheckCircle2, Banknote,
+  ChevronLeft, ChevronRight, Plus, X, Loader2, User, LogIn, LogOut, Ban, CheckCircle2, Banknote, Printer,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { useMyRole, useFormatMoney } from "@/lib/data/hooks";
+import { useMyRole, useFormatMoney, useShopSettings } from "@/lib/data/hooks";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import {
   useHotelReservations, useHotelRooms, useHotelRoomTypes, useHotelGuests, useUpsertHotelGuest,
   useCreateHotelReservation, useHotelReservation, useCheckInReservation, useCheckOutReservation,
   useCancelReservation, useUpdateHotelReservation, useHotelFolio, useAddFolioCharge, useAddFolioPayment,
   useCloseFolio, folioBalance, useHotelCorporateAccounts, useHotelRatePlans,
   type HotelReservationRow, type ReservationStatus, type HotelRoom, type FolioChargeKind, type HotelPaymentMethod,
+  type HotelFolioDetail,
 } from "@/lib/data/hotelHooks";
 import { cn } from "@/lib/utils";
 
@@ -348,9 +351,69 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
 }
 
 // ============ DÉTAIL / FOLIO ============
+// Facture au format SYSCOHADA (zone OHADA) : désignation/quantité/PU/montant,
+// mentions RCCM/IFU dans l'en-tête (renderA4Document), numérotée sur la
+// référence de la réservation — même gabarit A4 que les devis ZegCaisse
+// (src/lib/printDoc.ts), pas de format ad-hoc dédié à l'hôtel.
+function printHotelInvoice(
+  reservation: HotelReservationRow, folio: HotelFolioDetail,
+  org: { name: string; logo_url: string | null } | null,
+  settings: { data: { address?: string; phone?: string; ifu?: string } } | null | undefined,
+  formatMoney: (n: number) => string,
+) {
+  const nights = Math.max(1, (new Date(reservation.check_out).getTime() - new Date(reservation.check_in).getTime()) / 86400000);
+  const roomRows = reservation.reservation_rooms
+    .filter((rr) => rr.status !== "cancelled" && rr.status !== "no_show")
+    .map((rr) => `<tr><td>Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""} (${nights} nuit${nights > 1 ? "s" : ""})</td><td class="num">1</td><td class="num">${formatMoney(rr.rate_amount)}</td><td class="num">${formatMoney(rr.rate_amount)}</td></tr>`)
+    .join("");
+  const chargeRows = folio.charges
+    .map((c) => `<tr><td>${c.description}</td><td class="num">${c.quantity}</td><td class="num">${formatMoney(c.amount)}</td><td class="num">${formatMoney(c.amount * c.quantity)}</td></tr>`)
+    .join("");
+  const roomTotal = reservation.reservation_rooms
+    .filter((rr) => rr.status !== "cancelled" && rr.status !== "no_show")
+    .reduce((s, rr) => s + rr.rate_amount, 0);
+  const chargesTotal = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
+  const grandTotal = roomTotal + chargesTotal;
+  const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
+  const balance = grandTotal - paid;
+
+  const bodyHtml = `
+    <div class="doc-parties">
+      <div class="block"><h2>Client</h2><div class="name">${reservation.guest?.full_name ?? "—"}</div></div>
+      <div class="block" style="text-align:right"><h2>Séjour</h2><div class="name">${new Date(reservation.check_in).toLocaleDateString("fr-FR")} → ${new Date(reservation.check_out).toLocaleDateString("fr-FR")}</div></div>
+    </div>
+    <table class="doc-table">
+      <thead><tr><th>Désignation</th><th class="num">Qté</th><th class="num">P.U.</th><th class="num">Montant</th></tr></thead>
+      <tbody>${roomRows}${chargeRows}</tbody>
+    </table>
+    <div class="doc-totals">
+      <div class="row total"><span>Total facture</span><span>${formatMoney(grandTotal)}</span></div>
+      ${paid > 0 ? `<div class="row"><span>Réglé</span><span>-${formatMoney(paid)}</span></div>` : ""}
+      <div class="row total"><span>Solde dû</span><span>${formatMoney(balance)}</span></div>
+    </div>`;
+
+  const html = renderA4Document({
+    docTitle: "Facture",
+    docNumber: reservation.id.slice(0, 8).toUpperCase(),
+    docDate: new Date().toLocaleDateString("fr-FR"),
+    shop: {
+      shopName: org?.name ?? "Organisation",
+      logoUrl: org?.logo_url,
+      address: settings?.data.address,
+      phone: settings?.data.phone,
+      ifu: settings?.data.ifu,
+    },
+    bodyHtml,
+    footerHtml: "Facture générée par ZegHotel.",
+  });
+  openPrintWindow(html, { width: 900, height: 700 });
+}
+
 function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId: string; canWrite: boolean; onClose: () => void }) {
   const { data: reservation, isLoading } = useHotelReservation(reservationId);
   const formatMoney = useFormatMoney();
+  const { currentOrganization } = useOrganization();
+  const { data: settings } = useShopSettings();
   const checkIn = useCheckInReservation();
   const checkOut = useCheckOutReservation();
   const cancel = useCancelReservation();
@@ -440,9 +503,15 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                 <section>
                   <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     <span>Note (folio)</span>
-                    <span className={cn("rounded-full px-2 py-0.5 text-[10px]", folio.status === "open" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
-                      {folio.status === "open" ? "Ouverte" : "Clôturée"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => printHotelInvoice(reservation, folio, currentOrganization, settings, formatMoney)}
+                        className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold normal-case text-foreground hover:bg-muted">
+                        <Printer className="h-3 w-3" /> Facture PDF
+                      </button>
+                      <span className={cn("rounded-full px-2 py-0.5 text-[10px]", folio.status === "open" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                        {folio.status === "open" ? "Ouverte" : "Clôturée"}
+                      </span>
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     {folio.charges.map((c) => (

@@ -2,10 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Store, Coins, Receipt, ArrowLeftRight, Save, Plus, Image as ImageIcon, FileText, Loader2,
-  X, Trash2, Search, Check,
+  X, Trash2, Search, Check, BedDouble,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { HotelTarificationTab } from "@/components/app/HotelTarificationTab";
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
   useProvisionOrganization, useTransferStock, useProducts,
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/app/parametres")({
 });
 
 function ParametresPage() {
-  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer">("shop");
+  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer" | "hotel">("shop");
   const { organizations, currentOrganization } = useOrganization();
   const { data: settings, isLoading: settingsLoading } = useShopSettings();
   const updateShop = useUpdateShop();
@@ -125,6 +126,9 @@ function ParametresPage() {
               { k: "taxes", label: "Taxes", icon: Receipt },
               { k: "ticket", label: "Ticket de caisse", icon: FileText },
               { k: "transfer", label: "Transfert de stock", icon: ArrowLeftRight },
+              ...(currentOrganization.active_apps?.includes("hotel")
+                ? [{ k: "hotel", label: "Tarification Hôtel", icon: BedDouble }] as const
+                : []),
             ] as const).map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
                 className={cn("flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -333,6 +337,8 @@ function ParametresPage() {
           {tab === "transfer" && (
             <TransferPanel organizations={organizations} currentOrganizationId={currentOrganization.id} currentOrganizationName={currentOrganization.name} canManage={canManage} />
           )}
+
+          {tab === "hotel" && <HotelTarificationTab />}
         </div>
       </div>
 
