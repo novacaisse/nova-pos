@@ -6,7 +6,7 @@ import {
   type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
 import { generateSku, generateBarcode } from "@/lib/generateProductCodes";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export function ProductForm({ initial, cats, canManage }: {
   initial: Partial<ProductWithStock>;
@@ -182,25 +182,25 @@ export function ProductForm({ initial, cats, canManage }: {
               </label>
               <label className="block">
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Prix achat (F)</div>
-                <input type="number" value={form.cost ?? 0} onChange={(e) => setForm({ ...form, cost: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
+                <input type="number" onFocus={selectOnFocus} value={form.cost ?? 0} onChange={(e) => setForm({ ...form, cost: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
               </label>
               <label className="block">
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Prix vente (F) *</div>
-                <input type="number" value={form.price ?? 0} onChange={(e) => setForm({ ...form, price: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
+                <input type="number" onFocus={selectOnFocus} value={form.price ?? 0} onChange={(e) => setForm({ ...form, price: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
               </label>
               <label className="block">
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Taux de taxe (%)</div>
-                <input type="number" min={0} max={100} value={form.tax_rate ?? 0} onChange={(e) => setForm({ ...form, tax_rate: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
+                <input type="number" onFocus={selectOnFocus} min={0} max={100} value={form.tax_rate ?? 0} onChange={(e) => setForm({ ...form, tax_rate: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
               </label>
               {isNew && (
                 <label className="block">
                   <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Stock initial</div>
-                  <input type="number" value={form.stock ?? 0} onChange={(e) => setForm({ ...form, stock: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
+                  <input type="number" onFocus={selectOnFocus} value={form.stock ?? 0} onChange={(e) => setForm({ ...form, stock: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
                 </label>
               )}
               <label className="block">
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Seuil stock bas</div>
-                <input type="number" value={form.low_stock_threshold ?? 5} onChange={(e) => setForm({ ...form, low_stock_threshold: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
+                <input type="number" onFocus={selectOnFocus} value={form.low_stock_threshold ?? 5} onChange={(e) => setForm({ ...form, low_stock_threshold: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
               </label>
               <label className="block sm:col-span-2">
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Description</div>

@@ -6,13 +6,14 @@ import {
   Send, Check, Ban, Package, Loader2, MapPin,
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PageSkeleton } from "@/components/app/PageSkeleton";
 import {
   useSuppliers, useUpsertSupplier, useDeleteSupplier, useMyRole, useProducts,
   usePurchaseOrders, useUpsertPurchaseOrder, useDeletePurchaseOrder,
   useSendPurchaseOrder, useCancelPurchaseOrder, useReceivePurchaseOrder,
   useFormatMoney, type Supplier, type PurchaseOrderWithItems, type PurchaseOrderStatus, type ProductWithStock,
 } from "@/lib/data/hooks";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/fournisseurs")({
   component: FournisseursPage,
@@ -58,6 +59,8 @@ function FournisseursPage() {
       || (s.phone ?? "").toLowerCase().includes(q)
       || (s.email ?? "").toLowerCase().includes(q);
   });
+
+  if (isLoading || ordersLoading) return <PageSkeleton title="Fournisseurs" subtitle="Fournisseurs et bons de commande" />;
 
   return (
     <div>
@@ -443,9 +446,9 @@ function PurchaseOrderForm({ suppliers, products, onClose }: {
           ) : lines.map((l, i) => (
             <div key={i} className="flex items-center gap-2 rounded-xl border border-border p-2">
               <div className="min-w-0 flex-1 truncate text-sm font-medium">{l.name}</div>
-              <input type="number" min={0} value={l.quantity} onChange={(e) => updateLine(i, { quantity: Number(e.target.value) || 0 })}
+              <input type="number" onFocus={selectOnFocus} min={0} value={l.quantity} onChange={(e) => updateLine(i, { quantity: Number(e.target.value) || 0 })}
                 className="tabular h-8 w-16 rounded-lg border border-border bg-background px-2 text-right text-xs" />
-              <input type="number" min={0} value={l.unit_cost} onChange={(e) => updateLine(i, { unit_cost: Number(e.target.value) || 0 })}
+              <input type="number" onFocus={selectOnFocus} min={0} value={l.unit_cost} onChange={(e) => updateLine(i, { unit_cost: Number(e.target.value) || 0 })}
                 className="tabular h-8 w-24 rounded-lg border border-border bg-background px-2 text-right text-xs" />
               <div className="tabular w-20 shrink-0 text-right text-sm font-semibold">{formatXOF(l.quantity * l.unit_cost)}</div>
               <button onClick={() => removeLine(i)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>

@@ -113,14 +113,18 @@
   --chart-4: oklch(0.55 0.2 340);
   --chart-5: oklch(0.65 0.18 30);
 
-  --sidebar: oklch(0.22 0.03 200);
-  --sidebar-foreground: oklch(0.94 0.01 200);
-  --sidebar-primary: oklch(0.62 0.13 185);
-  --sidebar-primary-foreground: oklch(0.15 0.02 200);
-  --sidebar-accent: oklch(0.28 0.03 200);
-  --sidebar-accent-foreground: oklch(0.98 0.005 90);
-  --sidebar-border: oklch(0.3 0.03 200);
-  --sidebar-ring: oklch(0.62 0.13 185);
+  /* La sidebar suit le thème clair (audit ZegOS Phase 1, LOT E) — avant,
+     ces tokens restaient une teinte sombre fixe même en thème clair
+     (barre latérale foncée sur contenu clair). Gris-bleu légèrement
+     distinct du fond principal (--background), texte foncé lisible. */
+  --sidebar: oklch(0.97 0.006 200);
+  --sidebar-foreground: oklch(0.22 0.03 200);
+  --sidebar-primary: oklch(0.45 0.09 190);
+  --sidebar-primary-foreground: oklch(0.99 0.005 90);
+  --sidebar-accent: oklch(0.93 0.01 200);
+  --sidebar-accent-foreground: oklch(0.2 0.03 200);
+  --sidebar-border: oklch(0.9 0.01 210);
+  --sidebar-ring: oklch(0.55 0.1 190);
 }
 
 .dark {

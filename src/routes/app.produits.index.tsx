@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Package, ChevronDown, Check } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
+import { PageSkeleton } from "@/components/app/PageSkeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   useProducts, useDeleteProduct,
@@ -43,6 +44,8 @@ function ProduitsPage() {
     const q = query.toLowerCase();
     return p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q) || (p.barcode ?? "").toLowerCase().includes(q);
   }), [products, query, cat]);
+
+  if (isLoading) return <PageSkeleton title="Produits" subtitle="Catalogue" />;
 
   return (
     <div>

@@ -7,5 +7,10 @@ import { createFileRoute, Outlet } from "@tanstack/react-router";
 // convention que app.tsx+app.index.tsx et app.produits.tsx+app.produits.index.tsx.
 // Le tableau de bord lui-même vit dans app.hotel.index.tsx.
 export const Route = createFileRoute("/app/hotel")({
+  // Titre d'onglet dédié pour tout /app/hotel/* — sans lui, ces pages
+  // héritaient du titre "ZegCaisse" fixé par le layout parent /app
+  // (app.tsx), qui ne changeait jamais en naviguant dans ZegHotel (audit
+  // ZegOS Phase 1, LOT E).
+  head: () => ({ meta: [{ title: "ZegHotel" }] }),
   component: () => <Outlet />,
 });

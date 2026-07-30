@@ -8,7 +8,7 @@ import {
   useStockMovements, useCreateStockMovement, useMyRole,
   useFormatMoney, type ProductWithStock,
 } from "@/lib/data/hooks";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/stock")({
   component: StockPage,
@@ -297,7 +297,7 @@ function AdjustDialog({ products, onClose, onSave }: { products: ProductWithStoc
           ))}
         </div>
         <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Quantité</div>
-          <input type="number" value={qty} onChange={(e) => setQty(Number(e.target.value) || 0)} className={inp} />
+          <input type="number" onFocus={selectOnFocus} value={qty} onChange={(e) => setQty(Number(e.target.value) || 0)} className={inp} />
         </label>
         <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Motif (optionnel)</div>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ex : Inventaire mensuel" className={inp} />
@@ -325,7 +325,7 @@ function ThresholdDialog({ product, onClose, onSave }: { product: ProductWithSto
         <div className="font-display text-lg font-bold">Seuil d'alerte</div>
         <p className="mt-1 text-xs text-muted-foreground">{product.name} · stock actuel : <b>{product.stock}</b></p>
         <label className="mt-4 block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Seuil minimum</div>
-          <input type="number" min={0} value={v} onChange={(e) => setV(Math.max(0, Number(e.target.value) || 0))} className={inp} />
+          <input type="number" onFocus={selectOnFocus} min={0} value={v} onChange={(e) => setV(Math.max(0, Number(e.target.value) || 0))} className={inp} />
         </label>
         <div className="mt-4 flex gap-2">
           <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>

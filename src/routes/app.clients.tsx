@@ -7,7 +7,7 @@ import {
   useCustomers, useUpsertCustomer, useDeleteCustomer, useCustomerSales, useMyRole,
   useFormatMoney, type Customer,
 } from "@/lib/data/hooks";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/clients")({
   validateSearch: (search: Record<string, unknown>): { q?: string } => ({
@@ -260,8 +260,8 @@ function CustomerDialog({ initial, onClose, onSave }: { initial: Partial<Custome
         <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Téléphone</div><input value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inp} /></label>
         <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Email</div><input value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inp} /></label>
         <label className="sm:col-span-2"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Adresse</div><input value={form.address ?? ""} onChange={(e) => setForm({ ...form, address: e.target.value })} className={inp} /></label>
-        <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Points fidélité</div><input type="number" value={form.loyalty_points ?? 0} onChange={(e) => setForm({ ...form, loyalty_points: Number(e.target.value) || 0 })} className={inp} /></label>
-        <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Crédit dû (F)</div><input type="number" value={form.credit_balance ?? 0} onChange={(e) => setForm({ ...form, credit_balance: Number(e.target.value) || 0 })} className={inp} /></label>
+        <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Points fidélité</div><input type="number" onFocus={selectOnFocus} value={form.loyalty_points ?? 0} onChange={(e) => setForm({ ...form, loyalty_points: Number(e.target.value) || 0 })} className={inp} /></label>
+        <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Crédit dû (F)</div><input type="number" onFocus={selectOnFocus} value={form.credit_balance ?? 0} onChange={(e) => setForm({ ...form, credit_balance: Number(e.target.value) || 0 })} className={inp} /></label>
         <label className="sm:col-span-2"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Notes</div><textarea rows={2} value={form.notes ?? ""} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full rounded-xl border border-border bg-background p-3 text-sm" /></label>
         <div className="flex gap-2 pt-1 sm:col-span-2">
           <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>

@@ -11,7 +11,7 @@ import {
 } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/devis")({
   component: DevisPage,
@@ -278,7 +278,7 @@ function QuoteEditor({ initial, onClose, onSave }: {
               <select value={productSel} onChange={(e) => setProductSel(e.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-sm">
                 {products.map((p) => <option key={p.id} value={p.id}>{p.name} — {formatXOF(p.price)}</option>)}
               </select>
-              <input type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value) || 1)} className="h-10 w-20 rounded-xl border border-border bg-background px-2 text-center text-sm" />
+              <input type="number" onFocus={selectOnFocus} min={1} value={qty} onChange={(e) => setQty(Number(e.target.value) || 1)} className="h-10 w-20 rounded-xl border border-border bg-background px-2 text-center text-sm" />
               <button onClick={addLine} className="rounded-xl bg-primary px-3 text-sm font-bold text-primary-foreground">Ajouter</button>
             </div>
           </div>
@@ -384,7 +384,7 @@ function ConvertDialog({ quote, onClose }: { quote: QuoteWithItems; onClose: () 
           </div>
           <label className="block">
             <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Montant reçu</div>
-            <input type="number" value={paid} onChange={(e) => setPaid(e.target.value)}
+            <input type="number" onFocus={selectOnFocus} value={paid} onChange={(e) => setPaid(e.target.value)}
               className="tabular h-12 w-full rounded-xl border border-border bg-background px-4 text-xl font-bold outline-none focus:border-primary" />
           </label>
           {due > 0 && (

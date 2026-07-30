@@ -6,6 +6,7 @@ import {
   Plus, Printer, FileText, Ban, CreditCard as CardIcon, Loader2, Edit3,
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PageSkeleton } from "@/components/app/PageSkeleton";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -15,7 +16,7 @@ import {
   useFormatMoney, type Sale, type SaleItem,
 } from "@/lib/data/hooks";
 import { renderA4Document, openPrintWindow, THERMAL_CSS } from "@/lib/printDoc";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 type SaleFull = Sale & { sale_items: SaleItem[]; customers: { name: string } | null };
 
@@ -76,6 +77,8 @@ function VentesPage() {
   const revenueRows = filtered.filter(isRevenueSale);
   const totalRevenue = revenueRows.reduce((s, x) => s + Number(x.total || 0), 0);
   const avg = revenueRows.length ? Math.round(totalRevenue / revenueRows.length) : 0;
+
+  if (isLoading) return <PageSkeleton title="Ventes" subtitle="Historique et suivi des transactions" />;
 
   return (
     <div>
@@ -416,7 +419,7 @@ function PaymentDialog({ sale, onClose }: { sale: SaleFull; onClose: () => void 
         </div>
         <label className="block">
           <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Montant reçu</div>
-          <input type="number" min={0} max={due} value={amount}
+          <input type="number" onFocus={selectOnFocus} min={0} max={due} value={amount}
             onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
             className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary" />
         </label>

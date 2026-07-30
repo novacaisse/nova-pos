@@ -9,7 +9,7 @@ import {
 } from "@/lib/data/adminHooks";
 import { organizationStatus, STATUS_META, type OrganizationStatus } from "@/lib/adminShopStatus";
 import { formatXOF } from "@/lib/mock/catalog";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/boutiques")({
   component: AdminBoutiques,
@@ -279,7 +279,7 @@ function ExtendForm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: 
     <div className="rounded-xl border border-border p-3">
       <div className="mb-2 text-xs font-semibold text-muted-foreground">Prolonger l'essai de combien de jours ?</div>
       <div className="flex gap-2">
-        <input type="number" min={1} value={days} onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 1))}
+        <input type="number" onFocus={selectOnFocus} min={1} value={days} onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 1))}
           className="h-9 w-24 rounded-lg border border-border bg-background px-2 text-sm" />
         <button onClick={onCancel} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">Annuler</button>
         <button onClick={async () => { setBusy(true); try { await onConfirm(days); } finally { setBusy(false); } }} disabled={busy}

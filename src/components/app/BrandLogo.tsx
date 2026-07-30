@@ -9,10 +9,12 @@ import { cn } from "@/lib/utils";
 // restreints (sidebar repliée). app_settings.logo_url (Bloc 25, upload
 // Super Admin) reste prioritaire si défini, quel que soit le thème.
 //
-// variant="sidebar" force la variante sombre : le fond de la sidebar
-// (--sidebar) reste toujours sombre, y compris en thème clair — le
-// logo doit donc toujours y être la version pensée pour fond sombre,
-// indépendamment du thème global de la page.
+// variant="sidebar" ne force plus la variante sombre depuis le correctif
+// LOT E (audit ZegOS Phase 1) : la sidebar (--sidebar) suit désormais le
+// thème global comme le reste de l'app, elle n'est plus foncée en
+// permanence — le logo doit donc suivre le thème réel (isDark), au même
+// titre que partout ailleurs. Le paramètre reste accepté (compat des
+// appels existants) mais n'a plus d'effet différenciateur.
 export function BrandLogo({
   className, compact = false, variant = "auto",
 }: {
@@ -27,7 +29,6 @@ export function BrandLogo({
     return <img src={data.logo_url} alt="ZegOS" className={cn("object-contain", className)} />;
   }
 
-  const useDarkVariant = variant === "sidebar" || isDark;
-  const src = compact ? "/icon.png" : useDarkVariant ? "/logo-dark.png" : "/logo-light.png";
+  const src = compact ? "/icon.png" : isDark ? "/logo-dark.png" : "/logo-light.png";
   return <img src={src} alt="ZegOS" className={cn("object-contain", className)} />;
 }

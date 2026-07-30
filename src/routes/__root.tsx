@@ -82,15 +82,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "NovaCaisse — La caisse moderne pour les commerçants" },
-      { name: "description", content: "NovaCaisse : point de vente, stock, ventes et rapports pour organisations et commerces. Rapide, tactile, pensé tablette." },
-      { name: "author", content: "NovaCaisse" },
-      { property: "og:title", content: "NovaCaisse — La caisse moderne pour les commerçants" },
-      { property: "og:description", content: "NovaCaisse : point de vente, stock, ventes et rapports pour organisations et commerces. Rapide, tactile, pensé tablette." },
+      { title: "ZegCaisse — La caisse moderne pour les commerçants" },
+      { name: "description", content: "ZegCaisse : point de vente, stock, ventes et rapports pour organisations et commerces. Rapide, tactile, pensé tablette." },
+      { name: "author", content: "ZegCaisse" },
+      { property: "og:title", content: "ZegCaisse — La caisse moderne pour les commerçants" },
+      { property: "og:description", content: "ZegCaisse : point de vente, stock, ventes et rapports pour organisations et commerces. Rapide, tactile, pensé tablette." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "NovaCaisse — La caisse moderne pour les commerçants" },
-      { name: "twitter:description", content: "NovaCaisse : point de vente, stock, ventes et rapports pour organisations et commerces. Rapide, tactile, pensé tablette." },
+      { name: "twitter:title", content: "ZegCaisse — La caisse moderne pour les commerçants" },
+      { name: "twitter:description", content: "ZegCaisse : point de vente, stock, ventes et rapports pour organisations et commerces. Rapide, tactile, pensé tablette." },
       { property: "og:image", content: "/icon-512.png" },
       { name: "twitter:image", content: "/icon-512.png" },
     ],
@@ -116,7 +116,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="fr">
       <head>
         <HeadContent />
       </head>

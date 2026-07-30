@@ -13,7 +13,7 @@ import { PublicFooter } from "@/components/app/PublicFooter";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "NovaCaisse — ZegCaisse, la caisse pensée pour l'Afrique de l'Ouest" },
+      { title: "ZegCaisse — la caisse pensée pour l'Afrique de l'Ouest" },
       { name: "description", content: "ZegCaisse : point de vente tactile, stock intelligent, rapports pilotés par IA et Mobile Money natif. La première application de la plateforme ZegOS." },
     ],
   }),

@@ -9,7 +9,7 @@ import {
   useHotelRooms, useUpsertHotelRoom, useDeleteHotelRoom, useSetRoomHousekeepingStatus,
   type HotelRoomType, type HotelRoom, type HousekeepingStatus,
 } from "@/lib/data/hotelHooks";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/hotel/rooms")({
   component: RoomsPage,
@@ -193,12 +193,12 @@ function RoomTypeModal({ roomType, onClose }: { roomType: HotelRoomType | null; 
             <input value={description} onChange={(e) => setDescription(e.target.value)} className={inp} /></label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Adultes</span>
-              <input type="number" min={1} value={capacityAdults} onChange={(e) => setCapacityAdults(Number(e.target.value))} className={inp} /></label>
+              <input type="number" onFocus={selectOnFocus} min={1} value={capacityAdults} onChange={(e) => setCapacityAdults(Number(e.target.value))} className={inp} /></label>
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Enfants</span>
-              <input type="number" min={0} value={capacityChildren} onChange={(e) => setCapacityChildren(Number(e.target.value))} className={inp} /></label>
+              <input type="number" onFocus={selectOnFocus} min={0} value={capacityChildren} onChange={(e) => setCapacityChildren(Number(e.target.value))} className={inp} /></label>
           </div>
           <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Prix de base / nuit *</span>
-            <input type="number" min={0} value={basePrice} onChange={(e) => setBasePrice(Number(e.target.value))} className={inp} /></label>
+            <input type="number" onFocus={selectOnFocus} min={0} value={basePrice} onChange={(e) => setBasePrice(Number(e.target.value))} className={inp} /></label>
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>

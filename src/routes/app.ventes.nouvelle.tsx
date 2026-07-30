@@ -8,7 +8,7 @@ import {
   useProducts, useCustomers, useCreateSale, useMyRole, useTeamPermissions, useFormatMoney, newTicketRef,
   type ProductWithStock, type Customer, type Sale,
 } from "@/lib/data/hooks";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 // Écran de saisie back-office, distinct de la Caisse : pas de scan
 // code-barres ni de tickets en attente — pensé pour enregistrer une vente
@@ -139,7 +139,7 @@ function NouvelleVentePage() {
                 <div key={i} className="flex items-center gap-2 rounded-xl border border-border p-2">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{l.name}</div>
-                    <input type="number" min={0} value={l.unit_price} onChange={(e) => updatePrice(i, Number(e.target.value) || 0)}
+                    <input type="number" onFocus={selectOnFocus} min={0} value={l.unit_price} onChange={(e) => updatePrice(i, Number(e.target.value) || 0)}
                       className="tabular mt-1 h-7 w-28 rounded-lg border border-border bg-background px-2 text-xs" />
                   </div>
                   <div className="flex items-center gap-1">
@@ -193,7 +193,7 @@ function NouvelleVentePage() {
               {canDiscount && (
                 <label className="flex items-center justify-between gap-2 text-sm">
                   <span className="text-muted-foreground">Remise (montant)</span>
-                  <input type="number" min={0} value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
+                  <input type="number" onFocus={selectOnFocus} min={0} value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
                     className="tabular h-9 w-28 rounded-lg border border-border bg-background px-2 text-right text-sm" />
                 </label>
               )}
@@ -217,7 +217,7 @@ function NouvelleVentePage() {
 
               <label className="flex items-center justify-between gap-2 text-sm">
                 <span className="text-muted-foreground">Montant reçu</span>
-                <input type="number" min={0} value={paidAmount} onChange={(e) => setPaid(Math.max(0, Number(e.target.value) || 0))}
+                <input type="number" onFocus={selectOnFocus} min={0} value={paidAmount} onChange={(e) => setPaid(Math.max(0, Number(e.target.value) || 0))}
                   className="tabular h-9 w-28 rounded-lg border border-border bg-background px-2 text-right text-sm" />
               </label>
               {paidAmount < total && (

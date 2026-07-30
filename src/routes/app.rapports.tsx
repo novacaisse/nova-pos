@@ -7,6 +7,7 @@ import {
   startOfYear, endOfYear, subMonths, subYears,
 } from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PageSkeleton } from "@/components/app/PageSkeleton";
 import { useSales, useProducts, useSuppliers, useShopSettings, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
@@ -236,6 +237,8 @@ function RapportsPage() {
     setMessages((m) => [...m, { role: "user", text: q }]);
     setTimeout(() => setMessages((m) => [...m, { role: "ai", text: MOCK_AI[Math.floor(Math.random() * MOCK_AI.length)] }]), 700);
   };
+
+  if (isLoading) return <PageSkeleton title="Rapports avancés" subtitle="Analyses détaillées et assistant IA" />;
 
   return (
     <div>

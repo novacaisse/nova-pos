@@ -7,7 +7,7 @@ import {
   PLAN_MODULES, type Plan,
 } from "@/lib/data/adminHooks";
 import { formatXOF } from "@/lib/mock/catalog";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/parametres")({
   component: AdminParametres,
@@ -186,13 +186,13 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
       <div className="mt-4 grid grid-cols-2 gap-3">
         <label className="block">
           <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Comptes max</span>
-          <input type="number" min={0} value={maxUsers} onChange={(e) => setMaxUsers(Math.max(0, Number(e.target.value) || 0))}
+          <input type="number" onFocus={selectOnFocus} min={0} value={maxUsers} onChange={(e) => setMaxUsers(Math.max(0, Number(e.target.value) || 0))}
             placeholder="0 = illimité"
             className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
         </label>
         <label className="block">
           <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Crédits IA / mois</span>
-          <input type="number" min={0} value={aiCredits} onChange={(e) => setAiCredits(Math.max(0, Number(e.target.value) || 0))}
+          <input type="number" onFocus={selectOnFocus} min={0} value={aiCredits} onChange={(e) => setAiCredits(Math.max(0, Number(e.target.value) || 0))}
             placeholder="0 = illimité"
             className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
         </label>
@@ -237,7 +237,7 @@ function PriceField({ label, value, onChange }: { label: string; value: number; 
     <label className="block">
       <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
       <div className="relative">
-        <input type="number" value={value} onChange={(e) => onChange(Number(e.target.value) || 0)}
+        <input type="number" onFocus={selectOnFocus} value={value} onChange={(e) => onChange(Number(e.target.value) || 0)}
           className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 pr-12 text-sm font-semibold outline-none focus:border-primary" />
         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">FCFA</span>
       </div>

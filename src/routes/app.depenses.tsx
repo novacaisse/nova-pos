@@ -8,7 +8,7 @@ import {
   useFormatMoney, type Expense,
 } from "@/lib/data/hooks";
 import { DEFAULT_EXPENSE_CATEGORIES } from "@/lib/mock/expenses";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/depenses")({
   component: DepensesPage,
@@ -157,7 +157,7 @@ function EditDialog({ initial, categories, onClose, onSave }: { initial: Partial
           <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Catégorie</div><select value={form.category ?? categories[0]} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inp}>
             {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select></label>
-          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Montant (F)</div><input type="number" value={form.amount ?? 0} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) || 0 })} className={inp} /></label>
+          <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Montant (F)</div><input type="number" onFocus={selectOnFocus} value={form.amount ?? 0} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) || 0 })} className={inp} /></label>
           <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Date</div><input type="date" value={form.paid_at ?? new Date().toISOString().slice(0,10)} onChange={(e) => setForm({ ...form, paid_at: e.target.value })} className={inp} /></label>
           <label className="block"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Méthode</div><select value={form.method ?? "Espèces"} onChange={(e) => setForm({ ...form, method: e.target.value })} className={inp}>
             {["Espèces", "Mobile Money", "Carte", "Virement", "Chèque"].map((m) => <option key={m}>{m}</option>)}

@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { Plus, Trash2, Loader2, Save, Building2 } from "lucide-react";
 import { useFormatMoney } from "@/lib/data/hooks";
+import { selectOnFocus } from "@/lib/utils";
 import {
   useHotelRoomTypes, useUpsertHotelRoomType,
   useHotelSeasonalRates, useUpsertHotelSeasonalRate, useDeleteHotelSeasonalRate,
@@ -66,7 +67,7 @@ export function HotelTarificationTab() {
           {roomTypes.map((t) => (
             <div key={t.id} className="flex items-center gap-2 rounded-xl border border-border/60 p-3">
               <span className="flex-1 text-sm font-medium">{t.name}</span>
-              <input type="number" className="w-28 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+              <input type="number" onFocus={selectOnFocus} className="w-28 rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
                 value={priceFor(t.id, t.base_price)}
                 onChange={(e) => setPrices((p) => ({ ...p, [t.id]: Number(e.target.value) }))} />
               <button onClick={() => savePrice(t.id)} disabled={upsertType.isPending || prices[t.id] === undefined || prices[t.id] === t.base_price}
@@ -97,7 +98,7 @@ export function HotelTarificationTab() {
           <input type="date" value={newSeasonal.start_date} onChange={(e) => setNewSeasonal((s) => ({ ...s, start_date: e.target.value }))} className={inp} />
           <input type="date" value={newSeasonal.end_date} onChange={(e) => setNewSeasonal((s) => ({ ...s, end_date: e.target.value }))} className={inp} />
           <div className="flex gap-2">
-            <input type="number" placeholder="Prix" value={newSeasonal.price_override} onChange={(e) => setNewSeasonal((s) => ({ ...s, price_override: Number(e.target.value) }))} className={inp} />
+            <input type="number" onFocus={selectOnFocus} placeholder="Prix" value={newSeasonal.price_override} onChange={(e) => setNewSeasonal((s) => ({ ...s, price_override: Number(e.target.value) }))} className={inp} />
             <button disabled={!newSeasonal.room_type_id || !newSeasonal.start_date || !newSeasonal.end_date || upsertSeasonal.isPending}
               onClick={() => { upsertSeasonal.mutate(newSeasonal); setNewSeasonal({ room_type_id: "", name: "", start_date: "", end_date: "", price_override: 0 }); }}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-4 w-4" /></button>
@@ -126,7 +127,7 @@ export function HotelTarificationTab() {
           <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={newPlan.includes_breakfast} onChange={(e) => setNewPlan((s) => ({ ...s, includes_breakfast: e.target.checked }))} /> PDJ inclus</label>
           <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={newPlan.refundable} onChange={(e) => setNewPlan((s) => ({ ...s, refundable: e.target.checked }))} /> Remboursable</label>
           <div className="flex gap-2">
-            <input type="number" placeholder="% ajust." value={newPlan.price_adjustment_pct} onChange={(e) => setNewPlan((s) => ({ ...s, price_adjustment_pct: Number(e.target.value) }))} className={inp} />
+            <input type="number" onFocus={selectOnFocus} placeholder="% ajust." value={newPlan.price_adjustment_pct} onChange={(e) => setNewPlan((s) => ({ ...s, price_adjustment_pct: Number(e.target.value) }))} className={inp} />
             <button disabled={!newPlan.room_type_id || !newPlan.name.trim() || upsertPlan.isPending}
               onClick={() => { upsertPlan.mutate(newPlan); setNewPlan({ room_type_id: "", name: "", includes_breakfast: false, refundable: true, price_adjustment_pct: 0 }); }}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-4 w-4" /></button>
@@ -138,7 +139,7 @@ export function HotelTarificationTab() {
         <h2 className="mb-4 font-display text-lg font-bold">Taxe de séjour & devise secondaire</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={cityTaxEnabled} onChange={(e) => setCityTaxEnabled(e.target.checked)} /> Taxe de séjour activée</label>
-          <input type="number" disabled={!cityTaxEnabled} placeholder="Montant / nuit / pers." value={cityTaxAmount} onChange={(e) => setCityTaxAmount(Number(e.target.value))} className={inp} />
+          <input type="number" onFocus={selectOnFocus} disabled={!cityTaxEnabled} placeholder="Montant / nuit / pers." value={cityTaxAmount} onChange={(e) => setCityTaxAmount(Number(e.target.value))} className={inp} />
           <input placeholder="Devise secondaire (ex. EUR)" value={secondaryCurrency} onChange={(e) => setSecondaryCurrency(e.target.value.toUpperCase())} className={inp} />
         </div>
         <button onClick={() => updateSettings.mutate({ city_tax_enabled: cityTaxEnabled, city_tax_amount: cityTaxAmount, secondary_currency: secondaryCurrency || null })}
@@ -166,7 +167,7 @@ export function HotelTarificationTab() {
           <input placeholder="Contact" value={newCorporate.contact_name} onChange={(e) => setNewCorporate((s) => ({ ...s, contact_name: e.target.value }))} className={inp} />
           <input placeholder="Email" value={newCorporate.contact_email} onChange={(e) => setNewCorporate((s) => ({ ...s, contact_email: e.target.value }))} className={inp} />
           <div className="flex gap-2">
-            <input type="number" placeholder="Remise %" value={newCorporate.negotiated_discount_pct} onChange={(e) => setNewCorporate((s) => ({ ...s, negotiated_discount_pct: Number(e.target.value) }))} className={inp} />
+            <input type="number" onFocus={selectOnFocus} placeholder="Remise %" value={newCorporate.negotiated_discount_pct} onChange={(e) => setNewCorporate((s) => ({ ...s, negotiated_discount_pct: Number(e.target.value) }))} className={inp} />
             <button disabled={!newCorporate.name.trim() || upsertCorporate.isPending}
               onClick={() => { upsertCorporate.mutate(newCorporate); setNewCorporate({ name: "", contact_name: "", contact_email: "", negotiated_discount_pct: 0 }); }}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-4 w-4" /></button>
