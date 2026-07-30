@@ -68,13 +68,18 @@ function AbonnementPage() {
                   )}
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button disabled title="Bientôt disponible" className="cursor-not-allowed rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-muted-foreground opacity-60">
-                  Gérer le paiement
-                </button>
-                <button disabled title="Bientôt disponible" className="cursor-not-allowed rounded-xl bg-muted px-4 py-2 text-sm font-semibold text-muted-foreground opacity-60">
-                  Résilier
-                </button>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex gap-2">
+                  <button disabled className="cursor-not-allowed rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-muted-foreground opacity-60">
+                    Gérer le paiement
+                  </button>
+                  <button disabled className="cursor-not-allowed rounded-xl bg-muted px-4 py-2 text-sm font-semibold text-muted-foreground opacity-60">
+                    Résilier
+                  </button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Bientôt disponible — contactez le support pour gérer votre moyen de paiement ou résilier.
+                </p>
               </div>
             </div>
           )}

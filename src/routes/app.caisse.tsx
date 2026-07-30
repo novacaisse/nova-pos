@@ -6,7 +6,7 @@ import {
   UserPlus, ScanLine, X, Maximize2, Minimize2, RotateCcw, Printer, Check, Loader2,
   Package, ShoppingCart, ChevronUp,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 import {
   useCategories, useProducts, useCustomers, useUpsertCustomer,
   useCreateSale, useShopSettings, useProfile, DEFAULT_TICKET_CONFIG, useFormatMoney, newTicketRef,
@@ -14,6 +14,7 @@ import {
   type HoldTicket, type ProductWithStock, type Customer,
 } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
 import { THERMAL_CSS } from "@/lib/printDoc";
 
 export const Route = createFileRoute("/app/caisse")({
@@ -56,6 +57,7 @@ function CaissePage() {
   const deleteHold = useDeleteHoldTicket();
   const { data: myRole } = useMyRole();
   const perms = useTeamPermissions();
+  const { readOnly, reason: readOnlyReason } = useReadOnlyMode();
   // Bascule Bloc 15 : activé par défaut, comportement inchangé sauf si le
   // owner désactive explicitement la remise pour le rôle Caissier.
   const canDiscount = myRole !== "cashier" || perms.cashier_can_discount;
@@ -336,7 +338,7 @@ function CaissePage() {
                       {canDiscount && (
                         <div className="mt-1 flex items-center gap-2 pl-1">
                           <Percent className="h-3 w-3 text-muted-foreground" />
-                          <input type="number" min={0} max={100} value={dp || ""} placeholder="Remise ligne"
+                          <input type="number" onFocus={selectOnFocus} min={0} max={100} value={dp || ""} placeholder="Remise ligne"
                             onChange={(e) => setLineDiscount(l.product_id, Number(e.target.value) || 0)}
                             className="tabular h-6 w-20 rounded-md border border-border bg-card px-2 text-right text-[11px]" />
                           <span className="text-[10px] text-muted-foreground">% sur la ligne</span>
@@ -365,11 +367,11 @@ function CaissePage() {
                       className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "amount" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>F</button>
                   </div>
                   {discountMode === "pct" ? (
-                    <input type="number" min={0} max={100} value={discountPct}
+                    <input type="number" onFocus={selectOnFocus} min={0} max={100} value={discountPct}
                       onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
                       className="tabular h-7 w-14 rounded-md border border-border bg-card px-2 text-right text-xs" />
                   ) : (
-                    <input type="number" min={0} value={discountAmountInput}
+                    <input type="number" onFocus={selectOnFocus} min={0} value={discountAmountInput}
                       onChange={(e) => setDiscountAmountInput(Math.max(0, Number(e.target.value) || 0))}
                       className="tabular h-7 w-20 rounded-md border border-border bg-card px-2 text-right text-xs" />
                   )}
@@ -393,7 +395,10 @@ function CaissePage() {
             <PayPill active={payment === "card"} onClick={() => setPayment("card")} icon={<CreditCard className="h-4 w-4" />} label="Carte" />
           </div>
 
-          <motion.button whileTap={{ scale: 0.98 }} disabled={cart.length === 0 || createSale.isPending}
+          {readOnly && (
+            <div className="mt-3 rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 text-center text-xs text-destructive">{readOnlyReason}</div>
+          )}
+          <motion.button whileTap={{ scale: 0.98 }} disabled={cart.length === 0 || createSale.isPending || readOnly}
             onClick={() => setShowPay(true)}
             className="mt-3 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary to-primary-glow font-display text-base font-bold text-primary-foreground shadow-elegant transition-opacity disabled:cursor-not-allowed disabled:opacity-40">
             {createSale.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
@@ -545,7 +550,7 @@ function PaymentDialog({
           <div className="mb-1.5 text-xs font-semibold text-muted-foreground">
             {type === "total" ? "Montant reçu" : "Montant partiel"}
           </div>
-          <input type="number" value={received} autoFocus onChange={(e) => setReceived(e.target.value)}
+          <input type="number" onFocus={selectOnFocus} value={received} autoFocus onChange={(e) => setReceived(e.target.value)}
             className="tabular h-14 w-full rounded-xl border border-border bg-background px-4 text-2xl font-bold outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
         </label>
 

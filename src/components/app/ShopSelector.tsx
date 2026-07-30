@@ -71,7 +71,7 @@ export function ShopSelector() {
           );
         })}
         <div className="mt-1 border-t pt-1">
-          <Link to="/app/parametres" onClick={() => setOpen(false)}
+          <Link to="/app/parametres" search={{ openAdd: true }} onClick={() => setOpen(false)}
             className="block w-full rounded-lg px-2 py-2 text-left text-xs font-medium text-primary hover:bg-primary/5">
             + Ajouter une organisation
           </Link>

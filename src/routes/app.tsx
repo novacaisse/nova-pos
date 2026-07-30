@@ -14,7 +14,6 @@ import { BottomNav } from "@/components/app/BottomNav";
 import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
 import { OnboardingFlow } from "@/components/app/OnboardingFlow";
-import { getTrialInfo } from "@/lib/trial";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useMyRole } from "@/lib/data/hooks";
@@ -39,13 +38,12 @@ function AppLayout() {
     if (!loading && !user) navigate({ to: "/connexion" });
   }, [loading, user, navigate]);
 
-  // Blocage automatique après expiration de l'essai gratuit — basé sur
-  // organizations.trial_ends_at (Supabase), pas sur un flag local contournable.
-  useEffect(() => {
-    if (shopLoading) return;
-    const info = getTrialInfo(currentOrganization);
-    if (info.onTrial && info.expired) navigate({ to: "/souscription" });
-  }, [pathname, currentOrganization, shopLoading, navigate]);
+  // Essai expiré (audit ZegOS Phase 1, LOT C) : plus de redirection
+  // automatique et sans issue vers /souscription — l'organisation passe en
+  // lecture seule (bandeau TrialBanner + useReadOnlyMode bloque les actions
+  // de création/vente/réservation aux points d'entrée concernés), mais
+  // reste consultable et l'utilisateur garde toujours accès au sélecteur
+  // d'organisation et à la déconnexion. Voir src/lib/auth/useReadOnlyMode.ts.
 
   // Le tableau de bord racine (/app) est celui de ZegCaisse — inutile (ou
   // vide côté RLS) pour une organisation hotel-only ou un rôle

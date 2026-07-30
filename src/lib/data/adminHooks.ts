@@ -236,12 +236,45 @@ export function useDeleteOrganization() {
 // Changement de formule forcé par le Super Admin (ex. downgrade manuel,
 // correction après un paiement validé à la main) — même colonne que
 // l'auto-service (souscription), même policy shops_update_admin.
+//
+// Garde `subscriptions` synchronisé avec `organizations.plan` (audit ZegOS
+// Phase 1, LOT C) : avant ce correctif, cette action ne touchait QUE
+// organizations.plan — la ligne `subscriptions` (status/plan/
+// current_period_end), lue par la page Abonnement et par ce même Paramètres
+// > Organisation, restait figée sur son état précédent (souvent encore
+// "trialing" avec une échéance déjà dépassée). Résultat observé : Paramètres
+// affichait "Plan starter" pendant qu'Abonnement affichait "Essai gratuit
+// expiré depuis 5 jours" pour la même organisation. On upsert donc aussi la
+// ligne d'abonnement en "active" avec la nouvelle formule, et on efface
+// trial_ends_at (plus pertinent une fois sur une vraie formule).
 export function useChangeOrganizationPlan() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, plan }: { id: string; plan: string }) => {
-      const { error } = await supabase.from("organizations").update({ plan }).eq("id", id);
+      const { error } = await supabase.from("organizations")
+        .update({ plan, trial_ends_at: plan === "trial" ? undefined : null }).eq("id", id);
       if (error) throw error;
+
+      if (plan !== "trial") {
+        const { data: planDef } = await supabase.from("plans").select("price_month, currency").eq("id", plan).maybeSingle();
+        const { data: existing } = await supabase.from("subscriptions")
+          .select("id").eq("organization_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        const periodEnd = new Date();
+        periodEnd.setDate(periodEnd.getDate() + 30);
+        const payload = {
+          plan, status: "active" as const,
+          amount: planDef?.price_month ?? 0, currency: planDef?.currency ?? "XOF",
+          current_period_end: periodEnd.toISOString(),
+        };
+        if (existing) {
+          const { error: updErr } = await supabase.from("subscriptions").update(payload).eq("id", existing.id);
+          if (updErr) throw updErr;
+        } else {
+          const { error: insErr } = await supabase.from("subscriptions")
+            .insert({ ...payload, organization_id: id, started_at: new Date().toISOString() });
+          if (insErr) throw insErr;
+        }
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_organizations"] }),
   });

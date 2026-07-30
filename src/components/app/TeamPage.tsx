@@ -209,7 +209,18 @@ function MemberRow({ member, isOwner, isSelf, roles, onRoleChange, onRemove }: {
   member: ShopMember; isOwner: boolean; isSelf: boolean; roles: AppRole[];
   onRoleChange: (role: AppRole) => void; onRemove: () => void;
 }) {
-  const canEdit = isOwner && !isSelf;
+  // Un membre garde un seul rôle (organization_members.role) partagé entre
+  // ZegCaisse et ZegHotel — mais chaque page Équipe ne propose que les
+  // rôles pertinents pour SON application (voir app.equipe.tsx /
+  // app.hotel.equipe.tsx). Si le rôle réel du membre n'est pas dans cette
+  // liste (ex. "Caissier" vu depuis Équipe ZegHotel), un <select> contrôlé
+  // par `roles` afficherait silencieusement la première option de la liste
+  // au lieu de la vraie valeur (bug audité : Mariame affichée "Propriétaire"
+  // côté ZegHotel alors que son vrai rôle est "Caissier" côté ZegCaisse —
+  // pas une élévation de privilège réelle, un artefact d'affichage). On
+  // n'édite donc jamais depuis une page où le rôle actuel n'a pas de sens.
+  const roleBelongsHere = roles.includes(member.role);
+  const canEdit = isOwner && !isSelf && roleBelongsHere;
   return (
     <tr className="border-t border-border/60 hover:bg-muted/40">
       <td className="px-4 py-3">
@@ -231,7 +242,10 @@ function MemberRow({ member, isOwner, isSelf, roles, onRoleChange, onRemove }: {
             {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
           </select>
         ) : (
-          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{ROLE_LABEL[member.role]}</span>
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary"
+            title={!roleBelongsHere ? "Rôle géré depuis l'Équipe de l'autre application" : undefined}>
+            {ROLE_LABEL[member.role]}{!roleBelongsHere && isOwner && !isSelf && " (autre app)"}
+          </span>
         )}
       </td>
       <td className="px-4 py-3 text-xs text-muted-foreground">{member.profile?.phone || "—"}</td>
@@ -285,17 +299,24 @@ function CreateMemberModal({ onClose, roles, defaultRole }: { onClose: () => voi
             qu'elle se connecte — si un compte existe déjà avec cet email, il sera simplement rattaché à cette
             organisation (aucun mot de passe requis dans ce cas).
           </p>
+          {/* Le navigateur assimile ce formulaire à une connexion (email + mot de
+              passe) et propose sinon d'autofill les identifiants du compte Owner
+              connecté — autocomplete="off"/"new-password" + noms de champs non
+              standards pour empêcher toute suggestion d'identifiants sauvegardés. */}
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom complet *</span>
-            <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={inp} />
+            <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={inp}
+              name="member_full_name" autoComplete="off" />
           </label>
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email *</span>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inp} />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inp}
+              name="member_email_address" autoComplete="off" />
           </label>
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Mot de passe (si nouveau compte)</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="6 caractères minimum" className={inp} />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="6 caractères minimum" className={inp}
+              name="member_new_password" autoComplete="new-password" />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block">

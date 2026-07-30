@@ -5,27 +5,59 @@ import {
   X, Trash2, Search, LayoutGrid,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
+import { PageSkeleton } from "@/components/app/PageSkeleton";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { OrgIdentityTab } from "@/components/app/OrgIdentityTab";
 import { ApplicationsPanel } from "@/components/app/ApplicationsPanel";
 import {
-  useShopSettings, useUpdateShopSettings, useUpdateShop, useMyRole,
+  useShopSettings, useUpdateShopSettings, useUpdateShop, useMyRole, useSubscription,
   useProvisionOrganization, useTransferStock, useProducts,
-  DEFAULT_TICKET_CONFIG, useFormatMoney, type TicketConfig, type TaxRate, type ProductWithStock,
+  DEFAULT_TICKET_CONFIG, useFormatMoney, type TicketConfig, type TaxRate, type ProductWithStock, type Subscription,
 } from "@/lib/data/hooks";
-import { cn } from "@/lib/utils";
+import { getTrialInfo } from "@/lib/trial";
+import { cn, selectOnFocus } from "@/lib/utils";
+
+// Même calcul que la page Abonnement (audit ZegOS Phase 1, LOT C) — avant
+// ce correctif, cette liste affichait organizations.plan brut ("Plan
+// starter"), qui peut diverger de subscriptions (source de vérité de
+// l'état d'abonnement réel) si une formule a été changée manuellement sans
+// mettre à jour l'abonnement (voir useChangeOrganizationPlan). Pour
+// l'organisation courante, on croise avec subscriptions ; pour les autres
+// organisations de la liste (non chargées en détail ici), on retombe sur
+// organizations.plan/trial_ends_at seuls — fiables tant qu'aucun changement
+// de formule manuel désynchronisé n'a eu lieu dessus.
+function planStatusLabel(org: { plan: string; trial_ends_at: string | null }, subscription?: Subscription | null): string {
+  const trial = getTrialInfo(org);
+  if (trial.onTrial) {
+    return trial.expired ? "Essai terminé" : `Essai · ${trial.daysLeft} j restant${trial.daysLeft > 1 ? "s" : ""}`;
+  }
+  if (subscription && subscription.status !== "active") {
+    if (subscription.status === "trialing") return "Essai terminé";
+    if (subscription.status === "past_due") return `Plan ${org.plan} · paiement en retard`;
+    return `Plan ${org.plan} · ${subscription.status}`;
+  }
+  return `Plan ${org.plan}`;
+}
 
 const CURRENCIES = ["XOF", "XAF", "EUR", "USD", "GHS", "NGN"];
 const COUNTRIES = ["Bénin", "Togo", "Côte d'Ivoire", "Sénégal", "Burkina Faso", "Mali", "Niger", "Guinée", "Cameroun"];
 
 export const Route = createFileRoute("/app/parametres")({
+  // ?openAdd=1 : ouvre directement le formulaire "Ajouter une organisation"
+  // — utilisé par le raccourci du même nom dans ShopSelector.tsx, qui
+  // redirigeait ici sans jamais l'ouvrir (audit ZegOS Phase 1, LOT D).
+  validateSearch: (search: Record<string, unknown>): { openAdd?: boolean } => ({
+    openAdd: search.openAdd === true || search.openAdd === "1" ? true : undefined,
+  }),
   component: ParametresPage,
 });
 
 function ParametresPage() {
+  const { openAdd } = Route.useSearch();
   const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer" | "apps">("shop");
   const { organizations, currentOrganization } = useOrganization();
   const { data: settings, isLoading: settingsLoading } = useShopSettings();
+  const { data: currentSubscription } = useSubscription();
   const updateShop = useUpdateShop();
   const updateSettings = useUpdateShopSettings();
   const { data: myRole } = useMyRole();
@@ -38,6 +70,10 @@ function ParametresPage() {
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [showAddShop, setShowAddShop] = useState(false);
   const createShop = useProvisionOrganization();
+
+  useEffect(() => {
+    if (openAdd) { setTab("shop"); setShowAddShop(true); }
+  }, [openAdd]);
 
   useEffect(() => {
     if (currentOrganization) setCurrency(currentOrganization.currency);
@@ -84,6 +120,7 @@ function ParametresPage() {
   if (!currentOrganization) {
     return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une organisation.</div>;
   }
+  if (settingsLoading) return <PageSkeleton title="Paramètres" subtitle="Configuration ZegCaisse de votre organisation" />;
 
   return (
     <div>
@@ -127,7 +164,9 @@ function ParametresPage() {
                       <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary"><Store className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold">{s.name}</div>
-                        <div className="text-xs text-muted-foreground">{s.country} · Plan {s.plan}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {s.country} · {planStatusLabel(s, s.id === currentOrganization.id ? currentSubscription : undefined)}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -185,7 +224,7 @@ function ParametresPage() {
                       onChange={(e) => setTaxRates((r) => r.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x))}
                       placeholder="Nom (ex. TVA standard)"
                       className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-sm disabled:opacity-60" />
-                    <input type="number" min={0} max={100} value={t.rate} disabled={!canManage}
+                    <input type="number" onFocus={selectOnFocus} min={0} max={100} value={t.rate} disabled={!canManage}
                       onChange={(e) => setTaxRates((r) => r.map((x, idx) => idx === i ? { ...x, rate: Number(e.target.value) || 0 } : x))}
                       className="tabular h-9 w-20 rounded-lg border border-border bg-background px-2 text-right text-sm disabled:opacity-60" />
                     <span className="text-xs text-muted-foreground">%</span>
@@ -441,7 +480,7 @@ function TransferPanel({ organizations, currentOrganizationId, currentOrganizati
                 <div className="truncate text-sm font-medium">{p.name}</div>
                 <div className="text-[11px] text-muted-foreground">Stock : {p.stock} · {formatXOF(Number(p.price))}</div>
               </div>
-              <input type="number" min={0} max={p.stock} value={qty[p.id] ?? 0}
+              <input type="number" onFocus={selectOnFocus} min={0} max={p.stock} value={qty[p.id] ?? 0}
                 onChange={(e) => setQty((q) => ({ ...q, [p.id]: Math.max(0, Math.min(p.stock, Number(e.target.value) || 0)) }))}
                 className="w-20 rounded-lg border border-border bg-background px-2 py-1 text-right text-sm" />
             </div>

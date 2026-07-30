@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Clock, Sparkles } from "lucide-react";
+import { Clock, Sparkles, Lock } from "lucide-react";
 import { getTrialInfo } from "@/lib/trial";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useSubscription } from "@/lib/data/hooks";
@@ -15,7 +15,30 @@ export function TrialBanner() {
   // où l'un des deux resterait désynchronisé (ex. webhook manqué avant le
   // fix du Bloc 16), l'organisation ne doit jamais voir le bandeau d'essai
   // une fois réellement abonnée.
-  if (!info.onTrial || info.expired || subscription?.status === "active") return null;
+  if (!info.onTrial || subscription?.status === "active") return null;
+
+  // Essai expiré (audit ZegOS Phase 1, LOT C) : plus de redirection forcée
+  // et sans issue vers /souscription (app.tsx) — ce bandeau explique le
+  // mode lecture seule et reste le seul rappel visible ; l'utilisateur
+  // garde un accès complet à la navigation (sélecteur d'organisation,
+  // déconnexion) et peut continuer à consulter ses données.
+  if (info.expired) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive sm:text-sm">
+        <Lock className="h-4 w-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <span className="font-semibold">Essai gratuit terminé.</span>{" "}
+          Cette organisation est en lecture seule — consultation possible, ventes/réservations/créations désactivées.
+        </div>
+        <Link
+          to="/souscription"
+          className="rounded-lg bg-current/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider hover:underline"
+        >
+          Souscrire
+        </Link>
+      </div>
+    );
+  }
 
   const urgent = info.daysLeft <= 1;
 
