@@ -7,6 +7,7 @@ import {
 import { PageHeader } from "@/components/app/PageHeader";
 import { useMyRole, useFormatMoney, useShopSettings } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
 import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import {
   useHotelReservations, useHotelRooms, useHotelRoomTypes, useHotelGuests, useUpsertHotelGuest,
@@ -16,7 +17,7 @@ import {
   type HotelReservationRow, type ReservationStatus, type HotelRoom, type FolioChargeKind, type HotelPaymentMethod,
   type HotelFolioDetail,
 } from "@/lib/data/hotelHooks";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/hotel/reservations")({
   component: ReservationsPage,
@@ -41,7 +42,11 @@ function addDays(iso: string, n: number) { const d = new Date(iso + "T00:00:00")
 
 function ReservationsPage() {
   const { data: myRole } = useMyRole();
-  const canWrite = myRole === "owner" || myRole === "manager" || myRole === "front_desk";
+  const { readOnly } = useReadOnlyMode();
+  // Essai expiré (audit ZegOS Phase 1, LOT C) : plus aucune création/action
+  // d'écriture sur les réservations tant que l'organisation est en lecture
+  // seule — le bandeau global (TrialBanner, app.tsx) explique la situation.
+  const canWrite = (myRole === "owner" || myRole === "manager" || myRole === "front_desk") && !readOnly;
   const [rangeStart, setRangeStart] = useState(() => toISO(new Date()));
   const rangeEnd = addDays(rangeStart, DAYS_WINDOW);
   const days = useMemo(() => Array.from({ length: DAYS_WINDOW }, (_, i) => addDays(rangeStart, i)), [rangeStart]);
@@ -303,7 +308,7 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
                       {r.number} — {r.room_type?.name} {unavailable && <span className="text-xs text-destructive">(indisponible)</span>}
                     </span>
                     {selectedRoomIds.includes(r.id) && (
-                      <input type="number" className="w-24 rounded-lg border border-border bg-background px-2 py-1 text-xs"
+                      <input type="number" onFocus={selectOnFocus} className="w-24 rounded-lg border border-border bg-background px-2 py-1 text-xs"
                         value={rateOverrides[r.id] ?? rateFor(r.id)}
                         onChange={(e) => setRateOverrides((prev) => ({ ...prev, [r.id]: Number(e.target.value) }))} />
                     )}
@@ -315,9 +320,9 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Adultes</span>
-              <input type="number" min={1} value={adults} onChange={(e) => setAdults(Number(e.target.value))} className={inp} /></label>
+              <input type="number" onFocus={selectOnFocus} min={1} value={adults} onChange={(e) => setAdults(Number(e.target.value))} className={inp} /></label>
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Enfants</span>
-              <input type="number" min={0} value={children} onChange={(e) => setChildren(Number(e.target.value))} className={inp} /></label>
+              <input type="number" onFocus={selectOnFocus} min={0} value={children} onChange={(e) => setChildren(Number(e.target.value))} className={inp} /></label>
           </div>
           {ratePlans.length > 0 && (
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tarif</span>
@@ -361,15 +366,21 @@ function printHotelInvoice(
   settings: { data: { address?: string; phone?: string; ifu?: string } } | null | undefined,
   formatMoney: (n: number) => string,
 ) {
+  // La chambre est facturée comme charge "room" du folio dès le check-in
+  // (useCheckInReservation) — c'est la source de vérité une fois postée.
+  // Avant check-in, le folio n'a encore aucune charge "room" : on affiche
+  // alors un aperçu calculé depuis hotel_reservation_rooms (proforma), sans
+  // jamais afficher les deux à la fois (double comptage).
   const nights = Math.max(1, (new Date(reservation.check_out).getTime() - new Date(reservation.check_in).getTime()) / 86400000);
-  const roomRows = reservation.reservation_rooms
+  const hasPostedRoomCharge = folio.charges.some((c) => c.kind === "room");
+  const roomRows = hasPostedRoomCharge ? "" : reservation.reservation_rooms
     .filter((rr) => rr.status !== "cancelled" && rr.status !== "no_show")
-    .map((rr) => `<tr><td>Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""} (${nights} nuit${nights > 1 ? "s" : ""})</td><td class="num">1</td><td class="num">${formatMoney(rr.rate_amount)}</td><td class="num">${formatMoney(rr.rate_amount)}</td></tr>`)
+    .map((rr) => `<tr><td>Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""} (${nights} nuit${nights > 1 ? "s" : ""}) — proforma</td><td class="num">1</td><td class="num">${formatMoney(rr.rate_amount)}</td><td class="num">${formatMoney(rr.rate_amount)}</td></tr>`)
     .join("");
   const chargeRows = folio.charges
     .map((c) => `<tr><td>${c.description}</td><td class="num">${c.quantity}</td><td class="num">${formatMoney(c.amount)}</td><td class="num">${formatMoney(c.amount * c.quantity)}</td></tr>`)
     .join("");
-  const roomTotal = reservation.reservation_rooms
+  const roomTotal = hasPostedRoomCharge ? 0 : reservation.reservation_rooms
     .filter((rr) => rr.status !== "cancelled" && rr.status !== "no_show")
     .reduce((s, rr) => s + rr.rate_amount, 0);
   const chargesTotal = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
@@ -481,7 +492,7 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                     </button>
                   )}
                   {(reservation.status === "pending" || reservation.status === "confirmed") && (
-                    <button disabled={busy} onClick={() => run(() => checkIn(reservation.id))}
+                    <button disabled={busy} onClick={() => run(() => checkIn.mutateAsync(reservation.id))}
                       className="flex items-center justify-center gap-1.5 rounded-xl border border-success/40 bg-success/10 px-3 py-2.5 text-xs font-semibold text-success hover:bg-success/20">
                       <LogIn className="h-3.5 w-3.5" /> Check-in
                     </button>
@@ -533,7 +544,7 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                           <option value="extra">Extra</option><option value="penalty">Pénalité</option><option value="tax">Taxe</option><option value="discount">Remise</option>
                         </select>
                         <input value={chargeDesc} onChange={(e) => setChargeDesc(e.target.value)} placeholder="Description" className="flex-1 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
-                        <input type="number" value={chargeAmount} onChange={(e) => setChargeAmount(Number(e.target.value))} className="w-24 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
+                        <input type="number" onFocus={selectOnFocus} value={chargeAmount} onChange={(e) => setChargeAmount(Number(e.target.value))} className="w-24 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
                         <button disabled={busy || !chargeDesc.trim() || !chargeAmount}
                           onClick={() => run(async () => { await addCharge.mutateAsync({ folio_id: folio.id, kind: chargeKind, description: chargeDesc.trim(), amount: chargeAmount }); setChargeDesc(""); setChargeAmount(0); })}
                           className="rounded-xl bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-40">Ajouter</button>
@@ -543,7 +554,7 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                           className="rounded-xl border border-border bg-background px-2 py-2 text-xs">
                           <option value="cash">Espèces</option><option value="mobile_money">Mobile Money</option><option value="card">Carte</option><option value="bank_transfer">Virement</option>
                         </select>
-                        <input type="number" value={payAmount} onChange={(e) => setPayAmount(Number(e.target.value))} placeholder="Montant" className="flex-1 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
+                        <input type="number" onFocus={selectOnFocus} value={payAmount} onChange={(e) => setPayAmount(Number(e.target.value))} placeholder="Montant" className="flex-1 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
                         <button disabled={busy || !payAmount}
                           onClick={() => run(async () => { await addPayment.mutateAsync({ folio_id: folio.id, amount: payAmount, method: payMethod }); setPayAmount(0); })}
                           className="flex items-center gap-1 rounded-xl bg-success/10 px-3 text-xs font-semibold text-success disabled:opacity-40"><Banknote className="h-3.5 w-3.5" /> Encaisser</button>

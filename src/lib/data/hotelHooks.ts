@@ -508,11 +508,57 @@ export function useUpdateHotelReservation() {
 }
 
 // Check-in : bascule la réservation (le trigger BDD répercute sur les
-// lignes hotel_reservation_rooms). Le statut chambre n'a pas à changer ici
-// (elle est déjà "clean"/"inspected" avant l'arrivée).
+// lignes hotel_reservation_rooms) ET poste la charge "chambre" dans le
+// folio — avant ce correctif, le tarif de la chambre n'était JAMAIS
+// facturé (seuls les extras ajoutés manuellement dans le folio comptaient),
+// d'où un solde à 0F systématique au check-out et des rapports d'occupation/
+// ADR/RevPAR à 0 (ils lisent hotel_reservation_rooms.rate_amount, mais le
+// folio — source de vérité pour la facturation — restait vide). Idempotent
+// (vérifie qu'aucune charge "room" n'existe déjà) pour rester sûr même en
+// cas de nouvel appel. Correctif purement applicatif — le check-in ne
+// transite que par ce hook, pas besoin de trigger SQL.
 export function useCheckInReservation() {
-  const update = useUpdateHotelReservation();
-  return (id: string) => update.mutateAsync({ id, status: "checked_in" });
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { error: resErr } = await supabase.from("hotel_reservations").update({ status: "checked_in" }).eq("id", id);
+      if (resErr) throw resErr;
+
+      const { data: folio, error: folioErr } = await supabase.from("hotel_folios")
+        .select("id").eq("reservation_id", id).maybeSingle();
+      if (folioErr) throw folioErr;
+      if (!folio) return;
+
+      const { data: existingRoomCharges, error: existErr } = await supabase.from("hotel_folio_charges")
+        .select("id").eq("folio_id", folio.id).eq("kind", "room").limit(1);
+      if (existErr) throw existErr;
+      if (existingRoomCharges && existingRoomCharges.length > 0) return;
+
+      const { data: rooms, error: roomsErr } = await supabase.from("hotel_reservation_rooms")
+        .select("*, room:hotel_rooms(number, room_type:hotel_room_types(name))")
+        .eq("reservation_id", id);
+      if (roomsErr) throw roomsErr;
+
+      const charges = (rooms ?? []).map((rr: any) => {
+        const nights = Math.max(1, Math.round((new Date(rr.check_out).getTime() - new Date(rr.check_in).getTime()) / 86400000));
+        return {
+          organization_id: organizationId, folio_id: folio.id, kind: "room" as FolioChargeKind,
+          description: `Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""}`.trim(),
+          amount: rr.rate_amount / nights, quantity: nights, charge_date: rr.check_in,
+        };
+      });
+      if (charges.length) {
+        const { error: insErr } = await supabase.from("hotel_folio_charges").insert(charges);
+        if (insErr) throw insErr;
+      }
+    },
+    onSuccess: (_d, id) => {
+      qc.invalidateQueries({ queryKey: ["hotel_reservations", organizationId] });
+      qc.invalidateQueries({ queryKey: ["hotel_reservation", id] });
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" });
+    },
+  });
 }
 
 // Check-out : bascule la réservation ET marque les chambres occupées
@@ -718,7 +764,15 @@ export function useHotelDashboardStats(today: string) {
     queryKey: ["hotel_dashboard", organizationId, today],
     enabled: !!organizationId,
     queryFn: async () => {
-      const [{ count: totalRooms }, { data: arrivals }, { data: departures }, { data: inHouse }] = await Promise.all([
+      // Bug corrigé : la 4e requête (nuitées en cours) est en head:true —
+      // Supabase renvoie alors data: null (aucune ligne, juste le compte) —
+      // elle était destructurée en { data: inHouse } au lieu de
+      // { count: occupied }. `inHouse.count` sur un null jetait une
+      // exception à chaque appel, faisant échouer TOUTE la requête
+      // silencieusement (React Query gardait `stats` à undefined) — d'où
+      // le "0/0 chambres" permanent malgré totalRooms correctement récupéré
+      // juste au-dessus dans le même Promise.all.
+      const [{ count: totalRooms }, { data: arrivals }, { data: departures }, { count: occupied }] = await Promise.all([
         supabase.from("hotel_rooms").select("id", { count: "exact", head: true }).eq("organization_id", organizationId!),
         supabase.from("hotel_reservations").select("*, guest:hotel_guests(*)").eq("organization_id", organizationId!)
           .eq("check_in", today).in("status", ["pending", "confirmed"]),
@@ -727,11 +781,10 @@ export function useHotelDashboardStats(today: string) {
         supabase.from("hotel_reservations").select("id", { count: "exact", head: true }).eq("organization_id", organizationId!)
           .eq("status", "checked_in").lte("check_in", today).gt("check_out", today),
       ]);
-      const occupied = inHouse.count ?? 0;
       return {
         totalRooms: totalRooms ?? 0,
-        occupied,
-        occupancyPct: totalRooms ? Math.round((occupied / totalRooms) * 100) : 0,
+        occupied: occupied ?? 0,
+        occupancyPct: totalRooms ? Math.round(((occupied ?? 0) / totalRooms) * 100) : 0,
         arrivals: (arrivals ?? []) as HotelReservationRow[],
         departures: (departures ?? []) as HotelReservationRow[],
       };
