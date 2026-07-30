@@ -18,7 +18,6 @@ import {
   CalendarRange,
   DoorClosed,
   Sparkle,
-  LayoutGrid,
   X,
 } from "lucide-react";
 import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
@@ -58,10 +57,9 @@ const HOTEL_PRIMARY: Item[] = [
 ];
 const HOTEL_MORE: Item[] = [
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
-  { label: "Équipe", to: "/app/equipe", icon: UsersRound },
-  { label: "Paramètres", to: "/app/parametres", icon: Settings },
+  { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },
+  { label: "Paramètres", to: "/app/hotel/parametres", icon: Settings },
 ];
-const APPLICATIONS_ITEM: Item = { label: "Apps", to: "/app/applications", icon: LayoutGrid };
 // Housekeeping n'a accès ni aux réservations ni aux rapports (020h/020g,
 // données financières/clients hors de son périmètre) — mobile-first pour
 // ce rôle : juste ses chambres et ses tâches du jour.
@@ -82,11 +80,6 @@ export function BottomNav() {
   const isGatableModule = (to: string) => PLAN_MODULES.some((m) => m.url === to);
   const included = (item: Item) => !planModules || !isGatableModule(item.to) || planModules.includes(item.to);
 
-  const isOwner = myRole === "owner";
-  // Réservé au propriétaire (voir app.applications.tsx) — change ce que
-  // voit toute l'équipe, jamais proposé aux autres rôles.
-  const applicationsItem: Item[] = isOwner ? [APPLICATIONS_ITEM] : [];
-
   // ZegCaisse et ZegHôtel sont deux activités distinctes : quand les deux
   // sont actives, on ne mélange jamais leurs raccourcis — le menu affiché
   // dépend du contexte courant (déduit de l'URL), au même titre que dans
@@ -102,8 +95,8 @@ export function BottomNav() {
     ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY)
     : PRIMARY.filter(included);
   const more = useHotelNav
-    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : [...HOTEL_MORE, ...applicationsItem])
-    : [...MORE.filter(included), ...applicationsItem];
+    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : HOTEL_MORE)
+    : MORE.filter(included);
   // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes
   // (owner/manager/accountant) — front_desk/housekeeping n'ont RLS-wise
   // aucun accès à ZegCaisse, inutile de leur proposer de "basculer".

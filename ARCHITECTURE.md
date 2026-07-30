@@ -14,17 +14,25 @@ Un compte utilisateur peut, à terme, être abonné à plusieurs applications Ze
 | `public.organizations` | Un espace de travail (« boutique » dans le vocabulaire ZegCaisse). Porte `plan`, `trial_ends_at`, `active_apps`. |
 | `public.organization_members` | Appartenance many-to-many utilisateur ↔ organisation, avec un rôle (`app_role` : `owner`, `manager`, `accountant` partagés entre modules ; `cashier`, `stock` spécifiques ZegCaisse ; `front_desk`, `housekeeping` spécifiques ZegHotel — voir plus bas). |
 | `public.subscriptions` / `public.subscription_payments` | Abonnement et paiements, par organisation. |
-| `organizations.active_apps` | jsonb, ex. `["pos"]` ou `["pos","hotel"]` — applications ZegOS actives sur cette organisation. Gate désormais la navigation et les routes côté frontend (`AppSidebar`, `BottomNav`, `app.equipe.tsx`, l'onglet Tarification de Paramètres) ; **aucune policy RLS ne s'y appuie** — la RLS reste scopée par `organization_id` + rôle uniquement, `active_apps` est un filtre d'affichage, pas une barrière de sécurité. |
+| `organizations.active_apps` | jsonb, ex. `["pos"]` ou `["pos","hotel"]` — applications ZegOS actives sur cette organisation. Gate la navigation et les routes côté frontend (`AppSidebar`, `BottomNav`, `AppSwitcher`, `app.tsx`) ; **aucune policy RLS ne s'y appuie** — la RLS reste scopée par `organization_id` + rôle uniquement, `active_apps` est un filtre d'affichage, pas une barrière de sécurité. |
 
 Un même compte peut appartenir à plusieurs organisations (`organization_members` est many-to-many depuis l'origine). Deux façons de faire du multi-application avec ce seul modèle, sans table supplémentaire :
 - **Une organisation, plusieurs applications** : `active_apps = ["pos", "hotel"]` — un même établissement utilise ZegCaisse et un futur ZegHotel.
 - **Plusieurs organisations, une application chacune** : deux organisations séparées, chacune avec un seul élément dans `active_apps` — deux activités distinctes du même compte.
 
-## Ce qui appartient à ZegCaisse (module)
+## ZegCaisse et ZegHôtel : applications 100% autonomes, aucune page commune
 
-Le schéma historique est spécifique à ZegCaisse : `products`, `sales`, `stock_levels`, `customers`, `quotes`, `expenses`, `purchase_orders`, `organization_settings` (réglages boutique), etc. — toutes ces tables référencent `organization_id` mais n'ont de sens que dans le contexte du point de vente.
+Au-delà du socle ci-dessus (comptes, organisation, abonnement, rôles), **rien n'est partagé dans la navigation** entre les deux applications — chacune a sa propre page Équipe et sa propre page Paramètres, jamais un écran unique avec des onglets pour l'une et l'autre :
+- ZegCaisse : `/app/equipe`, `/app/parametres` (tabs Organisation/Devise/Taxes/Ticket/Transfert de stock/Applications).
+- ZegHotel : `/app/hotel/equipe`, `/app/hotel/parametres` (tabs Établissement/Tarification/Applications).
 
-Routes : `/app/caisse`, `/app/ventes`, `/app/produits`, `/app/stock`, `/app/clients`, `/app/fournisseurs`, `/app/devis`, `/app/depenses`, `/app/rapports`.
+Les deux pages Équipe partagent le même composant `TeamPage` (paramétré par la liste de rôles proposée) et les deux pages Paramètres partagent `OrgIdentityTab`/`ApplicationsPanel` — **réutilisation de composants, jamais de route ou d'écran commun** : `organizations`/`organization_members`/`organization_settings` restent des tables uniques par organisation (impossible de les dupliquer par application), donc la séparation se fait au niveau de l'écran, pas de la donnée.
+
+`AppSidebar`/`BottomNav` n'affichent jamais les deux menus empilés : le contexte courant se déduit de l'URL (`/app/hotel/*` vs le reste) et `AppSwitcher` bascule entre les deux quand l'organisation a les deux applications actives (voir `app.tsx` pour la redirection automatique `/app` → `/app/hotel` sur une organisation hotel-only ou un rôle front_desk/housekeeping).
+
+Le schéma ZegCaisse reste `products`, `sales`, `stock_levels`, `customers`, `quotes`, `expenses`, `purchase_orders`, etc. — toutes ces tables référencent `organization_id` mais n'ont de sens que dans le contexte du point de vente.
+
+Routes : `/app/caisse`, `/app/ventes`, `/app/produits`, `/app/stock`, `/app/clients`, `/app/fournisseurs`, `/app/devis`, `/app/depenses`, `/app/rapports`, `/app/equipe`, `/app/parametres`.
 
 ## Ce qui appartient à ZegHotel (module)
 
@@ -44,7 +52,7 @@ Routes : `/app/caisse`, `/app/ventes`, `/app/produits`, `/app/stock`, `/app/clie
 
 Rôles ZegHotel (`app_role` étendu) : `front_desk` (Réceptionniste — réservations, clients, folios) et `housekeeping` (Gouvernante — **scopée aux seules chambres et tâches de ménage/maintenance**, aucun accès RLS aux réservations, clients ou données financières). `owner`/`manager`/`accountant` sont partagés avec ZegCaisse et ont un accès équivalent des deux côtés.
 
-Routes : `/app/hotel` (tableau de bord), `/app/hotel/reservations` (planning + folio + facture PDF), `/app/hotel/rooms`, `/app/hotel/housekeeping`, `/app/hotel/rapports` (occupation/ADR/RevPAR/pickup + audit de nuit) ; onglet "Tarification Hôtel" dans `/app/parametres`. Toutes sous forme de fichiers plats (`app.hotel.tsx` + `app.hotel.index.tsx` + `app.hotel.<page>.tsx`), même convention que `app.produits.tsx` — jamais de layout imbriqué au-delà de ce que le routing par fichiers impose déjà.
+Routes : `/app/hotel` (tableau de bord), `/app/hotel/reservations` (planning + folio + facture PDF), `/app/hotel/rooms`, `/app/hotel/housekeeping`, `/app/hotel/rapports` (occupation/ADR/RevPAR/pickup + audit de nuit), `/app/hotel/equipe`, `/app/hotel/parametres` (Établissement/Tarification/Applications). Toutes sous forme de fichiers plats (`app.hotel.tsx` + `app.hotel.index.tsx` + `app.hotel.<page>.tsx`), même convention que `app.produits.tsx` — jamais de layout imbriqué au-delà de ce que le routing par fichiers impose déjà.
 
 Hors scope V1 (assumé) : intégrations channel manager réelles, moteur de yield/IA, POS interne lié au folio, multi-hôtel par organisation.
 

@@ -23,7 +23,6 @@ import {
   CalendarRange,
   DoorClosed,
   Sparkle,
-  LayoutGrid,
 } from "lucide-react";
 import {
   Sidebar,
@@ -61,7 +60,6 @@ const ICONS = {
   CalendarRange,
   DoorClosed,
   Sparkle,
-  LayoutGrid,
 } as const;
 
 type NavItem = {
@@ -98,10 +96,17 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Housekeeping", url: "/app/hotel/housekeeping", icon: "Sparkle" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
   ],
-  admin: [
-    { title: "Applications", url: "/app/applications", icon: "LayoutGrid" },
+  // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
+  // de commun dans la nav entre les deux applications (le paramètre
+  // "Applications" pour activer/désactiver/basculer vit maintenant comme
+  // onglet DANS chacune de ces deux pages Paramètres, plus de nav item dédié).
+  adminPos: [
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
+  ],
+  adminHotel: [
+    { title: "Équipe", url: "/app/hotel/equipe", icon: "UsersRound" },
+    { title: "Paramètres", url: "/app/hotel/parametres", icon: "Settings" },
   ],
 };
 
@@ -128,9 +133,6 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/hotel/reservations": ["housekeeping"],
   "/app/hotel/rapports": ["housekeeping"],
   "/app/hotel/housekeeping": ["accountant"],
-  // Activer/désactiver une application change ce que voit toute l'équipe —
-  // réservé au propriétaire (voir app.applications.tsx).
-  "/app/applications": ["manager", "cashier", "stock", "accountant", "front_desk", "housekeeping"],
 };
 
 export function AppSidebar() {
@@ -141,11 +143,10 @@ export function AppSidebar() {
   const planModules = useCurrentPlanModules();
   const { currentOrganization } = useOrganization();
   const activeApps = currentOrganization?.active_apps ?? ["pos"];
-  // ZegCaisse et ZegHôtel sont deux activités distinctes : si les deux sont
-  // actives sur l'organisation, on n'affiche jamais leurs menus empilés —
-  // seul celui du contexte courant (déduit de l'URL) est montré, on bascule
-  // via <AppSwitcher />. Administration (Applications/Équipe/Paramètres)
-  // reste commune aux deux, ce sont des réglages transverses au compte.
+  // ZegCaisse et ZegHôtel sont deux applications 100% autonomes : si les
+  // deux sont actives sur l'organisation, on n'affiche jamais leurs menus
+  // empilés — seul celui du contexte courant (déduit de l'URL) est montré,
+  // Administration (Équipe/Paramètres) inclus, on bascule via <AppSwitcher />.
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
   const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext);
@@ -244,7 +245,8 @@ export function AppSidebar() {
         {showPos && renderGroup("Opération", NAV.operation)}
         {showPos && renderGroup("Catalogue", NAV.catalogue)}
         {showHotel && renderGroup("Hôtel", NAV.hotel)}
-        {renderGroup("Administration", NAV.admin)}
+        {showPos && renderGroup("Administration", NAV.adminPos)}
+        {showHotel && renderGroup("Administration", NAV.adminHotel)}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-3">

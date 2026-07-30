@@ -1,14 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Store, Coins, Receipt, ArrowLeftRight, Save, Plus, Image as ImageIcon, FileText, Loader2,
-  X, Trash2, Search, Check, BedDouble,
+  Store, Coins, Receipt, ArrowLeftRight, Save, Plus, FileText, Loader2,
+  X, Trash2, Search, LayoutGrid,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
-import { HotelTarificationTab } from "@/components/app/HotelTarificationTab";
+import { OrgIdentityTab } from "@/components/app/OrgIdentityTab";
+import { ApplicationsPanel } from "@/components/app/ApplicationsPanel";
 import {
-  useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole,
+  useShopSettings, useUpdateShopSettings, useUpdateShop, useMyRole,
   useProvisionOrganization, useTransferStock, useProducts,
   DEFAULT_TICKET_CONFIG, useFormatMoney, type TicketConfig, type TaxRate, type ProductWithStock,
 } from "@/lib/data/hooks";
@@ -22,22 +23,16 @@ export const Route = createFileRoute("/app/parametres")({
 });
 
 function ParametresPage() {
-  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer" | "hotel">("shop");
+  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer" | "apps">("shop");
   const { organizations, currentOrganization } = useOrganization();
   const { data: settings, isLoading: settingsLoading } = useShopSettings();
   const updateShop = useUpdateShop();
   const updateSettings = useUpdateShopSettings();
-  const uploadLogo = useUploadShopLogo();
   const { data: myRole } = useMyRole();
   const canManage = myRole === "owner" || myRole === "manager"; // shops_update / shop_settings write
 
-  const [name, setName] = useState("");
-  const [shopExtra, setShopExtra] = useState({
-    phone: "", email: "", address: "", rccm: "", ifu: "", facebook: "", instagram: "",
-  });
   const [ticket, setTicket] = useState<TicketConfig>(DEFAULT_TICKET_CONFIG);
   const [footer, setFooter] = useState("");
-  const [logoUploading, setLogoUploading] = useState(false);
   const [currency, setCurrency] = useState("XOF");
   const [taxIncluded, setTaxIncluded] = useState(true);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
@@ -45,39 +40,16 @@ function ParametresPage() {
   const createShop = useProvisionOrganization();
 
   useEffect(() => {
-    if (currentOrganization) { setName(currentOrganization.name); setCurrency(currentOrganization.currency); }
+    if (currentOrganization) setCurrency(currentOrganization.currency);
   }, [currentOrganization]);
 
   useEffect(() => {
     if (!settings) return;
-    setShopExtra((s) => ({ ...s, ...settings.data }));
     setTicket((t) => ({ ...t, ...settings.data.ticket }));
     setFooter(settings.receipt_footer ?? "");
     setTaxIncluded(settings.tax_included);
     setTaxRates(settings.data.tax_rates ?? []);
   }, [settings]);
-
-  const onLogo = async (file?: File) => {
-    if (!file || !currentOrganization) return;
-    setLogoUploading(true);
-    try {
-      await uploadLogo.mutateAsync(file);
-    } catch (e: any) {
-      alert("Erreur upload logo : " + (e?.message ?? "inconnue"));
-    } finally {
-      setLogoUploading(false);
-    }
-  };
-
-  const saveShop = async () => {
-    if (!currentOrganization) return;
-    try {
-      await updateShop.mutateAsync({ name });
-      await updateSettings.mutateAsync({ data: { ...(settings?.data ?? {}), ...shopExtra, ticket } });
-    } catch (e: any) {
-      alert("Erreur enregistrement organisation : " + (e?.message ?? "inconnue"));
-    }
-  };
 
   const saveTicket = async () => {
     try {
@@ -115,7 +87,7 @@ function ParametresPage() {
 
   return (
     <div>
-      <PageHeader title="Paramètres" subtitle="Configuration de votre organisation" />
+      <PageHeader title="Paramètres" subtitle="Configuration ZegCaisse de votre organisation" />
 
       <div className="grid gap-6 p-5 sm:p-8 lg:grid-cols-4">
         <div className="lg:col-span-1">
@@ -126,9 +98,7 @@ function ParametresPage() {
               { k: "taxes", label: "Taxes", icon: Receipt },
               { k: "ticket", label: "Ticket de caisse", icon: FileText },
               { k: "transfer", label: "Transfert de stock", icon: ArrowLeftRight },
-              ...(currentOrganization.active_apps?.includes("hotel")
-                ? [{ k: "hotel", label: "Tarification Hôtel", icon: BedDouble }] as const
-                : []),
+              { k: "apps", label: "Applications", icon: LayoutGrid },
             ] as const).map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
                 className={cn("flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -141,40 +111,10 @@ function ParametresPage() {
 
         <div className="lg:col-span-3 space-y-4">
           {tab === "shop" && (
-            <div className="rounded-2xl border border-border bg-card p-6">
-              <h2 className="mb-4 font-display text-lg font-bold">Informations de l'organisation</h2>
+            <>
+              <OrgIdentityTab heading="Informations de l'organisation" />
 
-              <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-border p-4">
-                <div className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl bg-muted">
-                  {logoUploading ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    : currentOrganization.logo_url ? <img src={currentOrganization.logo_url} alt="Logo" className="h-full w-full object-contain" />
-                    : <ImageIcon className="h-8 w-8 text-muted-foreground" />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold">Logo de l'organisation</div>
-                  <p className="mb-2 text-xs text-muted-foreground">Appliqué automatiquement sur les reçus, factures et devis (PNG/JPG, max 1 Mo).</p>
-                  {canManage && (
-                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted">
-                      <input type="file" accept="image/*" className="hidden" disabled={logoUploading}
-                        onChange={(e) => onLogo(e.target.files?.[0])} />
-                      Choisir un fichier
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Nom" value={name} onChange={setName} disabled={!canManage} />
-                <Field label="Téléphone" value={shopExtra.phone} onChange={(v) => setShopExtra({ ...shopExtra, phone: v })} disabled={!canManage} />
-                <Field label="Email" value={shopExtra.email} onChange={(v) => setShopExtra({ ...shopExtra, email: v })} disabled={!canManage} />
-                <Field label="Adresse complète" value={shopExtra.address} onChange={(v) => setShopExtra({ ...shopExtra, address: v })} className="sm:col-span-2" disabled={!canManage} />
-                <Field label="RCCM" value={shopExtra.rccm} onChange={(v) => setShopExtra({ ...shopExtra, rccm: v })} disabled={!canManage} />
-                <Field label="IFU / N° fiscal" value={shopExtra.ifu} onChange={(v) => setShopExtra({ ...shopExtra, ifu: v })} disabled={!canManage} />
-                <Field label="Facebook" value={shopExtra.facebook} onChange={(v) => setShopExtra({ ...shopExtra, facebook: v })} disabled={!canManage} />
-                <Field label="Instagram" value={shopExtra.instagram} onChange={(v) => setShopExtra({ ...shopExtra, instagram: v })} disabled={!canManage} />
-              </div>
-
-              <div className="mt-6">
+              <div className="rounded-2xl border border-border bg-card p-6">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="font-semibold">Organisations multiples</div>
                   {myRole === "owner" && (
@@ -193,14 +133,7 @@ function ParametresPage() {
                   ))}
                 </div>
               </div>
-
-              {canManage && (
-                <button onClick={saveShop} disabled={updateShop.isPending || updateSettings.isPending}
-                  className="mt-6 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
-                  <Save className="h-4 w-4" /> Enregistrer
-                </button>
-              )}
-            </div>
+            </>
           )}
 
           {tab === "currency" && (
@@ -314,10 +247,10 @@ function ParametresPage() {
                 <div className="rounded-2xl bg-white p-5 text-black shadow-elegant" style={{ fontFamily: "monospace" }}>
                   {ticket.showLogo && currentOrganization.logo_url && <img src={currentOrganization.logo_url} alt="" className="mx-auto mb-2 h-14 w-14 object-contain" />}
                   <div className="text-center">
-                    <div className="text-sm font-bold">{name || currentOrganization.name}</div>
-                    {ticket.showAddress && shopExtra.address && <div className="text-xs">{shopExtra.address}</div>}
-                    {ticket.showPhone && shopExtra.phone && <div className="text-xs">{shopExtra.phone}</div>}
-                    {ticket.showFiscal && shopExtra.ifu && <div className="text-xs">IFU {shopExtra.ifu}</div>}
+                    <div className="text-sm font-bold">{currentOrganization.name}</div>
+                    {ticket.showAddress && settings?.data.address && <div className="text-xs">{settings.data.address}</div>}
+                    {ticket.showPhone && settings?.data.phone && <div className="text-xs">{settings.data.phone}</div>}
+                    {ticket.showFiscal && settings?.data.ifu && <div className="text-xs">IFU {settings.data.ifu}</div>}
                   </div>
                   <hr className="my-2 border-dashed" />
                   <div className="flex justify-between text-xs"><span>Ticket</span><span className="font-bold">T-1234</span></div>
@@ -338,7 +271,7 @@ function ParametresPage() {
             <TransferPanel organizations={organizations} currentOrganizationId={currentOrganization.id} currentOrganizationName={currentOrganization.name} canManage={canManage} />
           )}
 
-          {tab === "hotel" && <HotelTarificationTab />}
+          {tab === "apps" && <ApplicationsPanel />}
         </div>
       </div>
 
