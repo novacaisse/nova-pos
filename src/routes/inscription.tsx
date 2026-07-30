@@ -7,15 +7,15 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { BrandLogo } from "@/components/app/BrandLogo";
 
 export const Route = createFileRoute("/inscription")({
-  head: () => ({ meta: [{ title: "Créer un compte — ZegCaisse" }] }),
+  head: () => ({ meta: [{ title: "Créer un compte — ZegOS" }] }),
   component: InscriptionPage,
 });
 
 // Inscription réduite à la création du compte utilisateur seul (email +
-// mot de passe) — le choix d'application ZegOS et la configuration
-// spécifique (boutique, gérant… pour ZegCaisse) se font après connexion,
-// sur /app, dès que le compte n'a encore aucune organisation. Voir
-// OnboardingFlow.tsx.
+// mot de passe) — le choix d'application ZegOS (ZegCaisse, ZegHotel…) et
+// la configuration spécifique à l'application choisie se font après
+// connexion, sur /app, dès que le compte n'a encore aucune organisation.
+// Voir OnboardingFlow.tsx.
 function InscriptionPage() {
   const navigate = useNavigate();
   const { signUp } = useAuth();

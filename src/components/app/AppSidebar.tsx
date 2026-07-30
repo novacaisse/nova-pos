@@ -39,6 +39,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { BrandLogo } from "@/components/app/BrandLogo";
+import { AppSwitcher } from "@/components/app/AppSwitcher";
+import { cn } from "@/lib/utils";
 
 const ICONS = {
   LayoutDashboard,
@@ -139,6 +141,15 @@ export function AppSidebar() {
   const planModules = useCurrentPlanModules();
   const { currentOrganization } = useOrganization();
   const activeApps = currentOrganization?.active_apps ?? ["pos"];
+  // ZegCaisse et ZegHôtel sont deux activités distinctes : si les deux sont
+  // actives sur l'organisation, on n'affiche jamais leurs menus empilés —
+  // seul celui du contexte courant (déduit de l'URL) est montré, on bascule
+  // via <AppSwitcher />. Administration (Applications/Équipe/Paramètres)
+  // reste commune aux deux, ce sont des réglages transverses au compte.
+  const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
+  const inHotelContext = pathname.startsWith("/app/hotel");
+  const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext);
+  const showHotel = activeApps.includes("hotel") && (!bothAppsActive || inHotelContext);
 
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
@@ -222,11 +233,17 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
+      {bothAppsActive && (
+        <div className={cn("border-b border-sidebar-border", collapsed ? "py-1" : "px-2 py-2")}>
+          <AppSwitcher variant="sidebar" compact={collapsed} />
+        </div>
+      )}
+
       <SidebarContent className="gap-1 px-2 py-3">
-        {activeApps.includes("pos") && renderGroup("Pilotage", NAV.pilotage)}
-        {activeApps.includes("pos") && renderGroup("Opération", NAV.operation)}
-        {activeApps.includes("pos") && renderGroup("Catalogue", NAV.catalogue)}
-        {activeApps.includes("hotel") && renderGroup("Hôtel", NAV.hotel)}
+        {showPos && renderGroup("Pilotage", NAV.pilotage)}
+        {showPos && renderGroup("Opération", NAV.operation)}
+        {showPos && renderGroup("Catalogue", NAV.catalogue)}
+        {showHotel && renderGroup("Hôtel", NAV.hotel)}
         {renderGroup("Administration", NAV.admin)}
       </SidebarContent>
 

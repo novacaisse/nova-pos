@@ -50,7 +50,7 @@ const PILLARS = [
 // dupliquer avec la même liste dans OnboardingFlow.tsx.
 const ZEGOS_APPS = [
   { icon: ScanBarcode, name: "ZegCaisse", desc: "Point de vente & gestion commerciale", available: true },
-  { icon: Building2, name: "ZegHotel", desc: "Gestion hôtelière & réservations", available: false },
+  { icon: Building2, name: "ZegHotel", desc: "Gestion hôtelière & réservations", available: true },
   { icon: Boxes, name: "ZegERP", desc: "Gestion d'entreprise étendue", available: false },
 ];
 

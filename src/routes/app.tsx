@@ -17,6 +17,7 @@ import { OnboardingFlow } from "@/components/app/OnboardingFlow";
 import { getTrialInfo } from "@/lib/trial";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { useMyRole } from "@/lib/data/hooks";
 
 export const Route = createFileRoute("/app")({
   // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
@@ -31,6 +32,7 @@ function AppLayout() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user, loading, signOut } = useAuth();
   const { organizations, currentOrganization, loading: shopLoading, error: shopError, refresh } = useOrganization();
+  const { data: myRole } = useMyRole();
 
   // Auth guard côté client (SPA)
   useEffect(() => {
@@ -44,6 +46,18 @@ function AppLayout() {
     const info = getTrialInfo(currentOrganization);
     if (info.onTrial && info.expired) navigate({ to: "/souscription" });
   }, [pathname, currentOrganization, shopLoading, navigate]);
+
+  // Le tableau de bord racine (/app) est celui de ZegCaisse — inutile (ou
+  // vide côté RLS) pour une organisation hotel-only ou un rôle
+  // front_desk/housekeeping (aucun accès ZegCaisse). On les envoie
+  // directement sur leur propre tableau de bord ZegHôtel.
+  useEffect(() => {
+    if (shopLoading || pathname !== "/app" || !currentOrganization) return;
+    const activeApps = currentOrganization.active_apps ?? [];
+    const hotelOnlyOrg = activeApps.includes("hotel") && !activeApps.includes("pos");
+    const hotelOnlyRole = myRole === "front_desk" || myRole === "housekeeping";
+    if (hotelOnlyOrg || hotelOnlyRole) navigate({ to: "/app/hotel" });
+  }, [pathname, currentOrganization, shopLoading, myRole, navigate]);
 
   if (loading || !user) {
     return (

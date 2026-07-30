@@ -24,6 +24,7 @@ import {
 import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
 import { useMyRole } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { AppSwitcher } from "@/components/app/AppSwitcher";
 import { cn } from "@/lib/utils";
 
 type Item = { label: string; to: string; icon: React.ComponentType<{ className?: string }> };
@@ -60,6 +61,7 @@ const HOTEL_MORE: Item[] = [
   { label: "Équipe", to: "/app/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/parametres", icon: Settings },
 ];
+const APPLICATIONS_ITEM: Item = { label: "Apps", to: "/app/applications", icon: LayoutGrid };
 // Housekeeping n'a accès ni aux réservations ni aux rapports (020h/020g,
 // données financières/clients hors de son périmètre) — mobile-first pour
 // ce rôle : juste ses chambres et ses tâches du jour.
@@ -83,15 +85,29 @@ export function BottomNav() {
   const isOwner = myRole === "owner";
   // Réservé au propriétaire (voir app.applications.tsx) — change ce que
   // voit toute l'équipe, jamais proposé aux autres rôles.
-  const applicationsItem: Item[] = isOwner ? [{ label: "Apps", to: "/app/applications", icon: LayoutGrid }] : [];
+  const applicationsItem: Item[] = isOwner ? [APPLICATIONS_ITEM] : [];
 
+  // ZegCaisse et ZegHôtel sont deux activités distinctes : quand les deux
+  // sont actives, on ne mélange jamais leurs raccourcis — le menu affiché
+  // dépend du contexte courant (déduit de l'URL), au même titre que dans
+  // AppSidebar. front_desk/housekeeping n'ont de toute façon accès qu'à
+  // ZegHôtel (RLS), donc toujours ce menu pour eux.
   const isHotelOnlyRole = myRole === "housekeeping" || myRole === "front_desk";
-  const primary = isHotelOnlyRole
+  const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
+  const inHotelContext = pathname.startsWith("/app/hotel");
+  const useHotelNav = isHotelOnlyRole
+    || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext)));
+
+  const primary = useHotelNav
     ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY)
     : PRIMARY.filter(included);
-  const more = isHotelOnlyRole
-    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : HOTEL_MORE)
-    : [...MORE.filter(included), ...(activeApps.includes("hotel") ? [{ label: "Hôtel", to: "/app/hotel", icon: BedDouble }] : []), ...applicationsItem];
+  const more = useHotelNav
+    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : [...HOTEL_MORE, ...applicationsItem])
+    : [...MORE.filter(included), ...applicationsItem];
+  // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes
+  // (owner/manager/accountant) — front_desk/housekeeping n'ont RLS-wise
+  // aucun accès à ZegCaisse, inutile de leur proposer de "basculer".
+  const showSwitcher = bothAppsActive && !isHotelOnlyRole;
 
   return (
     <>
@@ -150,6 +166,12 @@ export function BottomNav() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+            {showSwitcher && (
+              <div className="mb-4">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Application</div>
+                <AppSwitcher variant="surface" />
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2">
               {more.map((m) => {
                 const Icon = m.icon;
