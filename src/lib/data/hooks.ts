@@ -646,21 +646,23 @@ export function useCancelSale() {
 // Paiement complémentaire sur une vente à crédit (paid < total) : ajoute
 // une ligne payments et met à jour sales.paid/change_due. Ne touche ni au
 // stock ni aux lignes de la vente.
+// RPC atomique (migration 024) plutôt que lire sale.paid côté client puis
+// réécrire paid/change_due : deux paiements complémentaires ajoutés à
+// quelques instants d'écart sur la même vente à crédit lisaient tous les
+// deux la même valeur `sale.paid` obsolète, et le second écrasait l'effet
+// du premier sur la colonne (perte de mise à jour concurrente, alors que
+// le journal `payments` restait correct, lui). L'incrément se fait
+// désormais en une seule instruction SQL atomique côté serveur.
 export function useAddSalePayment() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ sale, amount, method }: { sale: Sale; amount: number; method: Sale["payment_method"] }) => {
       if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       if (amount <= 0) throw new Error("Le montant doit être positif.");
-      const { error: e1 } = await supabase.from("payments").insert({
-        organization_id: organizationId, sale_id: sale.id,
-        method: method === "mixed" ? "cash" : method, amount,
+      const { error } = await supabase.rpc("add_sale_payment", {
+        p_sale_id: sale.id, p_amount: amount, p_method: method,
       });
-      if (e1) throw e1;
-      const paid = Number(sale.paid) + amount;
-      const change_due = Math.max(0, paid - Number(sale.total));
-      const { error: e2 } = await supabase.from("sales").update({ paid, change_due }).eq("id", sale.id);
-      if (e2) throw e2;
+      if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sales", organizationId] }),
   });
