@@ -5,7 +5,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { invokeFn } from "@/lib/data/invokeFn";
 
 export function useIsSuperAdmin() {
@@ -48,10 +47,11 @@ export type Plan = {
   max_users: number | null;
 };
 
-// Modules "métier" pouvant être inclus/exclus par formule — le tableau de
-// bord, l'équipe et les paramètres restent toujours accessibles (gestion
-// du compte, jamais verrouillable par une formule).
-export const PLAN_MODULES: { url: string; label: string }[] = [
+// Modules "métier" pouvant être inclus/exclus par formule, par application
+// (Phase 4) — le tableau de bord, l'équipe et les paramètres restent
+// toujours accessibles dans les deux apps (gestion du compte, jamais
+// verrouillables par une formule).
+export const POS_MODULES: { url: string; label: string }[] = [
   { url: "/app/caisse", label: "Point de vente" },
   { url: "/app/ventes", label: "Ventes" },
   { url: "/app/devis", label: "Devis" },
@@ -63,6 +63,23 @@ export const PLAN_MODULES: { url: string; label: string }[] = [
   { url: "/app/rapports", label: "Rapports" },
   { url: "/app/nova", label: "Nova IA" },
 ];
+
+export const HOTEL_MODULES: { url: string; label: string }[] = [
+  { url: "/app/hotel/reservations", label: "Réservations" },
+  { url: "/app/hotel/rooms", label: "Chambres" },
+  { url: "/app/hotel/housekeeping", label: "Housekeeping" },
+  { url: "/app/hotel/rapports", label: "Rapports" },
+];
+
+// Point d'entrée unique pour récupérer le catalogue de modules bridables
+// d'une application — jamais d'import direct de POS_MODULES/HOTEL_MODULES
+// en dehors de ce fichier et du formulaire d'édition (admin.formules.tsx),
+// pour éviter qu'un des deux catalogues reste câblé en dur ailleurs (c'est
+// exactement le bug corrigé en Phase 4 : AppSidebar/BottomNav ne
+// vérifiaient jusqu'ici que POS_MODULES, y compris côté ZegHotel).
+export function getModulesForApp(appModule: "pos" | "hotel" | null | undefined): { url: string; label: string }[] {
+  return appModule === "hotel" ? HOTEL_MODULES : POS_MODULES;
+}
 
 export function usePlans() {
   return useQuery({
@@ -87,26 +104,11 @@ export function useUpsertPlan() {
   });
 }
 
-// Formule de l'organisation courante (recherchée dans plans par
-// organizations.plan) — null tant que non chargée ou si le plan n'existe
-// plus. Base commune pour useCurrentPlanModules (nav) et l'enforcement du
-// nombre de comptes max (Équipe), Bloc 27.
-export function useCurrentPlan(): Plan | null {
-  const { currentOrganization } = useOrganization();
-  const { data: plans = [] } = usePlans();
-  return plans.find((p) => p.id === currentOrganization?.plan) ?? null;
-}
-
-// Modules inclus dans la formule de la boutique courante — null = aucune
-// restriction (formule sans `modules` défini, ou en attente de chargement).
-// Utilisé par AppSidebar/BottomNav (Bloc 27) pour masquer les modules non
-// inclus dans la formule active, en plus des restrictions par rôle déjà
-// en place (HIDDEN_FOR).
-export function useCurrentPlanModules(): string[] | null {
-  const plan = useCurrentPlan();
-  const modules = plan?.limits.modules;
-  return modules && modules.length > 0 ? modules : null;
-}
+// useCurrentPlan()/useCurrentPlanModules() ont déménagé dans accountHooks.ts
+// (Phase 4) : la formule active se résout désormais via account_subscriptions
+// (compte + app_module), pas via organizations.plan (champ legacy par
+// établissement, abandonné pour cet usage depuis la Phase 3 ailleurs dans
+// l'app — ce fichier avait été oublié).
 
 export function useDeletePlan() {
   const qc = useQueryClient();

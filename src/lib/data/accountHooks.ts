@@ -9,7 +9,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
-import { usePlans } from "@/lib/data/adminHooks";
+import { usePlans, type Plan } from "@/lib/data/adminHooks";
 
 export type AccountSubscription = {
   id: string;
@@ -39,6 +39,28 @@ export function useCurrentAccountSubscription() {
   });
 }
 
+// Formule active du compte courant (compte + app_module), résolue via
+// account_subscriptions.plan_id — remplace, depuis la Phase 4, l'ancienne
+// lecture par organizations.plan (champ legacy par établissement). Base
+// commune pour useCurrentPlanModules (nav) et useAccountMemberLimit
+// (Équipe) ci-dessous.
+export function useCurrentPlan(): Plan | null {
+  const { data: subscription } = useCurrentAccountSubscription();
+  const { data: plans = [] } = usePlans();
+  return plans.find((p) => p.id === subscription?.plan_id) ?? null;
+}
+
+// Modules inclus dans la formule active — null = aucune restriction
+// (formule sans `modules` défini, ou en attente de chargement). Utilisé par
+// AppSidebar/BottomNav pour masquer les modules non inclus dans la formule
+// active (avec le catalogue de la bonne application, cf. getModulesForApp),
+// en plus des restrictions par rôle déjà en place (HIDDEN_FOR).
+export function useCurrentPlanModules(): string[] | null {
+  const plan = useCurrentPlan();
+  const modules = plan?.limits.modules;
+  return modules && modules.length > 0 ? modules : null;
+}
+
 // Effectif cumulé de l'équipe sur toutes les organisations du compte pour
 // l'app_module courant, comparé à la limite de la formule de
 // l'account_subscription correspondante — utilisé par Équipe pour bloquer
@@ -48,8 +70,7 @@ export function useAccountMemberLimit() {
   const { currentOrganization, organizations } = useOrganization();
   const accountId = currentOrganization?.account_id ?? null;
   const appModule = currentOrganization?.app_module ?? null;
-  const { data: subscription } = useCurrentAccountSubscription();
-  const { data: plans = [] } = usePlans();
+  const plan = useCurrentPlan();
 
   const sameAppOrgIds = organizations
     .filter((o) => o.account_id === accountId && o.app_module === appModule)
@@ -66,7 +87,6 @@ export function useAccountMemberLimit() {
     },
   });
 
-  const plan = plans.find((p) => p.id === subscription?.plan_id) ?? null;
   const maxUsers = plan?.max_users ?? null;
   return { maxUsers, memberCount, planName: plan?.name ?? null };
 }

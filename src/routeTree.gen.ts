@@ -41,6 +41,7 @@ import { Route as AppAbonnementRouteImport } from './routes/app.abonnement'
 import { Route as AdminSupportRouteImport } from './routes/admin.support'
 import { Route as AdminProfilRouteImport } from './routes/admin.profil'
 import { Route as AdminParametresRouteImport } from './routes/admin.parametres'
+import { Route as AdminFormulesRouteImport } from './routes/admin.formules'
 import { Route as AdminFacturationRouteImport } from './routes/admin.facturation'
 import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
 import { Route as AdminAbonnementsRouteImport } from './routes/admin.abonnements'
@@ -218,6 +219,11 @@ const AdminParametresRoute = AdminParametresRouteImport.update({
   path: '/parametres',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminFormulesRoute = AdminFormulesRouteImport.update({
+  id: '/formules',
+  path: '/formules',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminFacturationRoute = AdminFacturationRouteImport.update({
   id: '/facturation',
   path: '/facturation',
@@ -306,6 +312,7 @@ export interface FileRoutesByFullPath {
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
   '/admin/facturation': typeof AdminFacturationRoute
+  '/admin/formules': typeof AdminFormulesRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
@@ -352,6 +359,7 @@ export interface FileRoutesByTo {
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
   '/admin/facturation': typeof AdminFacturationRoute
+  '/admin/formules': typeof AdminFormulesRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
@@ -399,6 +407,7 @@ export interface FileRoutesById {
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
   '/admin/facturation': typeof AdminFacturationRoute
+  '/admin/formules': typeof AdminFormulesRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
@@ -450,6 +459,7 @@ export interface FileRouteTypes {
     | '/admin/abonnements'
     | '/admin/boutiques'
     | '/admin/facturation'
+    | '/admin/formules'
     | '/admin/parametres'
     | '/admin/profil'
     | '/admin/support'
@@ -496,6 +506,7 @@ export interface FileRouteTypes {
     | '/admin/abonnements'
     | '/admin/boutiques'
     | '/admin/facturation'
+    | '/admin/formules'
     | '/admin/parametres'
     | '/admin/profil'
     | '/admin/support'
@@ -542,6 +553,7 @@ export interface FileRouteTypes {
     | '/admin/abonnements'
     | '/admin/boutiques'
     | '/admin/facturation'
+    | '/admin/formules'
     | '/admin/parametres'
     | '/admin/profil'
     | '/admin/support'
@@ -817,6 +829,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminParametresRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/formules': {
+      id: '/admin/formules'
+      path: '/formules'
+      fullPath: '/admin/formules'
+      preLoaderRoute: typeof AdminFormulesRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/facturation': {
       id: '/admin/facturation'
       path: '/facturation'
@@ -929,6 +948,7 @@ interface AdminRouteChildren {
   AdminAbonnementsRoute: typeof AdminAbonnementsRoute
   AdminBoutiquesRoute: typeof AdminBoutiquesRoute
   AdminFacturationRoute: typeof AdminFacturationRoute
+  AdminFormulesRoute: typeof AdminFormulesRoute
   AdminParametresRoute: typeof AdminParametresRoute
   AdminProfilRoute: typeof AdminProfilRoute
   AdminSupportRoute: typeof AdminSupportRoute
@@ -939,6 +959,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminAbonnementsRoute: AdminAbonnementsRoute,
   AdminBoutiquesRoute: AdminBoutiquesRoute,
   AdminFacturationRoute: AdminFacturationRoute,
+  AdminFormulesRoute: AdminFormulesRoute,
   AdminParametresRoute: AdminParametresRoute,
   AdminProfilRoute: AdminProfilRoute,
   AdminSupportRoute: AdminSupportRoute,
@@ -1074,7 +1095,9 @@ export const routeTree = rootRouteImport
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
+
 import type { startInstance } from './start.ts'
+
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true

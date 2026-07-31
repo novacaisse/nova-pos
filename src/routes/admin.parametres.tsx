@@ -1,41 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
-import { Save, FileText, Package, Plus, Trash2, Loader2, Star, Palette, Image as ImageIcon } from "lucide-react";
+import { useRef, useState } from "react";
+import { Save, FileText, Palette, Image as ImageIcon, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import {
-  usePlans, useUpsertPlan, useDeletePlan, useAppSettings, useUploadBrandingAsset,
-  PLAN_MODULES, type Plan,
-} from "@/lib/data/adminHooks";
-import { formatXOF } from "@/lib/mock/catalog";
-import { cn, selectOnFocus } from "@/lib/utils";
+import { useAppSettings, useUploadBrandingAsset } from "@/lib/data/adminHooks";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/parametres")({
   component: AdminParametres,
 });
 
-const slugify = (s: string) =>
-  s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "formule";
-
 function AdminParametres() {
-  const [tab, setTab] = useState<"plans" | "branding" | "landing">("plans");
-  const { data: plans = [], isLoading } = usePlans();
-  const [creating, setCreating] = useState(false);
+  // Les formules vivent désormais sur leur propre page (/admin/formules,
+  // Phase 4) — plus assez de place pour un simple onglet une fois les
+  // catalogues de modules par application et les limites ajoutés.
+  const [tab, setTab] = useState<"branding" | "landing">("branding");
 
   return (
     <div>
-      <PageHeader title="Paramètres" subtitle="Configuration globale de la plateforme"
-        actions={tab === "plans" && (
-          <button onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
-            <Plus className="h-4 w-4" /> Nouvelle formule
-          </button>
-        )}
-      />
+      <PageHeader title="Paramètres" subtitle="Configuration globale de la plateforme" />
 
       <div className="space-y-4 p-5 sm:p-8">
         <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
           {([
-            { k: "plans" as const, label: "Formules & tarifs", icon: Package },
             { k: "branding" as const, label: "Marque", icon: Palette },
             { k: "landing" as const, label: "Contenu landing", icon: FileText },
           ]).map((t) => (
@@ -46,25 +32,6 @@ function AdminParametres() {
             </button>
           ))}
         </div>
-
-        {tab === "plans" && (
-          isLoading ? (
-            <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
-          ) : (
-            <div className="space-y-6">
-              {creating && (
-                <div className="grid gap-4 lg:grid-cols-3">
-                  <PlanCard plan={null} onDoneCreating={() => setCreating(false)} />
-                </div>
-              )}
-              <PlanSection title="ZegCaisse" plans={plans.filter((p) => p.app_module === "pos")} />
-              <PlanSection title="ZegHotel" plans={plans.filter((p) => p.app_module === "hotel")} />
-              {plans.some((p) => p.app_module == null) && (
-                <PlanSection title="Non assignée à une application" plans={plans.filter((p) => p.app_module == null)} />
-              )}
-            </div>
-          )
-        )}
 
         {tab === "branding" && <BrandingTab />}
 
@@ -90,218 +57,6 @@ function AdminParametres() {
         )}
       </div>
     </div>
-  );
-}
-
-// Regroupement visuel par app_module (Phase 3, restructuration
-// compte/établissements) : une formule ZegCaisse et une formule ZegHotel
-// sont désormais deux catalogues distincts, jamais interchangeables — la
-// section reste visible même vide pour signaler qu'aucune formule n'existe
-// encore pour cette application (cf. /souscription, qui refuse alors
-// silencieusement de proposer les formules de l'autre app).
-function PlanSection({ title, plans }: { title: string; plans: Plan[] }) {
-  return (
-    <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</div>
-      {plans.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-4 text-xs text-muted-foreground">
-          Aucune formule pour l'instant.
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-3">
-          {plans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?: () => void }) {
-  const upsert = useUpsertPlan();
-  const remove = useDeletePlan();
-  const isNew = plan === null;
-
-  const [name, setName] = useState(plan?.name ?? "");
-  const [priceMonth, setPriceMonth] = useState(plan?.price_month ?? 0);
-  const [priceYear, setPriceYear] = useState(plan?.price_year ?? 0);
-  const [features, setFeatures] = useState<string[]>(plan?.features ?? []);
-  const [newFeature, setNewFeature] = useState("");
-  const [isActive, setIsActive] = useState(plan?.is_active ?? true);
-  const [isRecommended, setIsRecommended] = useState(plan?.is_recommended ?? false);
-  const [appModule, setAppModule] = useState<"pos" | "hotel">(plan?.app_module ?? "pos");
-  // Vide = illimité (null en base) — distinct de 0, contrairement à
-  // limits.ai_credits ci-dessous qui garde sa convention 0 = illimité.
-  const [maxEstablishments, setMaxEstablishments] = useState(
-    plan?.max_establishments != null ? String(plan.max_establishments) : "",
-  );
-  const [maxUsers, setMaxUsers] = useState(plan?.max_users != null ? String(plan.max_users) : "");
-  const [aiCredits, setAiCredits] = useState(plan?.limits.ai_credits ?? 0);
-  // Un plan sans `modules` défini = tout inclus (rétrocompatible) — l'état
-  // local part alors de la liste complète cochée, pour que décocher une
-  // case retire bien ce module plutôt que de créer une liste à un élément.
-  const allModuleUrls = PLAN_MODULES.map((m) => m.url);
-  const [modules, setModules] = useState<string[]>(
-    plan?.limits.modules?.length ? plan.limits.modules : allModuleUrls,
-  );
-  const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  useEffect(() => {
-    if (plan) {
-      setName(plan.name); setPriceMonth(plan.price_month); setPriceYear(plan.price_year);
-      setFeatures(plan.features); setIsActive(plan.is_active); setIsRecommended(plan.is_recommended);
-      setAppModule(plan.app_module ?? "pos");
-      setMaxEstablishments(plan.max_establishments != null ? String(plan.max_establishments) : "");
-      setMaxUsers(plan.max_users != null ? String(plan.max_users) : "");
-      setAiCredits(plan.limits.ai_credits ?? 0);
-      setModules(plan.limits.modules?.length ? plan.limits.modules : allModuleUrls);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan]);
-
-  const toggleModule = (url: string) => {
-    setModules((ms) => ms.includes(url) ? ms.filter((m) => m !== url) : [...ms, url]);
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await upsert.mutateAsync({
-        id: isNew ? slugify(name) : plan!.id,
-        name, price_month: priceMonth, price_year: priceYear,
-        features, is_active: isActive, is_recommended: isRecommended,
-        currency: plan?.currency ?? "XOF",
-        app_module: appModule,
-        max_establishments: maxEstablishments.trim() === "" ? null : Number(maxEstablishments),
-        max_users: maxUsers.trim() === "" ? null : Number(maxUsers),
-        limits: {
-          ai_credits: aiCredits || undefined,
-          modules: modules.length === allModuleUrls.length ? undefined : modules,
-        },
-        sort_order: plan?.sort_order ?? 99,
-      });
-      if (isNew) onDoneCreating?.();
-    } catch (e: any) {
-      alert("Erreur enregistrement formule : " + (e?.message ?? "inconnue"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className={cn("rounded-2xl border bg-card p-5", isActive ? "border-border" : "border-border opacity-60")}>
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom de la formule"
-          className="min-w-0 flex-1 border-b border-transparent bg-transparent font-display text-lg font-bold outline-none focus:border-primary" />
-        <button onClick={() => setIsRecommended((v) => !v)} title="Marquer comme recommandée"
-          className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-full", isRecommended ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted")}>
-          <Star className="h-3.5 w-3.5" fill={isRecommended ? "currentColor" : "none"} />
-        </button>
-      </div>
-
-      <label className="mb-3 block">
-        <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Application</span>
-        <select value={appModule} onChange={(e) => setAppModule(e.target.value as "pos" | "hotel")}
-          className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary">
-          <option value="pos">ZegCaisse</option>
-          <option value="hotel">ZegHotel</option>
-        </select>
-      </label>
-
-      <div className="space-y-3">
-        <PriceField label="Prix mensuel" value={priceMonth} onChange={setPriceMonth} />
-        <PriceField label="Prix annuel" value={priceYear} onChange={setPriceYear} />
-      </div>
-
-      <div className="mt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fonctionnalités incluses</div>
-        <div className="space-y-1.5">
-          {features.map((f, i) => (
-            <div key={i} className="flex items-center gap-1">
-              <input value={f} onChange={(e) => setFeatures((fs) => fs.map((x, j) => j === i ? e.target.value : x))}
-                className="min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary" />
-              <button onClick={() => setFeatures((fs) => fs.filter((_, j) => j !== i))} className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
-            </div>
-          ))}
-          <div className="flex items-center gap-1">
-            <input value={newFeature} onChange={(e) => setNewFeature(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && newFeature.trim()) { setFeatures((fs) => [...fs, newFeature.trim()]); setNewFeature(""); } }}
-              placeholder="Ajouter une fonctionnalité…"
-              className="min-w-0 flex-1 rounded-lg border border-dashed border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary" />
-            <button onClick={() => { if (newFeature.trim()) { setFeatures((fs) => [...fs, newFeature.trim()]); setNewFeature(""); } }}
-              className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border hover:bg-muted"><Plus className="h-3.5 w-3.5" /></button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Établissements max</span>
-          <input type="number" onFocus={selectOnFocus} min={0} value={maxEstablishments}
-            onChange={(e) => setMaxEstablishments(e.target.value.replace(/[^0-9]/g, ""))}
-            placeholder="Vide = illimité"
-            className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Comptes max</span>
-          <input type="number" onFocus={selectOnFocus} min={0} value={maxUsers}
-            onChange={(e) => setMaxUsers(e.target.value.replace(/[^0-9]/g, ""))}
-            placeholder="Vide = illimité"
-            className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
-        </label>
-        <label className="col-span-2 block">
-          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Crédits IA / mois</span>
-          <input type="number" onFocus={selectOnFocus} min={0} value={aiCredits} onChange={(e) => setAiCredits(Math.max(0, Number(e.target.value) || 0))}
-            placeholder="0 = illimité"
-            className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
-        </label>
-      </div>
-
-      <div className="mt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Modules inclus</div>
-        <div className="grid grid-cols-2 gap-1.5">
-          {PLAN_MODULES.map((m) => (
-            <label key={m.url} className="flex items-center gap-1.5 rounded-lg border border-border/60 px-2 py-1.5 text-xs">
-              <input type="checkbox" checked={modules.includes(m.url)}
-                onChange={() => toggleModule(m.url)} className="h-3.5 w-3.5 accent-primary" />
-              {m.label}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <label className="mt-4 flex items-center justify-between rounded-lg border border-border/60 p-2.5 text-xs">
-        <span>Formule active (visible sur /tarifs)</span>
-        <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="h-4 w-4 accent-primary" />
-      </label>
-
-      <div className="mt-5 flex gap-2">
-        {isNew ? (
-          <button onClick={onDoneCreating} className="flex-1 rounded-xl border border-border py-2 text-xs font-semibold">Annuler</button>
-        ) : confirmDelete ? (
-          <button onClick={() => remove.mutate(plan!.id)} className="flex-1 rounded-xl bg-destructive py-2 text-xs font-bold text-destructive-foreground">Confirmer la suppression</button>
-        ) : (
-          <button onClick={() => setConfirmDelete(true)} className="rounded-xl border border-destructive/40 px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
-        )}
-        <button onClick={save} disabled={!name || saving} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-2 text-xs font-bold text-primary-foreground disabled:opacity-40">
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Enregistrer
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function PriceField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-      <div className="relative">
-        <input type="number" onFocus={selectOnFocus} value={value} onChange={(e) => onChange(Number(e.target.value) || 0)}
-          className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 pr-12 text-sm font-semibold outline-none focus:border-primary" />
-        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">FCFA</span>
-      </div>
-      <div className="mt-1 text-[10px] text-muted-foreground">≈ {formatXOF(value)}</div>
-    </label>
   );
 }
 
