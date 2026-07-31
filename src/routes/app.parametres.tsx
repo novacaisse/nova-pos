@@ -2,13 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Store, Coins, Receipt, ArrowLeftRight, Save, Plus, FileText, Loader2,
-  Trash2, Search, LayoutGrid,
+  Trash2, Search,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { PageSkeleton } from "@/components/app/PageSkeleton";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { OrgIdentityTab } from "@/components/app/OrgIdentityTab";
-import { ApplicationsPanel } from "@/components/app/ApplicationsPanel";
 import { AddOrganizationDialog, CURRENCIES } from "@/components/app/AddOrganizationDialog";
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useMyRole, useSubscription,
@@ -52,7 +51,7 @@ export const Route = createFileRoute("/app/parametres")({
 
 function ParametresPage() {
   const { openAdd } = Route.useSearch();
-  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer" | "apps">("shop");
+  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer">("shop");
   const { organizations, currentOrganization } = useOrganization();
   const { data: settings, isLoading: settingsLoading } = useShopSettings();
   const { data: currentSubscription } = useSubscription();
@@ -133,7 +132,6 @@ function ParametresPage() {
               { k: "taxes", label: "Taxes", icon: Receipt },
               { k: "ticket", label: "Ticket de caisse", icon: FileText },
               { k: "transfer", label: "Transfert de stock", icon: ArrowLeftRight },
-              { k: "apps", label: "Applications", icon: LayoutGrid },
             ] as const).map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
                 className={cn("flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -307,8 +305,6 @@ function ParametresPage() {
           {tab === "transfer" && (
             <TransferPanel organizations={organizations} currentOrganizationId={currentOrganization.id} currentOrganizationName={currentOrganization.name} canManage={canManage} />
           )}
-
-          {tab === "apps" && <ApplicationsPanel />}
         </div>
       </div>
 
