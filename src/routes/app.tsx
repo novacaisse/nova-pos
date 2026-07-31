@@ -47,15 +47,18 @@ function AppLayout() {
   // d'organisation et à la déconnexion. Voir src/lib/auth/useReadOnlyMode.ts.
 
   // Le tableau de bord racine (/app) est celui de ZegCaisse — inutile (ou
-  // vide côté RLS) pour une organisation hotel-only ou un rôle
-  // front_desk/housekeeping (aucun accès ZegCaisse). On les envoie
-  // directement sur leur propre tableau de bord ZegHôtel.
+  // vide côté RLS) pour une organisation hotel-only/resto-only ou un rôle
+  // front_desk/housekeeping/server/cook (aucun accès ZegCaisse). On les
+  // envoie directement sur leur propre tableau de bord.
   useEffect(() => {
     if (shopLoading || pathname !== "/app" || !currentOrganization) return;
     const activeApps = currentOrganization.active_apps ?? [];
     const hotelOnlyOrg = activeApps.includes("hotel") && !activeApps.includes("pos");
     const hotelOnlyRole = myRole === "front_desk" || myRole === "housekeeping";
-    if (hotelOnlyOrg || hotelOnlyRole) navigate({ to: "/app/hotel" });
+    if (hotelOnlyOrg || hotelOnlyRole) { navigate({ to: "/app/hotel" }); return; }
+    const restoOnlyOrg = activeApps.includes("resto") && !activeApps.includes("pos");
+    const restoOnlyRole = myRole === "server" || myRole === "cook";
+    if (restoOnlyOrg || restoOnlyRole) navigate({ to: "/app/resto" });
   }, [pathname, currentOrganization, shopLoading, myRole, navigate]);
 
   if (loading || !user) {

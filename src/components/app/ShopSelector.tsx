@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Check, ChevronsUpDown, Store, BedDouble, Loader2 } from "lucide-react";
+import { Check, ChevronsUpDown, Store, BedDouble, UtensilsCrossed, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -18,12 +18,13 @@ export function ShopSelector() {
   const { organizations, currentOrganization, setCurrentOrganizationId, loading } = useOrganization();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const inHotelContext = pathname.startsWith("/app/hotel");
-  const appKey = inHotelContext ? "hotel" : "pos";
-  const Icon = inHotelContext ? BedDouble : Store;
-  const unitLabel = inHotelContext ? "Établissement" : "Boutique";
-  const listLabel = inHotelContext ? "Vos établissements" : "Vos boutiques";
-  const addLabel = inHotelContext ? "+ Ajouter un établissement" : "+ Ajouter une boutique";
-  const addTo = inHotelContext ? "/app/hotel/parametres" : "/app/parametres";
+  const inRestoContext = pathname.startsWith("/app/resto");
+  const appKey = inHotelContext ? "hotel" : inRestoContext ? "resto" : "pos";
+  const Icon = inHotelContext ? BedDouble : inRestoContext ? UtensilsCrossed : Store;
+  const unitLabel = inHotelContext ? "Établissement" : inRestoContext ? "Restaurant" : "Boutique";
+  const listLabel = inHotelContext ? "Vos établissements" : inRestoContext ? "Vos restaurants" : "Vos boutiques";
+  const addLabel = inHotelContext ? "+ Ajouter un établissement" : inRestoContext ? "+ Ajouter un restaurant" : "+ Ajouter une boutique";
+  const addTo = inHotelContext ? "/app/hotel/parametres" : inRestoContext ? "/app/resto/parametres" : "/app/parametres";
 
   if (loading && !currentOrganization) {
     return (
@@ -36,7 +37,7 @@ export function ShopSelector() {
   if (!currentOrganization) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-        <Icon className="h-4 w-4" /> Aucun{inHotelContext ? "" : "e"} {unitLabel.toLowerCase()}
+        <Icon className="h-4 w-4" /> Aucun{inHotelContext || inRestoContext ? "" : "e"} {unitLabel.toLowerCase()}
       </div>
     );
   }

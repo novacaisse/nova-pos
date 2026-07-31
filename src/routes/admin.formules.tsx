@@ -20,13 +20,15 @@ const slugify = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "formule";
 
-const APP_TABS: { k: "pos" | "hotel"; label: string }[] = [
+const APP_TABS: { k: "pos" | "hotel" | "resto"; label: string }[] = [
   { k: "pos", label: "ZegCaisse" },
   { k: "hotel", label: "ZegHotel" },
+  { k: "resto", label: "ZegResto" },
 ];
+const APP_LABEL: Record<"pos" | "hotel" | "resto", string> = { pos: "ZegCaisse", hotel: "ZegHotel", resto: "ZegResto" };
 
 function AdminFormules() {
-  const [appTab, setAppTab] = useState<"pos" | "hotel">("pos");
+  const [appTab, setAppTab] = useState<"pos" | "hotel" | "resto">("pos");
   const { data: plans = [], isLoading } = usePlans();
   const [creating, setCreating] = useState(false);
 
@@ -64,7 +66,7 @@ function AdminFormules() {
             {creating && <PlanCard plan={null} appModule={appTab} onDoneCreating={() => setCreating(false)} />}
             {tabPlans.length === 0 && !creating && (
               <div className="col-span-full rounded-2xl border border-dashed border-border bg-muted/30 p-4 text-xs text-muted-foreground">
-                Aucune formule {appTab === "pos" ? "ZegCaisse" : "ZegHotel"} pour l'instant.
+                Aucune formule {APP_LABEL[appTab]} pour l'instant.
               </div>
             )}
             {tabPlans.map((plan) => <PlanCard key={plan.id} plan={plan} appModule={appTab} />)}
@@ -88,9 +90,9 @@ function AdminFormules() {
 
 function UnassignedPlanRow({ plan }: { plan: Plan }) {
   const upsert = useUpsertPlan();
-  const [saving, setSaving] = useState<"pos" | "hotel" | null>(null);
+  const [saving, setSaving] = useState<"pos" | "hotel" | "resto" | null>(null);
 
-  const assign = async (app_module: "pos" | "hotel") => {
+  const assign = async (app_module: "pos" | "hotel" | "resto") => {
     setSaving(app_module);
     try {
       await upsert.mutateAsync({ id: plan.id, name: plan.name, app_module });
@@ -103,21 +105,19 @@ function UnassignedPlanRow({ plan }: { plan: Plan }) {
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3 text-sm">
       <span className="font-semibold">{plan.name}</span>
       <div className="flex gap-2">
-        <button onClick={() => assign("pos")} disabled={saving !== null}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-40">
-          {saving === "pos" && <Loader2 className="h-3 w-3 animate-spin" />} Assigner à ZegCaisse
-        </button>
-        <button onClick={() => assign("hotel")} disabled={saving !== null}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-40">
-          {saving === "hotel" && <Loader2 className="h-3 w-3 animate-spin" />} Assigner à ZegHotel
-        </button>
+        {APP_TABS.map((t) => (
+          <button key={t.k} onClick={() => assign(t.k)} disabled={saving !== null}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-40">
+            {saving === t.k && <Loader2 className="h-3 w-3 animate-spin" />} Assigner à {t.label}
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
 function PlanCard({ plan, appModule, onDoneCreating }: {
-  plan: Plan | null; appModule: "pos" | "hotel"; onDoneCreating?: () => void;
+  plan: Plan | null; appModule: "pos" | "hotel" | "resto"; onDoneCreating?: () => void;
 }) {
   const upsert = useUpsertPlan();
   const remove = useDeletePlan();

@@ -14,7 +14,7 @@ import { usePlans, type Plan } from "@/lib/data/adminHooks";
 export type AccountSubscription = {
   id: string;
   account_id: string;
-  app_module: "pos" | "hotel";
+  app_module: "pos" | "hotel" | "resto";
   plan_id: string;
   status: string;
   trial_ends_at: string | null;
