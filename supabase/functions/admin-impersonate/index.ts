@@ -56,6 +56,21 @@ Deno.serve(async (req) => {
     const { data: targetUser, error: targetErr } = await admin.auth.admin.getUserById(target_user_id);
     if (targetErr || !targetUser?.user?.email) return json({ error: "Utilisateur cible introuvable." }, 404);
 
+    // organization_id ne sert qu'à journaliser (pas à autoriser — un Super
+    // Admin peut déjà impersonner n'importe qui) mais ne jamais faire
+    // confiance à une valeur envoyée par le client sans vérification :
+    // sans ce contrôle, admin_impersonations pourrait enregistrer un
+    // organization_id qui n'a rien à voir avec target_user_id, rendant le
+    // journal d'audit trompeur.
+    if (organization_id) {
+      const { data: targetMembership, error: targetMemberErr } = await admin
+        .from("organization_members").select("id")
+        .eq("organization_id", organization_id).eq("user_id", target_user_id).maybeSingle();
+      if (targetMemberErr || !targetMembership) {
+        return json({ error: "Cette organisation n'appartient pas à l'utilisateur ciblé." }, 400);
+      }
+    }
+
     const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
       type: "magiclink",
       email: targetUser.user.email,
