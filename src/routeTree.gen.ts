@@ -41,8 +41,10 @@ import { Route as AppAbonnementRouteImport } from './routes/app.abonnement'
 import { Route as AdminSupportRouteImport } from './routes/admin.support'
 import { Route as AdminProfilRouteImport } from './routes/admin.profil'
 import { Route as AdminParametresRouteImport } from './routes/admin.parametres'
+import { Route as AdminImpersonationsRouteImport } from './routes/admin.impersonations'
 import { Route as AdminFormulesRouteImport } from './routes/admin.formules'
 import { Route as AdminFacturationRouteImport } from './routes/admin.facturation'
+import { Route as AdminComptesRouteImport } from './routes/admin.comptes'
 import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
 import { Route as AdminAbonnementsRouteImport } from './routes/admin.abonnements'
 import { Route as AppVentesIndexRouteImport } from './routes/app.ventes.index'
@@ -219,6 +221,11 @@ const AdminParametresRoute = AdminParametresRouteImport.update({
   path: '/parametres',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminImpersonationsRoute = AdminImpersonationsRouteImport.update({
+  id: '/impersonations',
+  path: '/impersonations',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminFormulesRoute = AdminFormulesRouteImport.update({
   id: '/formules',
   path: '/formules',
@@ -227,6 +234,11 @@ const AdminFormulesRoute = AdminFormulesRouteImport.update({
 const AdminFacturationRoute = AdminFacturationRouteImport.update({
   id: '/facturation',
   path: '/facturation',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminComptesRoute = AdminComptesRouteImport.update({
+  id: '/comptes',
+  path: '/comptes',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminBoutiquesRoute = AdminBoutiquesRouteImport.update({
@@ -311,8 +323,10 @@ export interface FileRoutesByFullPath {
   '/tarifs': typeof TarifsRoute
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
+  '/admin/comptes': typeof AdminComptesRoute
   '/admin/facturation': typeof AdminFacturationRoute
   '/admin/formules': typeof AdminFormulesRoute
+  '/admin/impersonations': typeof AdminImpersonationsRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
@@ -358,8 +372,10 @@ export interface FileRoutesByTo {
   '/tarifs': typeof TarifsRoute
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
+  '/admin/comptes': typeof AdminComptesRoute
   '/admin/facturation': typeof AdminFacturationRoute
   '/admin/formules': typeof AdminFormulesRoute
+  '/admin/impersonations': typeof AdminImpersonationsRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
@@ -406,8 +422,10 @@ export interface FileRoutesById {
   '/tarifs': typeof TarifsRoute
   '/admin/abonnements': typeof AdminAbonnementsRoute
   '/admin/boutiques': typeof AdminBoutiquesRoute
+  '/admin/comptes': typeof AdminComptesRoute
   '/admin/facturation': typeof AdminFacturationRoute
   '/admin/formules': typeof AdminFormulesRoute
+  '/admin/impersonations': typeof AdminImpersonationsRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
   '/admin/support': typeof AdminSupportRoute
@@ -458,8 +476,10 @@ export interface FileRouteTypes {
     | '/tarifs'
     | '/admin/abonnements'
     | '/admin/boutiques'
+    | '/admin/comptes'
     | '/admin/facturation'
     | '/admin/formules'
+    | '/admin/impersonations'
     | '/admin/parametres'
     | '/admin/profil'
     | '/admin/support'
@@ -505,8 +525,10 @@ export interface FileRouteTypes {
     | '/tarifs'
     | '/admin/abonnements'
     | '/admin/boutiques'
+    | '/admin/comptes'
     | '/admin/facturation'
     | '/admin/formules'
+    | '/admin/impersonations'
     | '/admin/parametres'
     | '/admin/profil'
     | '/admin/support'
@@ -552,8 +574,10 @@ export interface FileRouteTypes {
     | '/tarifs'
     | '/admin/abonnements'
     | '/admin/boutiques'
+    | '/admin/comptes'
     | '/admin/facturation'
     | '/admin/formules'
+    | '/admin/impersonations'
     | '/admin/parametres'
     | '/admin/profil'
     | '/admin/support'
@@ -829,6 +853,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminParametresRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/impersonations': {
+      id: '/admin/impersonations'
+      path: '/impersonations'
+      fullPath: '/admin/impersonations'
+      preLoaderRoute: typeof AdminImpersonationsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/formules': {
       id: '/admin/formules'
       path: '/formules'
@@ -841,6 +872,13 @@ declare module '@tanstack/react-router' {
       path: '/facturation'
       fullPath: '/admin/facturation'
       preLoaderRoute: typeof AdminFacturationRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/comptes': {
+      id: '/admin/comptes'
+      path: '/comptes'
+      fullPath: '/admin/comptes'
+      preLoaderRoute: typeof AdminComptesRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/boutiques': {
@@ -947,8 +985,10 @@ declare module '@tanstack/react-router' {
 interface AdminRouteChildren {
   AdminAbonnementsRoute: typeof AdminAbonnementsRoute
   AdminBoutiquesRoute: typeof AdminBoutiquesRoute
+  AdminComptesRoute: typeof AdminComptesRoute
   AdminFacturationRoute: typeof AdminFacturationRoute
   AdminFormulesRoute: typeof AdminFormulesRoute
+  AdminImpersonationsRoute: typeof AdminImpersonationsRoute
   AdminParametresRoute: typeof AdminParametresRoute
   AdminProfilRoute: typeof AdminProfilRoute
   AdminSupportRoute: typeof AdminSupportRoute
@@ -958,8 +998,10 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminAbonnementsRoute: AdminAbonnementsRoute,
   AdminBoutiquesRoute: AdminBoutiquesRoute,
+  AdminComptesRoute: AdminComptesRoute,
   AdminFacturationRoute: AdminFacturationRoute,
   AdminFormulesRoute: AdminFormulesRoute,
+  AdminImpersonationsRoute: AdminImpersonationsRoute,
   AdminParametresRoute: AdminParametresRoute,
   AdminProfilRoute: AdminProfilRoute,
   AdminSupportRoute: AdminSupportRoute,
