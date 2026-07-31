@@ -266,14 +266,31 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const upsertGuest = useUpsertHotelGuest();
   const create = useCreateHotelReservation();
 
+  // Nuitée ET horaire (ZegHotel Phase 1) : billing_unit porté par la
+  // formule tarifaire choisie — "Standard" (aucune formule) reste toujours
+  // nuitée. Un seul jour calendaire pour une réservation horaire ;
+  // checkOut n'est alors plus piloté par l'utilisateur (forcé = checkIn).
+  const selectedRatePlan = ratePlans.find((p) => p.id === ratePlanId);
+  const isHourly = selectedRatePlan?.billing_unit === "hour";
+  const [checkInTime, setCheckInTime] = useState("14:00");
+  const [checkOutTime, setCheckOutTime] = useState("16:00");
+  useEffect(() => { if (isHourly && checkOut !== checkIn) setCheckOut(checkIn); }, [isHourly, checkIn, checkOut]);
+  const checkInAt = isHourly ? `${checkIn}T${checkInTime}:00` : null;
+  const checkOutAt = isHourly ? `${checkIn}T${checkOutTime}:00` : null;
+  const hourlyHours = isHourly && checkOutAt && checkInAt
+    ? Math.max(1, Math.ceil((new Date(checkOutAt).getTime() - new Date(checkInAt).getTime()) / 3_600_000))
+    : 0;
+
   const nights = Math.max(1, (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
   const roomOf = (id: string) => rooms.find((r) => r.id === id);
-  // Aperçu uniquement (tarif saisonnier + formule tarifaire) — le serveur
-  // recalcule et applique le tarif définitif à la création (migration 027)
-  // si la réception ne saisit pas de prix manuel dans rateOverrides.
+  // Aperçu uniquement (tarif saisonnier + formule tarifaire, ou heures ×
+  // tarif horaire) — le serveur recalcule et applique le tarif définitif à
+  // la création (migrations 027/028) si la réception ne saisit pas de prix
+  // manuel dans rateOverrides.
   const rateFor = (id: string) => {
     const roomTypeId = roomOf(id)?.room_type_id;
     if (!roomTypeId) return 0;
+    if (isHourly) return Math.round(hourlyHours * (selectedRatePlan?.hourly_rate ?? 0) * 100) / 100;
     return estimateRoomRate(roomTypeId, checkIn, checkOut, ratePlanId, roomTypes, seasonalRates, ratePlans);
   };
   const [rateOverrides, setRateOverrides] = useState<Record<string, number>>({});
@@ -292,13 +309,17 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
         gId = g.id;
       }
       if (!selectedRoomIds.length) throw new Error("Sélectionnez au moins une chambre.");
+      if (isHourly && checkInAt && checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
+        throw new Error("L'heure de départ doit être après l'heure d'arrivée.");
+      }
       const reservation = await create.mutateAsync({
         guest_id: gId, check_in: checkIn, check_out: checkOut,
         rate_plan_id: ratePlanId || null, corporate_account_id: corporateId || null,
         channel, adults, children, notes: notes.trim() || undefined,
         // rate_amount = null quand la réception n'a pas touché le champ :
-        // le serveur calcule alors le tarif définitif (migration 027).
+        // le serveur calcule alors le tarif définitif (migrations 027/028).
         rooms: selectedRoomIds.map((id) => ({ room_id: id, rate_amount: rateOverrides[id] ?? null })),
+        check_in_at: checkInAt, check_out_at: checkOutAt,
       });
       onCreated(reservation.id);
     } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
@@ -315,9 +336,24 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Arrivée *</span>
               <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className={inp} /></label>
-            <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Départ *</span>
-              <input type="date" value={checkOut} min={addDays(checkIn, 1)} onChange={(e) => setCheckOut(e.target.value)} className={inp} /></label>
+            {isHourly ? (
+              <div className="rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-accent-foreground">
+                Formule horaire — départ le même jour, voir les heures ci-dessous.
+              </div>
+            ) : (
+              <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Départ *</span>
+                <input type="date" value={checkOut} min={addDays(checkIn, 1)} onChange={(e) => setCheckOut(e.target.value)} className={inp} /></label>
+            )}
           </div>
+
+          {isHourly && (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Heure d'arrivée *</span>
+                <input type="time" value={checkInTime} onChange={(e) => setCheckInTime(e.target.value)} className={inp} /></label>
+              <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Heure de départ *</span>
+                <input type="time" value={checkOutTime} onChange={(e) => setCheckOutTime(e.target.value)} className={inp} /></label>
+            </div>
+          )}
 
           <div>
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Client *</span>
@@ -348,7 +384,9 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
           </div>
 
           <div>
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Chambres * ({nights} nuit{nights > 1 ? "s" : ""} — prix total du séjour)</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Chambres * ({isHourly ? `${hourlyHours} h — prix total` : `${nights} nuit${nights > 1 ? "s" : ""} — prix total du séjour`})
+            </span>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
               {rooms.map((r) => {
                 const unavailable = bookedRoomIds.has(r.id) && !selectedRoomIds.includes(r.id);
@@ -378,8 +416,10 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
           {ratePlans.length > 0 && (
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tarif</span>
               <select value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)} className={inp}>
-                <option value="">Standard</option>
-                {ratePlans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="">Standard (nuitée)</option>
+                {ratePlans.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} — {p.billing_unit === "hour" ? "à l'heure" : "à la nuit"}</option>
+                ))}
               </select></label>
           )}
           {corporateAccounts.length > 0 && (
