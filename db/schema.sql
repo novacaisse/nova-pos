@@ -31,11 +31,47 @@ do $$ begin create type public.support_ticket_status as enum ('open','in_progres
 exception when duplicate_object then null; end $$;
 
 -- =============== TABLES ===============
+-- Restructuration compte/établissements (migrations 021/022) : accounts
+-- (1 par propriétaire) regroupe les établissements d'un même compte,
+-- account_subscriptions (1 par app_module actif) porte l'abonnement réel
+-- au niveau du compte + de l'application — organizations.plan/trial_ends_at
+-- et la table subscriptions restent en place pour compat (lus par
+-- useReadOnlyMode/trial.ts, cf. commentaires plus bas) mais ne sont plus la
+-- source de vérité pour le gating de modules ni les limites d'établissements/
+-- utilisateurs.
+create table if not exists public.accounts (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now(),
+  unique (owner_id)
+);
+create index if not exists idx_accounts_owner on public.accounts(owner_id);
+
+create table if not exists public.account_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.accounts(id) on delete cascade,
+  app_module text not null check (app_module in ('pos', 'hotel')),
+  -- Pas de FK vers plans(id) : comme subscriptions.plan existant, cette
+  -- colonne vaut aussi 'trial' pendant la période d'essai, une valeur qui
+  -- n'existe pas comme ligne dans plans (seules les formules payantes
+  -- starter/pro/business y sont définies).
+  plan_id text not null,
+  status public.subscription_status not null default 'trialing',
+  trial_ends_at timestamptz,
+  current_period_end timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (account_id, app_module)
+);
+create index if not exists idx_account_subs_account on public.account_subscriptions(account_id);
+
 create table if not exists public.organizations (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text unique not null,
   owner_id uuid not null references auth.users(id) on delete cascade,
+  account_id uuid not null references public.accounts(id),
   currency text not null default 'XOF',
   country text not null default 'CI',
   logo_url text,
@@ -43,13 +79,19 @@ create table if not exists public.organizations (
   trial_ends_at timestamptz,
   suspended boolean not null default false,
   created_at timestamptz not null default now(),
-  -- Applications ZegOS actives ('pos' = ZegCaisse) — informative pour
-  -- l'instant (migration 020c), aucune logique de restriction ne s'y
-  -- appuie encore. Nommée "active_apps" et non "active_modules" pour
-  -- éviter la collision avec plans.limits.modules (Bloc 27, concept
-  -- différent : écrans ZegCaisse inclus par formule).
-  active_apps jsonb not null default '["pos"]'::jsonb
+  -- Applications ZegOS actives ('pos' = ZegCaisse) — informatif seulement
+  -- désormais, supersede par app_module ci-dessous (migration 020c ; une
+  -- seule application par établissement depuis la restructuration
+  -- compte/établissements, jamais les deux à la fois).
+  active_apps jsonb not null default '["pos"]'::jsonb,
+  -- Application unique de cet établissement — 'pos' ou 'hotel' — jamais
+  -- modifiable après création (restructuration compte/établissements).
+  -- account_id regroupe les établissements d'un même compte, éventuellement
+  -- sur des applications différentes (un compte peut avoir des boutiques
+  -- ZegCaisse ET un établissement ZegHotel).
+  app_module text not null check (app_module in ('pos', 'hotel'))
 );
+create index if not exists idx_organizations_account on public.organizations(account_id);
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -69,10 +111,24 @@ create index if not exists idx_shop_members_user on public.organization_members(
 create index if not exists idx_shop_members_shop on public.organization_members(organization_id);
 
 -- =============== FONCTIONS SECURITY DEFINER ===============
+-- Exclut une organisation suspendue (migration 025) : organizations.suspended
+-- n'avait auparavant aucun effet RLS, seulement un blocage côté SPA
+-- (app.tsx) — un appel direct à l'API avec une session déjà active
+-- continuait à tout lire/écrire normalement. Cette fonction (et
+-- has_role_in_organization/has_any_role_in_organization ci-dessous)
+-- gouverne la quasi-totalité des policies RLS métier : la patcher ici
+-- suffit à propager le blocage partout. Seule exception : shops_select
+-- (plus bas) n'utilise PAS cette fonction, pour que la ligne organizations
+-- d'un établissement suspendu reste visible à ses propres membres (sinon
+-- l'écran "Compte suspendu", qui a besoin de la lire, ne s'afficherait
+-- jamais).
 create or replace function public.has_organization_access(_shop_id uuid)
 returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.organization_members
-    where organization_id = _shop_id and user_id = auth.uid());
+  select exists (
+    select 1 from public.organization_members m
+    join public.organizations o on o.id = m.organization_id
+    where m.organization_id = _shop_id and m.user_id = auth.uid() and not o.suspended
+  );
 $$;
 
 create or replace function public.current_user_organizations()
@@ -82,14 +138,20 @@ $$;
 
 create or replace function public.has_role_in_organization(_shop_id uuid, _role public.app_role)
 returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.organization_members
-    where organization_id = _shop_id and user_id = auth.uid() and role = _role);
+  select exists (
+    select 1 from public.organization_members m
+    join public.organizations o on o.id = m.organization_id
+    where m.organization_id = _shop_id and m.user_id = auth.uid() and m.role = _role and not o.suspended
+  );
 $$;
 
 create or replace function public.has_any_role_in_organization(_shop_id uuid, _roles public.app_role[])
 returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.organization_members
-    where organization_id = _shop_id and user_id = auth.uid() and role = any(_roles));
+  select exists (
+    select 1 from public.organization_members m
+    join public.organizations o on o.id = m.organization_id
+    where m.organization_id = _shop_id and m.user_id = auth.uid() and m.role = any(_roles) and not o.suspended
+  );
 $$;
 
 -- Utilisé uniquement par shop_members_insert ci-dessous : encapsule la
@@ -129,6 +191,23 @@ alter table public.super_admins enable row level security;
 create or replace function public.is_super_admin()
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.super_admins where user_id = auth.uid());
+$$;
+
+create or replace function public.is_account_owner(_account_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.accounts where id = _account_id and owner_id = auth.uid());
+$$;
+
+-- Lecture par tous les membres d'au moins une organisation du compte —
+-- cohérent avec le principe déjà appliqué dans useReadOnlyMode (statut
+-- d'abonnement visible par tous, écriture réservée au propriétaire).
+create or replace function public.is_account_member(_account_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.is_account_owner(_account_id) or exists (
+    select 1 from public.organizations o
+    join public.organization_members m on m.organization_id = o.id
+    where o.account_id = _account_id and m.user_id = auth.uid()
+  );
 $$;
 
 -- Lookup email pour l'écran Boutiques (Super Admin) — auth.users n'est
@@ -368,7 +447,11 @@ create index if not exists idx_sub_payments_subscription on public.subscription_
 -- Validation manuelle d'un paiement par le Super Admin (migration 020e) —
 -- filet de sécurité si la vérification automatique MoneyFusion (Edge
 -- Function check-subscription-payment) reste bloquée. Même logique que
--- la branche paid/failed de verifyAndApplyPayment côté Deno.
+-- la branche paid/failed de verifyAndApplyPayment côté Deno
+-- (supabase/functions/_shared/moneyfusion.ts) — y compris la mise à jour de
+-- account_subscriptions (Phase 6/migration 023 : cette fonction avait le
+-- même angle mort qu'avant le correctif Phase 5, jamais synchronisée avec
+-- le compte + app_module, seulement organizations/subscriptions).
 create or replace function public.admin_set_payment_status(p_payment_id uuid, p_status text)
 returns void
 language plpgsql security definer set search_path = public as $$
@@ -377,6 +460,7 @@ declare
   v_period_days integer;
   v_current_period_end timestamptz;
   v_plan_id text;
+  v_organization public.organizations;
 begin
   if not public.is_super_admin() then
     raise exception 'Accès réservé au Super Admin.';
@@ -409,11 +493,116 @@ begin
     where id = v_payment.subscription_id;
 
     update public.organizations set plan = v_plan_id where id = v_payment.organization_id;
+
+    select * into v_organization from public.organizations where id = v_payment.organization_id;
+    if found and v_organization.account_id is not null then
+      insert into public.account_subscriptions (account_id, app_module, plan_id, status, trial_ends_at, current_period_end)
+      values (v_organization.account_id, v_organization.app_module, v_plan_id, 'active', null, v_current_period_end)
+      on conflict (account_id, app_module) do update
+        set plan_id = excluded.plan_id, status = excluded.status,
+            trial_ends_at = excluded.trial_ends_at, current_period_end = excluded.current_period_end,
+            updated_at = now();
+    end if;
   end if;
 end;
 $$;
 revoke all on function public.admin_set_payment_status(uuid, text) from public;
 grant execute on function public.admin_set_payment_status(uuid, text) to authenticated;
+
+-- Changement de formule forcé par le Super Admin (Boutiques) — security
+-- definer plutôt qu'écriture directe depuis le client (migration 023) :
+-- les policies RLS de subscriptions n'autorisent qu'owner/manager de LA
+-- boutique concernée, jamais is_super_admin(), donc une écriture client
+-- échouait/no-opait silencieusement. Écrit aussi account_subscriptions —
+-- même angle mort que ci-dessus.
+create or replace function public.admin_change_organization_plan(p_organization_id uuid, p_plan text)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_organization public.organizations;
+  v_price numeric;
+  v_currency text;
+  v_period_end timestamptz := now() + interval '30 days';
+  v_existing_sub_id uuid;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Accès réservé au Super Admin.';
+  end if;
+
+  select * into v_organization from public.organizations where id = p_organization_id;
+  if not found then
+    raise exception 'Organisation introuvable.';
+  end if;
+
+  update public.organizations
+  set plan = p_plan, trial_ends_at = case when p_plan = 'trial' then trial_ends_at else null end
+  where id = p_organization_id;
+
+  if p_plan <> 'trial' then
+    select price_month, currency into v_price, v_currency from public.plans where id = p_plan;
+
+    select id into v_existing_sub_id from public.subscriptions
+    where organization_id = p_organization_id order by created_at desc limit 1;
+
+    if v_existing_sub_id is not null then
+      update public.subscriptions
+      set plan = p_plan, status = 'active', amount = coalesce(v_price, 0), currency = coalesce(v_currency, 'XOF'),
+          current_period_end = v_period_end
+      where id = v_existing_sub_id;
+    else
+      insert into public.subscriptions (organization_id, plan, status, amount, currency, current_period_end, started_at)
+      values (p_organization_id, p_plan, 'active', coalesce(v_price, 0), coalesce(v_currency, 'XOF'), v_period_end, now());
+    end if;
+
+    if v_organization.account_id is not null then
+      insert into public.account_subscriptions (account_id, app_module, plan_id, status, trial_ends_at, current_period_end)
+      values (v_organization.account_id, v_organization.app_module, p_plan, 'active', null, v_period_end)
+      on conflict (account_id, app_module) do update
+        set plan_id = excluded.plan_id, status = excluded.status,
+            trial_ends_at = excluded.trial_ends_at, current_period_end = excluded.current_period_end,
+            updated_at = now();
+    end if;
+  end if;
+end;
+$$;
+revoke all on function public.admin_change_organization_plan(uuid, text) from public;
+grant execute on function public.admin_change_organization_plan(uuid, text) to authenticated;
+
+-- Prolongation d'essai forcée par le Super Admin (Boutiques) — même
+-- raisonnement que ci-dessus (migration 023).
+create or replace function public.admin_extend_trial(p_organization_id uuid, p_days integer)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_organization public.organizations;
+  v_base timestamptz;
+  v_new timestamptz;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Accès réservé au Super Admin.';
+  end if;
+
+  select * into v_organization from public.organizations where id = p_organization_id;
+  if not found then
+    raise exception 'Organisation introuvable.';
+  end if;
+
+  v_base := case when v_organization.trial_ends_at is not null and v_organization.trial_ends_at > now()
+    then v_organization.trial_ends_at else now() end;
+  v_new := v_base + (p_days || ' days')::interval;
+
+  update public.organizations set trial_ends_at = v_new, plan = 'trial' where id = p_organization_id;
+
+  if v_organization.account_id is not null then
+    insert into public.account_subscriptions (account_id, app_module, plan_id, status, trial_ends_at)
+    values (v_organization.account_id, v_organization.app_module, 'trial', 'trialing', v_new)
+    on conflict (account_id, app_module) do update
+      set plan_id = 'trial', status = 'trialing', trial_ends_at = excluded.trial_ends_at, updated_at = now();
+  end if;
+end;
+$$;
+revoke all on function public.admin_extend_trial(uuid, integer) from public;
+grant execute on function public.admin_extend_trial(uuid, integer) to authenticated;
 
 create table if not exists public.organization_settings (
   organization_id uuid primary key references public.organizations(id) on delete cascade,
@@ -452,10 +641,10 @@ create or replace function public.provision_organization(
 language plpgsql security definer set search_path = public as $$
 declare
   v_uid uuid := auth.uid();
-  v_owned_count integer;
+  v_account_id uuid;
+  v_est_count integer;
   v_plan_id text;
-  v_limit jsonb;
-  v_max_shops integer;
+  v_max_establishments integer;
   v_organization public.organizations;
   v_slug text;
   v_base text;
@@ -465,19 +654,29 @@ begin
     raise exception 'Non authentifié.';
   end if;
 
-  select count(*) into v_owned_count from public.organizations where owner_id = v_uid;
+  if exists (select 1 from public.organizations where owner_id = v_uid and suspended) then
+    raise exception 'Compte suspendu : contactez le support avant de créer un nouvel établissement.';
+  end if;
 
-  if v_owned_count > 0 then
-    select plan into v_plan_id from public.organizations where owner_id = v_uid order by created_at asc limit 1;
-    select limits -> 'shops' into v_limit from public.plans where id = v_plan_id;
+  insert into public.accounts (owner_id, name) values (v_uid, trim(p_name))
+  on conflict (owner_id) do nothing
+  returning id into v_account_id;
+  if v_account_id is null then
+    select id into v_account_id from public.accounts where owner_id = v_uid;
+  end if;
 
-    if v_limit is not null and jsonb_typeof(v_limit) = 'number' then
-      v_max_shops := (v_limit)::text::integer;
-      if v_owned_count >= v_max_shops then
-        raise exception 'Limite de boutiques atteinte pour votre formule (% maximum). Passez à une formule supérieure pour en ajouter.', v_max_shops;
+  select count(*) into v_est_count from public.organizations
+  where account_id = v_account_id and app_module = p_app;
+
+  if v_est_count > 0 then
+    select plan_id into v_plan_id from public.account_subscriptions
+    where account_id = v_account_id and app_module = p_app;
+    if v_plan_id is not null then
+      select max_establishments into v_max_establishments from public.plans where id = v_plan_id;
+      if v_max_establishments is not null and v_est_count >= v_max_establishments then
+        raise exception 'Limite d''établissements atteinte pour votre formule (% maximum). Passez à une formule supérieure pour en ajouter.', v_max_establishments;
       end if;
     end if;
-    -- limite non numérique (ex. "∞") ou plan introuvable => pas de blocage.
   end if;
 
   v_base := trim(both '-' from lower(regexp_replace(trim(p_name), '[^a-zA-Z0-9]+', '-', 'g')));
@@ -488,20 +687,27 @@ begin
   loop
     v_slug := v_base || '-' || substr(md5(random()::text), 1, 4);
     begin
-      insert into public.organizations (name, slug, owner_id, country, currency, plan, trial_ends_at, active_apps)
-      values (trim(p_name), v_slug, v_uid, p_country, coalesce(p_currency, 'XOF'), 'trial', v_trial_ends, jsonb_build_array(p_app))
+      insert into public.organizations (name, slug, owner_id, country, currency, plan, trial_ends_at, active_apps, account_id, app_module)
+      values (trim(p_name), v_slug, v_uid, p_country, coalesce(p_currency, 'XOF'), 'trial', v_trial_ends, jsonb_build_array(p_app), v_account_id, p_app)
       returning * into v_organization;
       exit;
     exception when unique_violation then
-      null;
+      null; -- collision de slug : on retente avec un nouveau suffixe aléatoire
     end;
   end loop;
 
-  insert into public.organization_members (organization_id, user_id, role) values (v_organization.id, v_uid, 'owner');
+  insert into public.organization_members (organization_id, user_id, role)
+  values (v_organization.id, v_uid, 'owner');
+
   insert into public.subscriptions (organization_id, plan, status, amount, currency, current_period_end)
   values (v_organization.id, 'trial', 'trialing', 0, coalesce(p_currency, 'XOF'), v_trial_ends);
+
   insert into public.organization_settings (organization_id, data)
   values (v_organization.id, jsonb_build_object('phone', p_phone, 'address', p_address));
+
+  insert into public.account_subscriptions (account_id, app_module, plan_id, status, trial_ends_at)
+  values (v_account_id, p_app, 'trial', 'trialing', v_trial_ends)
+  on conflict (account_id, app_module) do nothing;
 
   if p_owner_phone is not null and p_owner_phone <> '' then
     update public.profiles set phone = p_owner_phone where id = v_uid;
@@ -513,6 +719,44 @@ $$;
 
 revoke all on function public.provision_organization(text, text, text, text, text, text, text) from public;
 grant execute on function public.provision_organization(text, text, text, text, text, text, text) to authenticated;
+
+-- add_sale_payment (migration 024) : atomique (set paid = paid + p_amount
+-- sous le verrou de ligne de l'UPDATE) — remplace un calcul client
+-- (sale.paid + amount) qui perdait un paiement sur deux lorsque deux
+-- règlements complémentaires arrivaient à quelques instants d'écart sur la
+-- même vente à crédit. Security invoker (pas definer) : les policies RLS
+-- existantes sur sales/payments s'appliquent normalement.
+create or replace function public.add_sale_payment(p_sale_id uuid, p_amount numeric, p_method public.payment_method)
+returns public.sales
+language plpgsql as $$
+declare
+  v_organization_id uuid;
+  v_sale public.sales;
+begin
+  if p_amount <= 0 then
+    raise exception 'Le montant doit être positif.';
+  end if;
+
+  select organization_id into v_organization_id from public.sales where id = p_sale_id;
+  if v_organization_id is null then
+    raise exception 'Vente introuvable.';
+  end if;
+
+  insert into public.payments (organization_id, sale_id, method, amount)
+  values (v_organization_id, p_sale_id, case when p_method = 'mixed' then 'cash' else p_method end, p_amount);
+
+  update public.sales
+  set paid = paid + p_amount,
+      change_due = greatest(0, (paid + p_amount) - total)
+  where id = p_sale_id
+  returning * into v_sale;
+
+  return v_sale;
+end;
+$$;
+
+revoke all on function public.add_sale_payment(uuid, numeric, public.payment_method) from public;
+grant execute on function public.add_sale_payment(uuid, numeric, public.payment_method) to authenticated;
 
 -- Catalogue de formules, éditable depuis /admin/parametres, lu publiquement
 -- par /tarifs (anon). id en text (slug) plutôt qu'uuid : organizations.plan /
@@ -529,8 +773,20 @@ create table if not exists public.plans (
   is_active boolean not null default true,
   is_recommended boolean not null default false,
   sort_order integer not null default 0,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Restructuration compte/établissements (Phase 3, saisies depuis
+  -- /admin/formules) : app_module distingue une formule ZegCaisse d'une
+  -- formule ZegHotel (deux catalogues distincts, jamais interchangeables) ;
+  -- max_establishments/max_users bornent le compte (account_subscriptions)
+  -- pour cette app. null = illimité / non assignée, jamais saisi en dur.
+  app_module text,
+  max_establishments integer,
+  max_users integer
 );
+do $$ begin
+  alter table public.plans add constraint plans_app_module_check check (app_module is null or app_module in ('pos', 'hotel'));
+exception when duplicate_object then null;
+end $$;
 
 insert into public.plans (id, name, price_month, price_year, features, limits, is_active, is_recommended, sort_order)
 values
@@ -596,6 +852,8 @@ insert into public.app_settings (id) values (true) on conflict (id) do nothing;
 alter table public.app_settings enable row level security;
 
 -- =============== GRANTS (obligatoires pour la Data API PostgREST) ===============
+grant select, insert, update, delete on public.accounts               to authenticated;
+grant select, insert, update, delete on public.account_subscriptions  to authenticated;
 grant select, insert, update, delete on public.organizations           to authenticated;
 grant select, insert, update, delete on public.profiles        to authenticated;
 grant select, insert, update, delete on public.organization_members    to authenticated;
@@ -627,6 +885,8 @@ grant update on public.app_settings to authenticated;
 grant all on all tables in schema public to service_role;
 
 -- =============== RLS ===============
+alter table public.accounts                enable row level security;
+alter table public.account_subscriptions   enable row level security;
 alter table public.organizations           enable row level security;
 alter table public.profiles        enable row level security;
 alter table public.organization_members    enable row level security;
@@ -650,9 +910,56 @@ alter table public.plans           enable row level security;
 alter table public.purchase_orders      enable row level security;
 alter table public.purchase_order_items enable row level security;
 
+drop policy if exists accounts_select on public.accounts;
+create policy accounts_select on public.accounts for select to authenticated
+  using (public.is_account_member(id));
+drop policy if exists accounts_insert on public.accounts;
+create policy accounts_insert on public.accounts for insert to authenticated
+  with check (owner_id = auth.uid());
+drop policy if exists accounts_update on public.accounts;
+create policy accounts_update on public.accounts for update to authenticated
+  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists accounts_delete on public.accounts;
+create policy accounts_delete on public.accounts for delete to authenticated
+  using (owner_id = auth.uid());
+-- Super Admin : lecture cross-comptes (même principe que shops_select_admin).
+drop policy if exists accounts_select_admin on public.accounts;
+create policy accounts_select_admin on public.accounts for select to authenticated
+  using (public.is_super_admin());
+
+drop policy if exists account_subscriptions_select on public.account_subscriptions;
+create policy account_subscriptions_select on public.account_subscriptions for select to authenticated
+  using (public.is_account_member(account_id));
+drop policy if exists account_subscriptions_insert on public.account_subscriptions;
+create policy account_subscriptions_insert on public.account_subscriptions for insert to authenticated
+  with check (public.is_account_owner(account_id));
+drop policy if exists account_subscriptions_update on public.account_subscriptions;
+create policy account_subscriptions_update on public.account_subscriptions for update to authenticated
+  using (public.is_account_owner(account_id)) with check (public.is_account_owner(account_id));
+drop policy if exists account_subscriptions_delete on public.account_subscriptions;
+create policy account_subscriptions_delete on public.account_subscriptions for delete to authenticated
+  using (public.is_account_owner(account_id));
+-- Super Admin : lecture cross-comptes (Abonnements/Facturation, Phase 3).
+drop policy if exists account_subscriptions_select_admin on public.account_subscriptions;
+create policy account_subscriptions_select_admin on public.account_subscriptions for select to authenticated
+  using (public.is_super_admin());
+
+-- shops_select : vérification d'appartenance inline, volontairement SANS le
+-- filtre "not suspended" présent dans has_organization_access (migration
+-- 025) — sinon la ligne organizations d'un établissement suspendu
+-- deviendrait invisible à ses propres membres, cassant l'écran "Compte
+-- suspendu" (qui a besoin de lire organizations.suspended/name pour
+-- s'afficher) au lieu de l'afficher. shops_update/shops_delete restent
+-- régies par has_any_role_in_organization/has_role_in_organization
+-- ci-dessous, donc bien bloquées pour une organisation suspendue.
 drop policy if exists shops_select on public.organizations;
 create policy shops_select on public.organizations for select to authenticated
-  using (public.has_organization_access(id));
+  using (
+    exists (
+      select 1 from public.organization_members m
+      where m.organization_id = organizations.id and m.user_id = auth.uid()
+    )
+  );
 drop policy if exists shops_insert on public.organizations;
 create policy shops_insert on public.organizations for insert to authenticated
   with check (owner_id = auth.uid());

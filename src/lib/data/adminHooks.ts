@@ -205,6 +205,119 @@ export function useAdminOrganizations() {
   });
 }
 
+// ============ COMPTES (cross-tenant, Phase 11) ============
+// Jusqu'ici, aucun écran admin ne montrait accounts/account_subscriptions
+// — pourtant l'unité de facturation réelle depuis la Phase 1 — Emmanuel ne
+// pouvait voir "ce compte possède N établissements sur telle app, avec tel
+// abonnement" sans accès direct à la base. RLS déjà en place depuis la
+// Phase 1 (accounts_select_admin/account_subscriptions_select_admin,
+// is_super_admin()) — aucune nouvelle policy nécessaire pour cet écran.
+export type AdminAccountSubscription = {
+  app_module: "pos" | "hotel"; plan_id: string; status: string;
+  trial_ends_at: string | null; current_period_end: string | null;
+};
+export type AdminAccount = {
+  id: string; owner_id: string; name: string; created_at: string;
+  owner_profile: { full_name: string | null; phone: string | null } | null;
+  owner_email: string | null;
+  subscriptions: AdminAccountSubscription[];
+  establishment_counts: Partial<Record<"pos" | "hotel", number>>;
+};
+
+export function useAdminAccounts() {
+  return useQuery({
+    queryKey: ["admin_accounts"],
+    queryFn: async (): Promise<AdminAccount[]> => {
+      const { data: accounts, error } = await supabase.from("accounts")
+        .select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      const accountIds = (accounts ?? []).map((a: any) => a.id);
+      const ownerIds = [...new Set((accounts ?? []).map((a: any) => a.owner_id))];
+
+      let profiles: Record<string, any> = {};
+      let emails: Record<string, string> = {};
+      if (ownerIds.length) {
+        const { data: profs } = await supabase.from("profiles").select("id, full_name, phone").in("id", ownerIds);
+        profiles = Object.fromEntries((profs ?? []).map((p: any) => [p.id, p]));
+        const { data: emailRows } = await supabase.rpc("admin_get_user_emails", { _user_ids: ownerIds });
+        emails = Object.fromEntries((emailRows ?? []).map((r: any) => [r.user_id, r.email]));
+      }
+
+      const subsByAccount: Record<string, AdminAccountSubscription[]> = {};
+      const countsByAccount: Record<string, Partial<Record<"pos" | "hotel", number>>> = {};
+      if (accountIds.length) {
+        const { data: subs } = await supabase.from("account_subscriptions")
+          .select("account_id, app_module, plan_id, status, trial_ends_at, current_period_end").in("account_id", accountIds);
+        for (const s of (subs ?? []) as any[]) {
+          (subsByAccount[s.account_id] ??= []).push(s);
+        }
+        const { data: orgs } = await supabase.from("organizations").select("account_id, app_module").in("account_id", accountIds);
+        for (const o of (orgs ?? []) as any[]) {
+          const byApp = (countsByAccount[o.account_id] ??= {});
+          byApp[o.app_module as "pos" | "hotel"] = (byApp[o.app_module as "pos" | "hotel"] ?? 0) + 1;
+        }
+      }
+
+      return (accounts ?? []).map((a: any) => ({
+        ...a,
+        owner_profile: profiles[a.owner_id] ?? null,
+        owner_email: emails[a.owner_id] ?? null,
+        subscriptions: subsByAccount[a.id] ?? [],
+        establishment_counts: countsByAccount[a.id] ?? {},
+      }));
+    },
+  });
+}
+
+// ============ JOURNAL D'IMPERSONATION (cross-tenant, Phase 11) ============
+// admin_impersonations est écrit depuis la Phase "Bloc 9"/audit-impersonate
+// mais n'a jamais eu d'écran de lecture — Emmanuel ne pouvait pas auditer
+// "qui a impersonné qui, quand" sans accès SQL direct, malgré une table
+// prévue précisément pour ça.
+export type AdminImpersonation = {
+  id: string; admin_user_id: string; target_user_id: string;
+  organization_id: string | null; created_at: string;
+  admin_email: string | null;
+  target_email: string | null; target_full_name: string | null;
+  organization_name: string | null;
+};
+
+export function useAdminImpersonations() {
+  return useQuery({
+    queryKey: ["admin_impersonations"],
+    queryFn: async (): Promise<AdminImpersonation[]> => {
+      const { data: rows, error } = await supabase.from("admin_impersonations")
+        .select("*").order("created_at", { ascending: false }).limit(200);
+      if (error) throw error;
+
+      const userIds = [...new Set((rows ?? []).flatMap((r: any) => [r.admin_user_id, r.target_user_id]))];
+      const orgIds = [...new Set((rows ?? []).map((r: any) => r.organization_id).filter(Boolean))];
+
+      let emails: Record<string, string> = {};
+      let profiles: Record<string, any> = {};
+      let orgNames: Record<string, string> = {};
+      if (userIds.length) {
+        const { data: emailRows } = await supabase.rpc("admin_get_user_emails", { _user_ids: userIds });
+        emails = Object.fromEntries((emailRows ?? []).map((r: any) => [r.user_id, r.email]));
+        const { data: profs } = await supabase.from("profiles").select("id, full_name").in("id", userIds);
+        profiles = Object.fromEntries((profs ?? []).map((p: any) => [p.id, p]));
+      }
+      if (orgIds.length) {
+        const { data: orgs } = await supabase.from("organizations").select("id, name").in("id", orgIds as string[]);
+        orgNames = Object.fromEntries((orgs ?? []).map((o: any) => [o.id, o.name]));
+      }
+
+      return (rows ?? []).map((r: any) => ({
+        ...r,
+        admin_email: emails[r.admin_user_id] ?? null,
+        target_email: emails[r.target_user_id] ?? null,
+        target_full_name: profiles[r.target_user_id]?.full_name ?? null,
+        organization_name: r.organization_id ? (orgNames[r.organization_id] ?? null) : null,
+      }));
+    },
+  });
+}
+
 export function useSuspendOrganization() {
   const qc = useQueryClient();
   return useMutation({
