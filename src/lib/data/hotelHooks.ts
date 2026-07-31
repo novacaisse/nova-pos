@@ -454,37 +454,41 @@ export type CreateReservationInput = {
   guest_id: string; check_in: string; check_out: string;
   rate_plan_id?: string | null; corporate_account_id?: string | null;
   channel?: string; adults?: number; children?: number; notes?: string;
-  rooms: { room_id: string; rate_amount: number }[];
+  // rate_amount null = pas de saisie manuelle par la réception : le
+  // serveur calcule le tarif définitif (tarif saisonnier + formule
+  // tarifaire, migration 027). Un nombre = override manuel explicite,
+  // toujours prioritaire.
+  rooms: { room_id: string; rate_amount: number | null }[];
 };
+// RPC atomique (migration 027) plutôt que 3 écritures client séparées
+// (hotel_reservations, hotel_reservation_rooms, hotel_folios) : vérifie
+// aussi les restrictions (séjour minimum/stop-vente/fermé à l'arrivée,
+// jusqu'ici configurables en Paramètres > Tarification mais jamais
+// appliquées) avant toute écriture, et calcule le tarif via le tarif
+// saisonnier + la formule tarifaire si la réception n'a pas saisi de prix
+// manuel — jusqu'ici le prix venait uniquement de room_type.base_price,
+// la formule tarifaire choisie n'étant enregistrée que pour l'affichage.
 export function useCreateHotelReservation() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: CreateReservationInput) => {
       if (!organizationId) throw new Error("Aucune organisation sélectionnée");
       if (!input.rooms.length) throw new Error("Sélectionnez au moins une chambre.");
-      const { data: reservation, error: resErr } = await supabase.from("hotel_reservations").insert({
-        organization_id: organizationId, guest_id: input.guest_id,
-        check_in: input.check_in, check_out: input.check_out,
-        rate_plan_id: input.rate_plan_id ?? null, corporate_account_id: input.corporate_account_id ?? null,
-        channel: input.channel ?? "direct", adults: input.adults ?? 1, children: input.children ?? 0,
-        notes: input.notes ?? null,
-      }).select().single();
-      if (resErr) throw resErr;
-
-      const { error: roomsErr } = await supabase.from("hotel_reservation_rooms").insert(
-        input.rooms.map((r) => ({
-          organization_id: organizationId, reservation_id: reservation.id,
-          room_id: r.room_id, rate_amount: r.rate_amount,
-        })),
-      );
-      if (roomsErr) throw roomsErr;
-
-      const { error: folioErr } = await supabase.from("hotel_folios").insert({
-        organization_id: organizationId, reservation_id: reservation.id,
+      const { data, error } = await supabase.rpc("create_hotel_reservation", {
+        p_organization_id: organizationId,
+        p_guest_id: input.guest_id,
+        p_check_in: input.check_in,
+        p_check_out: input.check_out,
+        p_rooms: input.rooms,
+        p_rate_plan_id: input.rate_plan_id ?? null,
+        p_corporate_account_id: input.corporate_account_id ?? null,
+        p_channel: input.channel ?? "direct",
+        p_adults: input.adults ?? 1,
+        p_children: input.children ?? 0,
+        p_notes: input.notes ?? null,
       });
-      if (folioErr) throw folioErr;
-
-      return reservation as HotelReservation;
+      if (error) throw error;
+      return data as HotelReservation;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hotel_reservations", organizationId] });

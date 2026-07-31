@@ -39,6 +39,7 @@ import { Route as AppClientsRouteImport } from './routes/app.clients'
 import { Route as AppCaisseRouteImport } from './routes/app.caisse'
 import { Route as AppAbonnementRouteImport } from './routes/app.abonnement'
 import { Route as AdminSupportRouteImport } from './routes/admin.support'
+import { Route as AdminReconciliationRouteImport } from './routes/admin.reconciliation'
 import { Route as AdminProfilRouteImport } from './routes/admin.profil'
 import { Route as AdminParametresRouteImport } from './routes/admin.parametres'
 import { Route as AdminImpersonationsRouteImport } from './routes/admin.impersonations'
@@ -211,6 +212,11 @@ const AdminSupportRoute = AdminSupportRouteImport.update({
   path: '/support',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminReconciliationRoute = AdminReconciliationRouteImport.update({
+  id: '/reconciliation',
+  path: '/reconciliation',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminProfilRoute = AdminProfilRouteImport.update({
   id: '/profil',
   path: '/profil',
@@ -329,6 +335,7 @@ export interface FileRoutesByFullPath {
   '/admin/impersonations': typeof AdminImpersonationsRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
   '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
@@ -378,6 +385,7 @@ export interface FileRoutesByTo {
   '/admin/impersonations': typeof AdminImpersonationsRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
   '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
@@ -428,6 +436,7 @@ export interface FileRoutesById {
   '/admin/impersonations': typeof AdminImpersonationsRoute
   '/admin/parametres': typeof AdminParametresRoute
   '/admin/profil': typeof AdminProfilRoute
+  '/admin/reconciliation': typeof AdminReconciliationRoute
   '/admin/support': typeof AdminSupportRoute
   '/app/abonnement': typeof AppAbonnementRoute
   '/app/caisse': typeof AppCaisseRoute
@@ -482,6 +491,7 @@ export interface FileRouteTypes {
     | '/admin/impersonations'
     | '/admin/parametres'
     | '/admin/profil'
+    | '/admin/reconciliation'
     | '/admin/support'
     | '/app/abonnement'
     | '/app/caisse'
@@ -531,6 +541,7 @@ export interface FileRouteTypes {
     | '/admin/impersonations'
     | '/admin/parametres'
     | '/admin/profil'
+    | '/admin/reconciliation'
     | '/admin/support'
     | '/app/abonnement'
     | '/app/caisse'
@@ -580,6 +591,7 @@ export interface FileRouteTypes {
     | '/admin/impersonations'
     | '/admin/parametres'
     | '/admin/profil'
+    | '/admin/reconciliation'
     | '/admin/support'
     | '/app/abonnement'
     | '/app/caisse'
@@ -839,6 +851,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSupportRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/reconciliation': {
+      id: '/admin/reconciliation'
+      path: '/reconciliation'
+      fullPath: '/admin/reconciliation'
+      preLoaderRoute: typeof AdminReconciliationRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/profil': {
       id: '/admin/profil'
       path: '/profil'
@@ -991,6 +1010,7 @@ interface AdminRouteChildren {
   AdminImpersonationsRoute: typeof AdminImpersonationsRoute
   AdminParametresRoute: typeof AdminParametresRoute
   AdminProfilRoute: typeof AdminProfilRoute
+  AdminReconciliationRoute: typeof AdminReconciliationRoute
   AdminSupportRoute: typeof AdminSupportRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
@@ -1004,6 +1024,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminImpersonationsRoute: AdminImpersonationsRoute,
   AdminParametresRoute: AdminParametresRoute,
   AdminProfilRoute: AdminProfilRoute,
+  AdminReconciliationRoute: AdminReconciliationRoute,
   AdminSupportRoute: AdminSupportRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
