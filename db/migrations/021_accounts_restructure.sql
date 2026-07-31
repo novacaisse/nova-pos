@@ -205,7 +205,10 @@ with ranked as (
     s.status,
     -- trial_ends_at vit sur organizations, pas sur subscriptions (qui n'a
     -- pas cette colonne) — la subscription ne porte que current_period_end.
-    o.trial_ends_at,
+    -- Laissé null ici : le fallback 5g couvre déjà les comptes/app_module
+    -- sans subscription en dérivant trial_ends_at directement depuis
+    -- organizations pour ce cas précis.
+    null::timestamptz as trial_ends_at,
     s.current_period_end,
     row_number() over (
       partition by o.account_id, o.app_module
@@ -218,7 +221,7 @@ with ranked as (
           when 'expired' then 5
           else 6
         end,
-        coalesce(s.current_period_end, o.trial_ends_at) desc nulls last,
+        s.current_period_end desc nulls last,
         s.created_at desc
     ) as rnk
   from public.organizations o
