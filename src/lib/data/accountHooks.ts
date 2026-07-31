@@ -1,10 +1,11 @@
-// Limites par compte (Phase 2, restructuration compte/établissements,
-// migration 021) : un account_subscriptions par (account_id, app_module),
-// dont la formule (plans.max_users) borne le nombre de membres cumulés sur
-// TOUTES les organisations du compte pour cette app — pas seulement
-// l'organisation courante, contrairement à l'ancien plan.limits.max_users
-// (TeamPage/adminHooks) qui reste utilisé pour les autres champs de formule
-// (ai_credits, modules).
+// Abonnement/limites par compte (Phases 1-3, restructuration
+// compte/établissements) : un account_subscriptions par (account_id,
+// app_module), dont la formule (plans.max_establishments/max_users) borne
+// le nombre d'établissements et de membres cumulés sur TOUTES les
+// organisations du compte pour cette app — pas seulement l'organisation
+// courante. Remplace, pour l'affichage et les limites, l'ancien modèle par
+// organisation (organizations.plan/subscriptions), qui reste écrit en base
+// pour compat mais n'est plus lu ici.
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -20,7 +21,9 @@ export type AccountSubscription = {
   current_period_end: string | null;
 };
 
-function useCurrentAccountSubscription() {
+// Account_subscriptions du compte + app_module actifs — source d'affichage
+// pour la page Abonnement (Phase 3) et les limites d'équipe/établissements.
+export function useCurrentAccountSubscription() {
   const { currentOrganization } = useOrganization();
   const accountId = currentOrganization?.account_id ?? null;
   const appModule = currentOrganization?.app_module ?? null;

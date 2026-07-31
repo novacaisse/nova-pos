@@ -51,9 +51,17 @@ function AdminParametres() {
           isLoading ? (
             <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
           ) : (
-            <div className="grid gap-4 lg:grid-cols-3">
-              {plans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
-              {creating && <PlanCard plan={null} onDoneCreating={() => setCreating(false)} />}
+            <div className="space-y-6">
+              {creating && (
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <PlanCard plan={null} onDoneCreating={() => setCreating(false)} />
+                </div>
+              )}
+              <PlanSection title="ZegCaisse" plans={plans.filter((p) => p.app_module === "pos")} />
+              <PlanSection title="ZegHotel" plans={plans.filter((p) => p.app_module === "hotel")} />
+              {plans.some((p) => p.app_module == null) && (
+                <PlanSection title="Non assignée à une application" plans={plans.filter((p) => p.app_module == null)} />
+              )}
             </div>
           )
         )}
@@ -85,6 +93,29 @@ function AdminParametres() {
   );
 }
 
+// Regroupement visuel par app_module (Phase 3, restructuration
+// compte/établissements) : une formule ZegCaisse et une formule ZegHotel
+// sont désormais deux catalogues distincts, jamais interchangeables — la
+// section reste visible même vide pour signaler qu'aucune formule n'existe
+// encore pour cette application (cf. /souscription, qui refuse alors
+// silencieusement de proposer les formules de l'autre app).
+function PlanSection({ title, plans }: { title: string; plans: Plan[] }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</div>
+      {plans.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-4 text-xs text-muted-foreground">
+          Aucune formule pour l'instant.
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          {plans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?: () => void }) {
   const upsert = useUpsertPlan();
   const remove = useDeletePlan();
@@ -97,7 +128,13 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
   const [newFeature, setNewFeature] = useState("");
   const [isActive, setIsActive] = useState(plan?.is_active ?? true);
   const [isRecommended, setIsRecommended] = useState(plan?.is_recommended ?? false);
-  const [maxUsers, setMaxUsers] = useState(plan?.limits.max_users ?? 0);
+  const [appModule, setAppModule] = useState<"pos" | "hotel">(plan?.app_module ?? "pos");
+  // Vide = illimité (null en base) — distinct de 0, contrairement à
+  // limits.ai_credits ci-dessous qui garde sa convention 0 = illimité.
+  const [maxEstablishments, setMaxEstablishments] = useState(
+    plan?.max_establishments != null ? String(plan.max_establishments) : "",
+  );
+  const [maxUsers, setMaxUsers] = useState(plan?.max_users != null ? String(plan.max_users) : "");
   const [aiCredits, setAiCredits] = useState(plan?.limits.ai_credits ?? 0);
   // Un plan sans `modules` défini = tout inclus (rétrocompatible) — l'état
   // local part alors de la liste complète cochée, pour que décocher une
@@ -113,7 +150,10 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
     if (plan) {
       setName(plan.name); setPriceMonth(plan.price_month); setPriceYear(plan.price_year);
       setFeatures(plan.features); setIsActive(plan.is_active); setIsRecommended(plan.is_recommended);
-      setMaxUsers(plan.limits.max_users ?? 0); setAiCredits(plan.limits.ai_credits ?? 0);
+      setAppModule(plan.app_module ?? "pos");
+      setMaxEstablishments(plan.max_establishments != null ? String(plan.max_establishments) : "");
+      setMaxUsers(plan.max_users != null ? String(plan.max_users) : "");
+      setAiCredits(plan.limits.ai_credits ?? 0);
       setModules(plan.limits.modules?.length ? plan.limits.modules : allModuleUrls);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,8 +171,10 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
         name, price_month: priceMonth, price_year: priceYear,
         features, is_active: isActive, is_recommended: isRecommended,
         currency: plan?.currency ?? "XOF",
+        app_module: appModule,
+        max_establishments: maxEstablishments.trim() === "" ? null : Number(maxEstablishments),
+        max_users: maxUsers.trim() === "" ? null : Number(maxUsers),
         limits: {
-          max_users: maxUsers || undefined,
           ai_credits: aiCredits || undefined,
           modules: modules.length === allModuleUrls.length ? undefined : modules,
         },
@@ -156,6 +198,15 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
           <Star className="h-3.5 w-3.5" fill={isRecommended ? "currentColor" : "none"} />
         </button>
       </div>
+
+      <label className="mb-3 block">
+        <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Application</span>
+        <select value={appModule} onChange={(e) => setAppModule(e.target.value as "pos" | "hotel")}
+          className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary">
+          <option value="pos">ZegCaisse</option>
+          <option value="hotel">ZegHotel</option>
+        </select>
+      </label>
 
       <div className="space-y-3">
         <PriceField label="Prix mensuel" value={priceMonth} onChange={setPriceMonth} />
@@ -185,12 +236,20 @@ function PlanCard({ plan, onDoneCreating }: { plan: Plan | null; onDoneCreating?
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Comptes max</span>
-          <input type="number" onFocus={selectOnFocus} min={0} value={maxUsers} onChange={(e) => setMaxUsers(Math.max(0, Number(e.target.value) || 0))}
-            placeholder="0 = illimité"
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Établissements max</span>
+          <input type="number" onFocus={selectOnFocus} min={0} value={maxEstablishments}
+            onChange={(e) => setMaxEstablishments(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="Vide = illimité"
             className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
         </label>
         <label className="block">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Comptes max</span>
+          <input type="number" onFocus={selectOnFocus} min={0} value={maxUsers}
+            onChange={(e) => setMaxUsers(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="Vide = illimité"
+            className="tabular w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary" />
+        </label>
+        <label className="col-span-2 block">
           <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Crédits IA / mois</span>
           <input type="number" onFocus={selectOnFocus} min={0} value={aiCredits} onChange={(e) => setAiCredits(Math.max(0, Number(e.target.value) || 0))}
             placeholder="0 = illimité"

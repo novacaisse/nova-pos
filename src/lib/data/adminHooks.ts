@@ -25,11 +25,13 @@ export function useIsSuperAdmin() {
 // Une seule requête pour les deux usages : la RLS renvoie automatiquement
 // les formules inactives en plus si l'appelant est super admin (OR des
 // deux policies), donc pas besoin d'un hook séparé pour le CMS.
-// limits.max_users / limits.ai_credits : 0 ou absent = illimité.
-// limits.modules : urls de modules inclus (cf. PLAN_MODULES) — absent ou
-// vide = aucune restriction (comportement par défaut, rétrocompatible
-// avec les formules créées avant l'ajout de ce champ, Bloc 27).
-export type PlanLimits = { max_users?: number; ai_credits?: number; modules?: string[] };
+// limits.ai_credits : 0 ou absent = illimité. limits.modules : urls de
+// modules inclus (cf. PLAN_MODULES) — absent ou vide = aucune restriction
+// (comportement par défaut, rétrocompatible avec les formules créées avant
+// l'ajout de ce champ, Bloc 27). L'ancien limits.max_users (organisation) a
+// été retiré au Phase 3 : remplacé par la colonne physique max_users
+// ci-dessous, désormais au niveau du compte (account_subscriptions).
+export type PlanLimits = { ai_credits?: number; modules?: string[] };
 export type Plan = {
   id: string; name: string;
   price_month: number; price_year: number; currency: string;
@@ -37,9 +39,10 @@ export type Plan = {
   is_active: boolean; is_recommended: boolean; sort_order: number;
   created_at: string;
   // Colonnes physiques ajoutées par la migration 021 (restructuration
-  // compte/établissements) : limites par app_module d'un account_subscriptions,
-  // distinctes de limits.max_users ci-dessus (qui reste, lui, au niveau de
-  // l'organisation). null = illimité, jamais saisi en dur (Phase 3, mini-CMS).
+  // compte/établissements), saisies depuis l'admin (Phase 3) : app_module
+  // distingue une formule ZegCaisse d'une formule ZegHotel ; max_establishments
+  // et max_users bornent le compte (account_subscriptions) pour cette app.
+  // null = illimité / non assignée.
   app_module: "pos" | "hotel" | null;
   max_establishments: number | null;
   max_users: number | null;
