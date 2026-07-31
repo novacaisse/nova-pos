@@ -68,6 +68,7 @@ export const HOTEL_MODULES: { url: string; label: string }[] = [
   { url: "/app/hotel/reservations", label: "Réservations" },
   { url: "/app/hotel/rooms", label: "Chambres" },
   { url: "/app/hotel/housekeeping", label: "Housekeeping" },
+  { url: "/app/hotel/maintenance", label: "Maintenance" },
   { url: "/app/hotel/clients", label: "Clients" },
   { url: "/app/hotel/rapports", label: "Rapports" },
 ];

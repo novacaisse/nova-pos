@@ -2552,16 +2552,17 @@ create table if not exists public.hotel_maintenance_tickets (
 create index if not exists idx_hotel_maintenance_org on public.hotel_maintenance_tickets(organization_id);
 create index if not exists idx_hotel_maintenance_room on public.hotel_maintenance_tickets(room_id);
 alter table public.hotel_maintenance_tickets enable row level security;
--- Tout le monde qui peut voir une chambre peut signaler un incident
--- (housekeeping/front_desk en particulier) ; suivi/résolution réservé à
--- owner/manager/housekeeping (souvent la gouvernante qui gère aussi la
--- coordination avec un technicien).
+-- Module Maintenance détaché (ZegHotel Phase 3, migration 030) :
+-- accessible à TOUT le personnel hôtel pour signaler un incident
+-- (accountant ajouté) ; suivi/résolution réservé à owner/manager/
+-- housekeeping (souvent la gouvernante qui gère aussi la coordination
+-- avec un technicien).
 drop policy if exists hotel_maintenance_select on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_select on public.hotel_maintenance_tickets for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping','accountant']::public.app_role[]));
 drop policy if exists hotel_maintenance_insert on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_insert on public.hotel_maintenance_tickets for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping','accountant']::public.app_role[]));
 drop policy if exists hotel_maintenance_update on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_update on public.hotel_maintenance_tickets for update to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]))

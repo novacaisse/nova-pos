@@ -18,6 +18,7 @@ import {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  Wrench,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -57,6 +58,7 @@ const HOTEL_PRIMARY: Item[] = [
   { label: "Ménage", to: "/app/hotel/housekeeping", icon: Sparkle },
 ];
 const HOTEL_MORE: Item[] = [
+  { label: "Maintenance", to: "/app/hotel/maintenance", icon: Wrench },
   { label: "Clients", to: "/app/hotel/clients", icon: Users },
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },

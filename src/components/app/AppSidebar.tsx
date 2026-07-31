@@ -24,6 +24,7 @@ import {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  Wrench,
 } from "lucide-react";
 import {
   Sidebar,
@@ -61,6 +62,7 @@ const ICONS = {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  Wrench,
 } as const;
 
 type NavItem = {
@@ -95,6 +97,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Réservations", url: "/app/hotel/reservations", icon: "CalendarRange" },
     { title: "Chambres", url: "/app/hotel/rooms", icon: "DoorClosed" },
     { title: "Housekeeping", url: "/app/hotel/housekeeping", icon: "Sparkle" },
+    { title: "Maintenance", url: "/app/hotel/maintenance", icon: "Wrench" },
     { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
   ],
