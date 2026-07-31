@@ -30,6 +30,10 @@ function SouscriptionPage() {
   const { currentOrganization, loading: shopLoading } = useOrganization();
   const { data: profile } = useProfile();
   const { data: plans = [], isLoading: plansLoading } = usePlans();
+  // Phase 3 : ne propose que les formules de l'app_module de l'établissement
+  // actif — jamais de repli silencieux vers les formules de l'autre app.
+  const appModule = currentOrganization?.app_module;
+  const appPlans = useMemo(() => plans.filter((p) => p.app_module === appModule), [plans, appModule]);
 
   const [step, setStep] = useState<Step>("recap");
   const [planId, setPlanId] = useState<string | null>(null);
@@ -49,12 +53,12 @@ function SouscriptionPage() {
   }, [profile]);
 
   useEffect(() => {
-    if (planId || plans.length === 0) return;
-    const preselected = planFromUrl && plans.find((p) => p.id === planFromUrl);
-    setPlanId(preselected ? preselected.id : (plans.find((p) => p.is_recommended) ?? plans[0]).id);
-  }, [plans, planFromUrl, planId]);
+    if (planId || appPlans.length === 0) return;
+    const preselected = planFromUrl && appPlans.find((p) => p.id === planFromUrl);
+    setPlanId(preselected ? preselected.id : (appPlans.find((p) => p.is_recommended) ?? appPlans[0]).id);
+  }, [appPlans, planFromUrl, planId]);
 
-  const plan = useMemo(() => plans.find((p) => p.id === planId) ?? null, [plans, planId]);
+  const plan = useMemo(() => appPlans.find((p) => p.id === planId) ?? null, [appPlans, planId]);
   const total = plan ? (period === "mensuel" ? plan.price_month : plan.price_year) : 0;
 
   const launchPayment = async () => {
@@ -77,7 +81,7 @@ function SouscriptionPage() {
     }
   };
 
-  if (authLoading || shopLoading || plansLoading || !plan) {
+  if (authLoading || shopLoading || plansLoading) {
     return (
       <div className="grid min-h-screen place-items-center bg-background">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -93,6 +97,26 @@ function SouscriptionPage() {
           <p className="mt-3 text-sm text-muted-foreground">Aucune organisation associée à votre compte.</p>
           <Link to="/app" className="mt-4 inline-block text-sm font-semibold text-primary hover:underline">Retour à l'application</Link>
         </div>
+      </div>
+    );
+  }
+
+  if (appPlans.length === 0) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background px-5 text-center">
+        <div>
+          <AlertTriangle className="mx-auto h-10 w-10 text-destructive" />
+          <p className="mt-3 text-sm text-muted-foreground">Aucune formule n'est encore disponible pour cette application. Contactez le support.</p>
+          <Link to="/app" className="mt-4 inline-block text-sm font-semibold text-primary hover:underline">Retour à l'application</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!plan) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -115,7 +139,7 @@ function SouscriptionPage() {
                 <div className="mt-5">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Formule</div>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    {plans.map((p) => (
+                    {appPlans.map((p) => (
                       <button key={p.id} onClick={() => setPlanId(p.id)}
                         className={cn("rounded-2xl border p-4 text-left transition-all",
                           planId === p.id ? "border-primary bg-primary/5 shadow-elegant" : "border-border hover:bg-muted")}>

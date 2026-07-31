@@ -61,7 +61,8 @@ export function AddOrganizationDialog({ unitLabel, onClose, onCreate, pending }:
             </label>
           </div>
           <p className="text-xs text-muted-foreground">
-            Nouvel{unitLabel === "boutique" ? "le boutique" : " établissement"} en période d'essai, avec son propre abonnement — comme à l'inscription.
+            Nouvel{unitLabel === "boutique" ? "le boutique" : " établissement"} rattaché à votre compte existant — jamais un nouveau
+            compte séparé. En période d'essai tant qu'aucun abonnement actif n'existe encore pour cette application sur ce compte.
           </p>
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
           <div className="flex gap-2 pt-1">

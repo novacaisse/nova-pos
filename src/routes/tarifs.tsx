@@ -77,9 +77,9 @@ function TarifsPage() {
                   <span className="tabular font-display text-4xl font-black">{formatMoney(amount, plan.currency)}</span>
                   <span className="text-xs text-muted-foreground">{suffix}</span>
                 </div>
-                {(plan.limits.max_users || plan.limits.ai_credits) && (
+                {(plan.max_users || plan.limits.ai_credits) && (
                   <div className="mt-2 text-xs text-muted-foreground">
-                    {plan.limits.max_users ? `${plan.limits.max_users} comptes` : "Comptes illimités"}
+                    {plan.max_users ? `${plan.max_users} comptes` : "Comptes illimités"}
                     {" · "}
                     {plan.limits.ai_credits ? `${plan.limits.ai_credits} crédits IA/mois` : "Crédits IA illimités"}
                   </div>

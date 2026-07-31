@@ -2,9 +2,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Sparkles, CreditCard, Loader2, Clock } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
-import { useSubscription, useSubscriptionPayments, formatMoney } from "@/lib/data/hooks";
+import { useSubscriptionPayments, formatMoney } from "@/lib/data/hooks";
 import { getTrialInfo } from "@/lib/trial";
 import { usePlans } from "@/lib/data/adminHooks";
+import { useCurrentAccountSubscription } from "@/lib/data/accountHooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/abonnement")({
@@ -17,12 +18,27 @@ const PAYMENT_STATUS_LABEL: Record<string, string> = {
 
 function AbonnementPage() {
   const { currentOrganization } = useOrganization();
-  const { data: subscription, isLoading: subLoading } = useSubscription();
+  // Phase 3 : l'affichage se base sur account_subscriptions (compte +
+  // app_module courant), plus sur organizations/subscriptions (par
+  // établissement). La table subscriptions par organisation reste écrite
+  // en base par create-subscription-payment (paiement) pour compat, mais
+  // n'est plus lue ni affichée ici — seul son historique de transactions
+  // (subscription_payments, par établissement) reste montré ci-dessous.
+  const { data: accountSubscription, isLoading: subLoading } = useCurrentAccountSubscription();
   const { data: payments = [], isLoading: paymentsLoading } = useSubscriptionPayments();
   const { data: plans = [] } = usePlans();
-  const trial = getTrialInfo(currentOrganization);
+  const appPlans = plans.filter((p) => p.app_module === currentOrganization?.app_module);
+  // account_subscriptions.trial_ends_at est vide pour les comptes backfillés
+  // en Phase 1 (021_accounts_restructure.sql, section 5f — non porté par
+  // l'ancienne table subscriptions) : organizations.trial_ends_at comble ce
+  // trou pour l'affichage, les deux valeurs coïncidant pour tout compte créé
+  // depuis la Phase 2 (provision_organization les pose ensemble).
+  const trial = getTrialInfo({
+    plan: accountSubscription?.plan_id ?? "trial",
+    trial_ends_at: accountSubscription?.trial_ends_at ?? currentOrganization?.trial_ends_at ?? null,
+  });
 
-  const currentPlan = plans.find((p) => p.id === subscription?.plan);
+  const currentPlan = appPlans.find((p) => p.id === accountSubscription?.plan_id);
 
   return (
     <div>
@@ -40,9 +56,9 @@ function AbonnementPage() {
                   <span className="font-display text-3xl font-bold">{currentPlan?.name ?? "Essai gratuit"}</span>
                   {currentPlan && <span className="tabular text-sm text-muted-foreground">{formatMoney(currentPlan.price_month, currentPlan.currency)} / mois</span>}
                 </div>
-                {currentPlan && (currentPlan.limits.max_users || currentPlan.limits.ai_credits) && (
+                {currentPlan && (currentPlan.max_users || currentPlan.limits.ai_credits) && (
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {currentPlan.limits.max_users ? `${currentPlan.limits.max_users} comptes` : "Comptes illimités"}
+                    {currentPlan.max_users ? `${currentPlan.max_users} comptes` : "Comptes illimités"}
                     {" · "}
                     {currentPlan.limits.ai_credits ? `${currentPlan.limits.ai_credits} crédits IA/mois` : "Crédits IA illimités"}
                   </div>
@@ -59,10 +75,10 @@ function AbonnementPage() {
                     <>
                       <span className="inline-block h-2 w-2 rounded-full bg-success" />
                       <span className="font-semibold text-success">
-                        {subscription?.status === "active" ? "Actif" : subscription?.status === "past_due" ? "Paiement en retard" : subscription?.status ?? "—"}
+                        {accountSubscription?.status === "active" ? "Actif" : accountSubscription?.status === "past_due" ? "Paiement en retard" : accountSubscription?.status ?? "—"}
                       </span>
-                      {subscription?.current_period_end && (
-                        <span className="text-muted-foreground">· Prochaine échéance le {new Date(subscription.current_period_end).toLocaleDateString("fr-FR")}</span>
+                      {accountSubscription?.current_period_end && (
+                        <span className="text-muted-foreground">· Prochaine échéance le {new Date(accountSubscription.current_period_end).toLocaleDateString("fr-FR")}</span>
                       )}
                     </>
                   )}
@@ -90,9 +106,14 @@ function AbonnementPage() {
           <p className="mb-3 text-xs text-muted-foreground">
             Paiement sécurisé par Mobile Money via MoneyFusion.
           </p>
+          {appPlans.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-5 text-sm text-muted-foreground">
+              Aucune formule n'est encore disponible pour cette application.
+            </div>
+          )}
           <div className="grid gap-3 md:grid-cols-3">
-            {plans.map((p) => {
-              const isCurrent = p.id === subscription?.plan;
+            {appPlans.map((p) => {
+              const isCurrent = p.id === accountSubscription?.plan_id;
               return (
                 <div key={p.id} className={cn(
                   "relative flex flex-col rounded-2xl border p-5 transition-shadow",
