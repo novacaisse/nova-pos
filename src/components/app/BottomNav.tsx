@@ -19,6 +19,7 @@ import {
   DoorClosed,
   Sparkle,
   Wrench,
+  Building2,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -60,6 +61,7 @@ const HOTEL_PRIMARY: Item[] = [
 const HOTEL_MORE: Item[] = [
   { label: "Maintenance", to: "/app/hotel/maintenance", icon: Wrench },
   { label: "Clients", to: "/app/hotel/clients", icon: Users },
+  { label: "Entreprises", to: "/app/hotel/corporate", icon: Building2 },
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/hotel/parametres", icon: Settings },
@@ -107,7 +109,7 @@ export function BottomNav() {
     : PRIMARY.filter(included);
   const more = useHotelNav
     ? (myRole === "housekeeping"
-        ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports" && m.to !== "/app/hotel/clients")
+        ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports" && m.to !== "/app/hotel/clients" && m.to !== "/app/hotel/corporate")
         // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de
         // hotel_guests_select (données d'identité restreintes à
         // owner/manager/front_desk) — masqué ici aussi.

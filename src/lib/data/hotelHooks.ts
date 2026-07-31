@@ -107,6 +107,8 @@ export type FolioStatus = "open" | "closed";
 export type HotelFolio = {
   id: string; organization_id: string; reservation_id: string; status: FolioStatus;
   opened_at: string; closed_at: string | null; created_at: string;
+  // Facturation différée (ZegHotel Phase 4, migration 031).
+  billed_to_corporate: boolean; corporate_paid_at: string | null;
 };
 export type FolioChargeKind = "room" | "extra" | "penalty" | "tax" | "discount";
 export type HotelFolioCharge = {
@@ -863,10 +865,16 @@ export function folioBalance(folio: HotelFolioDetail): number {
 // réglé. Une note avec un solde à régler autrement (remise, perte
 // commerciale) doit d'abord recevoir une charge "discount" qui l'amène à 0
 // — pas de clôture forcée en dehors de ce chemin.
+//
+// billToCorporate (ZegHotel Phase 4, migration 031) : seule exception au
+// solde-à-zéro — une réservation rattachée à un compte entreprise peut être
+// clôturée avec un solde positif restant, marqué "à facturer à
+// l'entreprise" (billed_to_corporate). Un solde négatif (trop perçu) reste
+// bloqué dans tous les cas, facturation différée ou non.
 export function useCloseFolio() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (folioId: string) => {
+    mutationFn: async ({ folioId, billToCorporate }: { folioId: string; billToCorporate?: boolean }) => {
       const chargesRes = await supabase.from("hotel_folio_charges").select("amount, quantity").eq("folio_id", folioId);
       if (chargesRes.error) throw chargesRes.error;
       const paymentsRes = await supabase.from("hotel_payments").select("amount, kind").eq("folio_id", folioId);
@@ -876,15 +884,108 @@ export function useCloseFolio() {
       const totalCharges = charges.reduce((s, c) => s + Number(c.amount) * Number(c.quantity), 0);
       const totalPaid = payments.reduce((s, p) => s + (p.kind === "refund" ? -Number(p.amount) : Number(p.amount)), 0);
       const balance = totalCharges - totalPaid;
-      if (Math.round(balance) !== 0) {
+      const canBillCorporate = billToCorporate && balance > 0;
+      if (Math.round(balance) !== 0 && !canBillCorporate) {
         throw new Error(`Impossible de clôturer : solde non nul (${balance > 0 ? "reste dû" : "trop perçu"}). Encaissez le solde ou ajoutez une charge d'ajustement avant de clôturer.`);
       }
 
       const { error } = await supabase.from("hotel_folios")
-        .update({ status: "closed", closed_at: new Date().toISOString() }).eq("id", folioId);
+        .update({ status: "closed", closed_at: new Date().toISOString(), billed_to_corporate: !!canBillCorporate })
+        .eq("id", folioId);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" }),
+    onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" || q.queryKey[0] === "hotel_corporate_invoices" }),
+  });
+}
+
+// Règlement d'une facture entreprise en attente (ZegHotel Phase 4) : si un
+// solde reste dû, enregistre un hotel_payments (bank_transfer) pour le
+// montant restant — folioBalance() retombe alors naturellement à 0, aucun
+// cas particulier ailleurs — puis marque corporate_paid_at (marqueur
+// en attente/réglé pour le relevé mensuel).
+export function useMarkCorporateInvoicePaid() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (folioId: string) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const chargesRes = await supabase.from("hotel_folio_charges").select("amount, quantity").eq("folio_id", folioId);
+      if (chargesRes.error) throw chargesRes.error;
+      const paymentsRes = await supabase.from("hotel_payments").select("amount, kind").eq("folio_id", folioId);
+      if (paymentsRes.error) throw paymentsRes.error;
+      const charges = (chargesRes.data ?? []) as { amount: number; quantity: number }[];
+      const payments = (paymentsRes.data ?? []) as { amount: number; kind: HotelPaymentKind }[];
+      const totalCharges = charges.reduce((s, c) => s + Number(c.amount) * Number(c.quantity), 0);
+      const totalPaid = payments.reduce((s, p) => s + (p.kind === "refund" ? -Number(p.amount) : Number(p.amount)), 0);
+      const balance = totalCharges - totalPaid;
+      if (balance > 0) {
+        const { error: payErr } = await supabase.from("hotel_payments").insert({
+          organization_id: organizationId, folio_id: folioId, amount: balance,
+          method: "bank_transfer", kind: "payment", reference: "Règlement compte entreprise",
+        });
+        if (payErr) throw payErr;
+      }
+      const { error } = await supabase.from("hotel_folios")
+        .update({ corporate_paid_at: new Date().toISOString() }).eq("id", folioId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" || q.queryKey[0] === "hotel_corporate_invoices" }),
+  });
+}
+
+// Liste des notes facturées à un compte entreprise (ZegHotel Phase 4) —
+// noms de clients via hotel_guest_contact() (pas un embed direct sur
+// hotel_guests) : cet écran reste accessible à accountant, qui n'a plus
+// accès aux données d'identité depuis le durcissement RLS de la Phase 1.
+export type HotelCorporateInvoice = {
+  folio_id: string; reservation_id: string; corporate_account_id: string | null;
+  guest_name: string; check_out: string; closed_at: string | null;
+  total: number; corporate_paid_at: string | null;
+};
+export function useHotelCorporateInvoices() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_corporate_invoices", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelCorporateInvoice[]> => {
+      const { data: folios, error } = await supabase.from("hotel_folios")
+        .select("id, reservation_id, closed_at, corporate_paid_at")
+        .eq("organization_id", organizationId!).eq("billed_to_corporate", true)
+        .order("closed_at", { ascending: false });
+      if (error) throw error;
+      const folioIds = (folios ?? []).map((f: any) => f.id);
+      if (!folioIds.length) return [];
+      const reservationIds = (folios ?? []).map((f: any) => f.reservation_id);
+
+      const [{ data: reservations, error: resErr }, { data: charges, error: chErr }, { data: payments, error: payErr }, { data: guestContacts, error: guestErr }] = await Promise.all([
+        supabase.from("hotel_reservations").select("id, guest_id, corporate_account_id, check_out").in("id", reservationIds),
+        supabase.from("hotel_folio_charges").select("folio_id, amount, quantity").in("folio_id", folioIds),
+        supabase.from("hotel_payments").select("folio_id, amount, kind").in("folio_id", folioIds),
+        supabase.rpc("hotel_guest_contact", { _organization_id: organizationId! }),
+      ]);
+      if (resErr) throw resErr;
+      if (chErr) throw chErr;
+      if (payErr) throw payErr;
+      if (guestErr) throw guestErr;
+
+      const reservationById = new Map<string, any>((reservations ?? []).map((r: any) => [r.id, r]));
+      const guestNameById = new Map(((guestContacts ?? []) as HotelGuestContact[]).map((g) => [g.id, g.full_name]));
+      const totalByFolio = new Map<string, number>();
+      for (const c of (charges ?? []) as any[]) totalByFolio.set(c.folio_id, (totalByFolio.get(c.folio_id) ?? 0) + c.amount * c.quantity);
+      for (const p of (payments ?? []) as any[]) {
+        const delta = p.kind === "refund" ? p.amount : -p.amount;
+        totalByFolio.set(p.folio_id, (totalByFolio.get(p.folio_id) ?? 0) + delta);
+      }
+
+      return (folios ?? []).flatMap((f: any) => {
+        const r = reservationById.get(f.reservation_id);
+        if (!r) return [];
+        return [{
+          folio_id: f.id, reservation_id: f.reservation_id, corporate_account_id: r.corporate_account_id,
+          guest_name: guestNameById.get(r.guest_id) ?? "—", check_out: r.check_out, closed_at: f.closed_at,
+          total: totalByFolio.get(f.id) ?? 0, corporate_paid_at: f.corporate_paid_at,
+        }];
+      });
+    },
   });
 }
 

@@ -61,6 +61,7 @@ import { Route as AppHotelParametresRouteImport } from './routes/app.hotel.param
 import { Route as AppHotelMaintenanceRouteImport } from './routes/app.hotel.maintenance'
 import { Route as AppHotelHousekeepingRouteImport } from './routes/app.hotel.housekeeping'
 import { Route as AppHotelEquipeRouteImport } from './routes/app.hotel.equipe'
+import { Route as AppHotelCorporateRouteImport } from './routes/app.hotel.corporate'
 import { Route as AppHotelClientsRouteImport } from './routes/app.hotel.clients'
 
 const TarifsRoute = TarifsRouteImport.update({
@@ -324,6 +325,11 @@ const AppHotelEquipeRoute = AppHotelEquipeRouteImport.update({
   path: '/equipe',
   getParentRoute: () => AppHotelRoute,
 } as any)
+const AppHotelCorporateRoute = AppHotelCorporateRouteImport.update({
+  id: '/corporate',
+  path: '/corporate',
+  getParentRoute: () => AppHotelRoute,
+} as any)
 const AppHotelClientsRoute = AppHotelClientsRouteImport.update({
   id: '/clients',
   path: '/clients',
@@ -371,6 +377,7 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
+  '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
@@ -420,6 +427,7 @@ export interface FileRoutesByTo {
   '/app': typeof AppIndexRoute
   '/souscription': typeof SouscriptionIndexRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
+  '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
@@ -476,6 +484,7 @@ export interface FileRoutesById {
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
+  '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
@@ -533,6 +542,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/souscription/'
     | '/app/hotel/clients'
+    | '/app/hotel/corporate'
     | '/app/hotel/equipe'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
@@ -582,6 +592,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/souscription'
     | '/app/hotel/clients'
+    | '/app/hotel/corporate'
     | '/app/hotel/equipe'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
@@ -637,6 +648,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/souscription/'
     | '/app/hotel/clients'
+    | '/app/hotel/corporate'
     | '/app/hotel/equipe'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
@@ -1029,6 +1041,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHotelEquipeRouteImport
       parentRoute: typeof AppHotelRoute
     }
+    '/app/hotel/corporate': {
+      id: '/app/hotel/corporate'
+      path: '/corporate'
+      fullPath: '/app/hotel/corporate'
+      preLoaderRoute: typeof AppHotelCorporateRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
     '/app/hotel/clients': {
       id: '/app/hotel/clients'
       path: '/clients'
@@ -1071,6 +1090,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppHotelRouteChildren {
   AppHotelClientsRoute: typeof AppHotelClientsRoute
+  AppHotelCorporateRoute: typeof AppHotelCorporateRoute
   AppHotelEquipeRoute: typeof AppHotelEquipeRoute
   AppHotelHousekeepingRoute: typeof AppHotelHousekeepingRoute
   AppHotelMaintenanceRoute: typeof AppHotelMaintenanceRoute
@@ -1083,6 +1103,7 @@ interface AppHotelRouteChildren {
 
 const AppHotelRouteChildren: AppHotelRouteChildren = {
   AppHotelClientsRoute: AppHotelClientsRoute,
+  AppHotelCorporateRoute: AppHotelCorporateRoute,
   AppHotelEquipeRoute: AppHotelEquipeRoute,
   AppHotelHousekeepingRoute: AppHotelHousekeepingRoute,
   AppHotelMaintenanceRoute: AppHotelMaintenanceRoute,

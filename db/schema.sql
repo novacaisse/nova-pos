@@ -2199,6 +2199,14 @@ create table if not exists public.hotel_folios (
   opened_at timestamptz not null default now(),
   closed_at timestamptz,
   created_at timestamptz not null default now(),
+  -- Facturation différée (ZegHotel Phase 4, migration 031) : clôture
+  -- différée simple — la réception peut clôturer une note avec un solde
+  -- impayé si la réservation est rattachée à un compte entreprise, en la
+  -- marquant "à facturer à l'entreprise". corporate_paid_at n'est qu'un
+  -- marqueur en attente/réglé pour le relevé, pas une nouvelle source de
+  -- vérité financière (folioBalance() reste calculée normalement).
+  billed_to_corporate boolean not null default false,
+  corporate_paid_at timestamptz,
   unique (reservation_id)
 );
 create index if not exists idx_hotel_folios_org on public.hotel_folios(organization_id);

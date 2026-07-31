@@ -610,9 +610,13 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                         className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold normal-case text-foreground hover:bg-muted">
                         <Printer className="h-3 w-3" /> Facture PDF
                       </button>
-                      <span className={cn("rounded-full px-2 py-0.5 text-[10px]", folio.status === "open" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
-                        {folio.status === "open" ? "Ouverte" : "Clôturée"}
-                      </span>
+                      {folio.billed_to_corporate && !folio.corporate_paid_at ? (
+                        <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] text-accent-foreground">À facturer (entreprise)</span>
+                      ) : (
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10px]", folio.status === "open" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                          {folio.status === "open" ? "Ouverte" : "Clôturée"}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -651,8 +655,20 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                           className="flex items-center gap-1 rounded-xl bg-success/10 px-3 text-xs font-semibold text-success disabled:opacity-40"><Banknote className="h-3.5 w-3.5" /> Encaisser</button>
                       </div>
                       {reservation.status === "checked_out" && (
-                        <button disabled={busy} onClick={() => run(() => closeFolio.mutateAsync(folio.id))}
-                          className="w-full rounded-xl border border-border bg-card py-2 text-xs font-semibold hover:bg-muted">Clôturer la note</button>
+                        <div className="space-y-2">
+                          <button disabled={busy} onClick={() => run(() => closeFolio.mutateAsync({ folioId: folio.id }))}
+                            className="w-full rounded-xl border border-border bg-card py-2 text-xs font-semibold hover:bg-muted">Clôturer la note</button>
+                          {/* Facturation différée (ZegHotel Phase 4) : uniquement si un
+                              compte entreprise est rattaché et qu'un solde reste dû —
+                              sinon "Clôturer la note" ci-dessus suffit. */}
+                          {reservation.corporate_account_id && folioBalance(folio) > 0 && (
+                            <button disabled={busy}
+                              onClick={() => { if (confirm("Clôturer avec le solde restant à facturer à l'entreprise ?")) run(() => closeFolio.mutateAsync({ folioId: folio.id, billToCorporate: true })); }}
+                              className="w-full rounded-xl border border-accent/40 bg-accent/10 py-2 text-xs font-semibold text-accent-foreground hover:bg-accent/20">
+                              Clôturer et facturer à l'entreprise
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
