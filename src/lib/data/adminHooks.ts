@@ -269,6 +269,68 @@ export function useAdminAccounts() {
   });
 }
 
+// ============ RÉCONCILIATION (cross-tenant, Phase 11 partie 2) ============
+// Depuis la Phase 1, chaque établissement garde son ancien état
+// (organizations.plan/trial_ends_at + table subscriptions), conservé pour
+// compatibilité pendant que account_subscriptions (par compte + app) est
+// devenu la source de vérité réelle du gating/des limites. Les deux
+// peuvent en théorie diverger (bug futur, migration partielle, écriture
+// oubliée) sans que personne ne le remarque — cet écran liste les
+// établissements dont organizations.plan ne correspond plus au plan de
+// account_subscriptions pour le même compte + application, pour repérer
+// une dérive avant qu'elle ne cause un problème de facturation. Lecture
+// seule : la correction reste manuelle (SQL direct), volontairement pas
+// automatisée ici tant qu'aucune dérive réelle n'a été observée.
+export type ReconciliationRow = {
+  organization_id: string; organization_name: string;
+  account_id: string | null; account_name: string | null;
+  app_module: string | null;
+  org_plan: string; org_trial_ends_at: string | null;
+  sub_plan_id: string | null; sub_status: string | null; sub_trial_ends_at: string | null;
+  issue: string;
+};
+
+export function useAdminReconciliation() {
+  return useQuery({
+    queryKey: ["admin_reconciliation"],
+    queryFn: async (): Promise<ReconciliationRow[]> => {
+      const { data: orgs, error } = await supabase.from("organizations")
+        .select("id, name, account_id, app_module, plan, trial_ends_at")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      const accountIds = [...new Set((orgs ?? []).map((o: any) => o.account_id).filter(Boolean))];
+      let accountNames: Record<string, string> = {};
+      const subsByKey: Record<string, any> = {};
+      if (accountIds.length) {
+        const { data: accounts } = await supabase.from("accounts").select("id, name").in("id", accountIds);
+        accountNames = Object.fromEntries((accounts ?? []).map((a: any) => [a.id, a.name]));
+        const { data: subs } = await supabase.from("account_subscriptions")
+          .select("account_id, app_module, plan_id, status, trial_ends_at").in("account_id", accountIds);
+        for (const s of (subs ?? []) as any[]) subsByKey[`${s.account_id}:${s.app_module}`] = s;
+      }
+
+      const rows: ReconciliationRow[] = [];
+      for (const o of (orgs ?? []) as any[]) {
+        const sub = o.account_id ? subsByKey[`${o.account_id}:${o.app_module}`] : undefined;
+        let issue: string | null = null;
+        if (!o.account_id) issue = "Aucun compte rattaché (account_id manquant).";
+        else if (!sub) issue = "Aucun abonnement compte (account_subscriptions) pour ce couple compte/application.";
+        else if (sub.plan_id !== o.plan) issue = `Formule différente : établissement "${o.plan}" vs compte "${sub.plan_id}".`;
+        if (!issue) continue;
+        rows.push({
+          organization_id: o.id, organization_name: o.name,
+          account_id: o.account_id, account_name: o.account_id ? (accountNames[o.account_id] ?? null) : null,
+          app_module: o.app_module, org_plan: o.plan, org_trial_ends_at: o.trial_ends_at,
+          sub_plan_id: sub?.plan_id ?? null, sub_status: sub?.status ?? null, sub_trial_ends_at: sub?.trial_ends_at ?? null,
+          issue,
+        });
+      }
+      return rows;
+    },
+  });
+}
+
 // ============ JOURNAL D'IMPERSONATION (cross-tenant, Phase 11) ============
 // admin_impersonations est écrit depuis la Phase "Bloc 9"/audit-impersonate
 // mais n'a jamais eu d'écran de lecture — Emmanuel ne pouvait pas auditer

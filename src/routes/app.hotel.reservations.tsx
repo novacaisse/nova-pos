@@ -13,11 +13,41 @@ import {
   useHotelReservations, useHotelRooms, useHotelRoomTypes, useHotelGuests, useUpsertHotelGuest,
   useCreateHotelReservation, useHotelReservation, useCheckInReservation, useCheckOutReservation,
   useCancelReservation, useUpdateHotelReservation, useHotelFolio, useAddFolioCharge, useAddFolioPayment,
-  useCloseFolio, folioBalance, useHotelCorporateAccounts, useHotelRatePlans,
+  useCloseFolio, folioBalance, useHotelCorporateAccounts, useHotelRatePlans, useHotelSeasonalRates,
   type HotelReservationRow, type ReservationStatus, type HotelRoom, type FolioChargeKind, type HotelPaymentMethod,
-  type HotelFolioDetail,
+  type HotelFolioDetail, type HotelRoomType, type HotelSeasonalRate, type HotelRatePlan,
 } from "@/lib/data/hotelHooks";
 import { cn, selectOnFocus } from "@/lib/utils";
+
+// Aperçu du tarif définitif (migration 027) : tarif saisonnier (s'il y en a
+// un qui s'applique cette nuit-là) remplace base_price, puis le % de la
+// formule tarifaire s'applique sur le total du séjour — même règle que
+// hotel_compute_room_rate() côté serveur, qui reste la source de vérité
+// appliquée à la création si la réception ne saisit pas de prix manuel.
+function estimateRoomRate(
+  roomTypeId: string, checkIn: string, checkOut: string, ratePlanId: string,
+  roomTypes: HotelRoomType[], seasonalRates: HotelSeasonalRate[], ratePlans: HotelRatePlan[],
+) {
+  const roomType = roomTypes.find((t) => t.id === roomTypeId);
+  const base = roomType?.base_price ?? 0;
+  const plan = ratePlanId ? ratePlans.find((p) => p.id === ratePlanId) : undefined;
+  const adjustmentPct = plan?.price_adjustment_pct ?? 0;
+
+  let total = 0;
+  const day = new Date(checkIn + "T00:00:00");
+  const end = new Date(checkOut + "T00:00:00");
+  while (day < end) {
+    const iso = day.toISOString().slice(0, 10);
+    const dow = day.getDay();
+    const matching = seasonalRates.filter((s) =>
+      s.room_type_id === roomTypeId && iso >= s.start_date && iso <= s.end_date
+      && (!s.days_of_week || s.days_of_week.includes(dow)));
+    const latest = matching.length ? matching.reduce((a, b) => (a.start_date > b.start_date ? a : b)) : undefined;
+    total += latest?.price_override ?? base;
+    day.setDate(day.getDate() + 1);
+  }
+  return Math.round(total * (1 + adjustmentPct / 100) * 100) / 100;
+}
 
 export const Route = createFileRoute("/app/hotel/reservations")({
   // ?openCreate=1 : ouvre directement le formulaire de nouvelle réservation
@@ -208,6 +238,7 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const { data: overlapping = [] } = useHotelReservations(checkIn, checkOut);
   const { data: corporateAccounts = [] } = useHotelCorporateAccounts();
   const { data: ratePlans = [] } = useHotelRatePlans();
+  const { data: seasonalRates = [] } = useHotelSeasonalRates();
 
   const bookedRoomIds = useMemo(() => {
     const set = new Set<string>();
@@ -237,7 +268,14 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
 
   const nights = Math.max(1, (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
   const roomOf = (id: string) => rooms.find((r) => r.id === id);
-  const rateFor = (id: string) => roomOf(id)?.room_type?.base_price ?? 0;
+  // Aperçu uniquement (tarif saisonnier + formule tarifaire) — le serveur
+  // recalcule et applique le tarif définitif à la création (migration 027)
+  // si la réception ne saisit pas de prix manuel dans rateOverrides.
+  const rateFor = (id: string) => {
+    const roomTypeId = roomOf(id)?.room_type_id;
+    if (!roomTypeId) return 0;
+    return estimateRoomRate(roomTypeId, checkIn, checkOut, ratePlanId, roomTypes, seasonalRates, ratePlans);
+  };
   const [rateOverrides, setRateOverrides] = useState<Record<string, number>>({});
 
   const toggleRoom = (id: string) => setSelectedRoomIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
@@ -258,7 +296,9 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
         guest_id: gId, check_in: checkIn, check_out: checkOut,
         rate_plan_id: ratePlanId || null, corporate_account_id: corporateId || null,
         channel, adults, children, notes: notes.trim() || undefined,
-        rooms: selectedRoomIds.map((id) => ({ room_id: id, rate_amount: (rateOverrides[id] ?? rateFor(id)) * nights })),
+        // rate_amount = null quand la réception n'a pas touché le champ :
+        // le serveur calcule alors le tarif définitif (migration 027).
+        rooms: selectedRoomIds.map((id) => ({ room_id: id, rate_amount: rateOverrides[id] ?? null })),
       });
       onCreated(reservation.id);
     } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
@@ -308,7 +348,7 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
           </div>
 
           <div>
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Chambres * ({nights} nuit{nights > 1 ? "s" : ""})</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Chambres * ({nights} nuit{nights > 1 ? "s" : ""} — prix total du séjour)</span>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
               {rooms.map((r) => {
                 const unavailable = bookedRoomIds.has(r.id) && !selectedRoomIds.includes(r.id);
