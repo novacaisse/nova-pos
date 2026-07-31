@@ -517,6 +517,14 @@ export function useUpdateHotelReservation() {
 // (vérifie qu'aucune charge "room" n'existe déjà) pour rester sûr même en
 // cas de nouvel appel. Correctif purement applicatif — le check-in ne
 // transite que par ce hook, pas besoin de trigger SQL.
+//
+// Poste aussi la taxe de séjour si hotel_settings.city_tax_enabled (jusqu'ici
+// configurable en Paramètres > Tarification mais jamais réellement
+// facturée nulle part) : city_tax_amount par personne (adultes + enfants de
+// la réservation) et par nuit, une ligne par chambre — même granularité que
+// la charge "room" ci-dessus. Le mode de calcul exact (par personne, par
+// chambre, plafonné...) varie selon la réglementation locale ; à ajuster
+// dans ce hook si celui d'Emmanuel diffère.
 export function useCheckInReservation() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
@@ -524,6 +532,10 @@ export function useCheckInReservation() {
       if (!organizationId) throw new Error("Aucune organisation sélectionnée");
       const { error: resErr } = await supabase.from("hotel_reservations").update({ status: "checked_in" }).eq("id", id);
       if (resErr) throw resErr;
+
+      const { data: reservation, error: reservationErr } = await supabase.from("hotel_reservations")
+        .select("adults, children").eq("id", id).maybeSingle();
+      if (reservationErr) throw reservationErr;
 
       const { data: folio, error: folioErr } = await supabase.from("hotel_folios")
         .select("id").eq("reservation_id", id).maybeSingle();
@@ -535,18 +547,31 @@ export function useCheckInReservation() {
       if (existErr) throw existErr;
       if (existingRoomCharges && existingRoomCharges.length > 0) return;
 
+      const { data: settings, error: settingsErr } = await supabase.from("hotel_settings")
+        .select("city_tax_enabled, city_tax_amount").eq("organization_id", organizationId).maybeSingle();
+      if (settingsErr) throw settingsErr;
+
       const { data: rooms, error: roomsErr } = await supabase.from("hotel_reservation_rooms")
         .select("*, room:hotel_rooms(number, room_type:hotel_room_types(name))")
         .eq("reservation_id", id);
       if (roomsErr) throw roomsErr;
 
-      const charges = (rooms ?? []).map((rr: any) => {
+      const occupants = Math.max(1, (reservation?.adults ?? 1) + (reservation?.children ?? 0));
+      const charges = (rooms ?? []).flatMap((rr: any) => {
         const nights = Math.max(1, Math.round((new Date(rr.check_out).getTime() - new Date(rr.check_in).getTime()) / 86400000));
-        return {
+        const roomLabel = `Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""}`.trim();
+        const lines = [{
           organization_id: organizationId, folio_id: folio.id, kind: "room" as FolioChargeKind,
-          description: `Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""}`.trim(),
-          amount: rr.rate_amount / nights, quantity: nights, charge_date: rr.check_in,
-        };
+          description: roomLabel, amount: rr.rate_amount / nights, quantity: nights, charge_date: rr.check_in,
+        }];
+        if (settings?.city_tax_enabled && settings.city_tax_amount > 0) {
+          lines.push({
+            organization_id: organizationId, folio_id: folio.id, kind: "tax" as FolioChargeKind,
+            description: `Taxe de séjour — ${roomLabel}`, amount: settings.city_tax_amount,
+            quantity: nights * occupants, charge_date: rr.check_in,
+          });
+        }
+        return lines;
       });
       if (charges.length) {
         const { error: insErr } = await supabase.from("hotel_folio_charges").insert(charges);
@@ -641,21 +666,41 @@ export function useAddFolioPayment() {
     onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" }),
   });
 }
+export function folioBalance(folio: HotelFolioDetail): number {
+  const charges = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
+  const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
+  return charges - paid;
+}
+// Recalcule le solde depuis la base (pas depuis l'objet folio déjà en
+// mémoire côté client) avant de clôturer — sans ce garde-fous, une note
+// pouvait être clôturée avec un solde positif sans confirmation ni blocage,
+// le client quittant en devant de l'argent qu'on considère ensuite comme
+// réglé. Une note avec un solde à régler autrement (remise, perte
+// commerciale) doit d'abord recevoir une charge "discount" qui l'amène à 0
+// — pas de clôture forcée en dehors de ce chemin.
 export function useCloseFolio() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (folioId: string) => {
+      const chargesRes = await supabase.from("hotel_folio_charges").select("amount, quantity").eq("folio_id", folioId);
+      if (chargesRes.error) throw chargesRes.error;
+      const paymentsRes = await supabase.from("hotel_payments").select("amount, kind").eq("folio_id", folioId);
+      if (paymentsRes.error) throw paymentsRes.error;
+      const charges = (chargesRes.data ?? []) as { amount: number; quantity: number }[];
+      const payments = (paymentsRes.data ?? []) as { amount: number; kind: HotelPaymentKind }[];
+      const totalCharges = charges.reduce((s, c) => s + Number(c.amount) * Number(c.quantity), 0);
+      const totalPaid = payments.reduce((s, p) => s + (p.kind === "refund" ? -Number(p.amount) : Number(p.amount)), 0);
+      const balance = totalCharges - totalPaid;
+      if (Math.round(balance) !== 0) {
+        throw new Error(`Impossible de clôturer : solde non nul (${balance > 0 ? "reste dû" : "trop perçu"}). Encaissez le solde ou ajoutez une charge d'ajustement avant de clôturer.`);
+      }
+
       const { error } = await supabase.from("hotel_folios")
         .update({ status: "closed", closed_at: new Date().toISOString() }).eq("id", folioId);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" }),
   });
-}
-export function folioBalance(folio: HotelFolioDetail): number {
-  const charges = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
-  const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
-  return charges - paid;
 }
 
 // ============ HOUSEKEEPING ============
