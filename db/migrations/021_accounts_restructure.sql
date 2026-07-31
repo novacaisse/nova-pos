@@ -203,7 +203,9 @@ with ranked as (
     o.app_module,
     s.plan,
     s.status,
-    s.trial_ends_at,
+    -- trial_ends_at vit sur organizations, pas sur subscriptions (qui n'a
+    -- pas cette colonne) — la subscription ne porte que current_period_end.
+    o.trial_ends_at,
     s.current_period_end,
     row_number() over (
       partition by o.account_id, o.app_module
@@ -216,7 +218,7 @@ with ranked as (
           when 'expired' then 5
           else 6
         end,
-        coalesce(s.current_period_end, s.trial_ends_at) desc nulls last,
+        coalesce(s.current_period_end, o.trial_ends_at) desc nulls last,
         s.created_at desc
     ) as rnk
   from public.organizations o
