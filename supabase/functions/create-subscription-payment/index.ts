@@ -95,6 +95,19 @@ Deno.serve(async (req) => {
       .from("plans").select("*").eq("id", plan_id).eq("is_active", true).maybeSingle();
     if (planErr || !plan) return json({ error: "Formule introuvable ou inactive." }, 404);
 
+    // Ne jamais faire confiance au plan_id envoyé par le client seul : l'UI
+    // (souscription.index.tsx) ne propose déjà que les formules de l'app
+    // de l'établissement actif, mais un appel direct pourrait sinon payer
+    // une formule ZegHotel pour une boutique ZegCaisse (ou l'inverse) —
+    // account_subscriptions se retrouverait avec le plan_id d'une autre
+    // application (Phase 5/moneyfusion.ts en hérite ensuite aveuglément).
+    const { data: organization, error: orgErr } = await admin
+      .from("organizations").select("app_module").eq("id", organization_id).maybeSingle();
+    if (orgErr || !organization) return json({ error: "Boutique introuvable." }, 404);
+    if (plan.app_module !== organization.app_module) {
+      return json({ error: "Cette formule n'est pas disponible pour cette application." }, 400);
+    }
+
     const totalPrice = period === "year" ? Number(plan.price_year) : Number(plan.price_month);
     if (!totalPrice || totalPrice <= 0) return json({ error: "Prix invalide pour cette formule." }, 400);
 

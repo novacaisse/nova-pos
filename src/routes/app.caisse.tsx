@@ -178,9 +178,13 @@ function CaissePage() {
           discount: Math.round(l.unit_price * l.quantity * ((l.discount_pct ?? 0) / 100)),
         })),
         discount: discountAmt,
+        // "partially_refunded" désigne un remboursement partiel, pas un
+        // solde restant à encaisser — une vente sous-payée est une vente à
+        // crédit normale (même convention que la conversion de devis) :
+        // payment_method la signale déjà (ligne ci-dessus), le statut reste
+        // "completed" (défaut de useCreateSale).
         payment_method: method,
         paid: r.paidNow,
-        status: r.due > 0 ? "partially_refunded" : "completed",
         notes: r.type !== "total" ? `Paiement ${r.type}` : undefined,
       });
       setShowPay(false);

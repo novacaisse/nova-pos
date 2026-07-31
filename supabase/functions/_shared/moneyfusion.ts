@@ -95,6 +95,32 @@ export async function verifyAndApplyPayment(
         .update({ status: "active", plan: meta.plan_id, current_period_end: currentPeriodEnd })
         .eq("id", payment.subscription_id);
       await admin.from("organizations").update({ plan: meta.plan_id }).eq("id", payment.organization_id);
+
+      // Restructuration compte/établissements (Phases 1-4) : account_subscriptions
+      // (compte + app_module), pas organizations/subscriptions ci-dessus, est la
+      // source lue par la page Abonnement, le gating de modules (useCurrentPlan)
+      // et l'enforcement des limites max_establishments/max_users — sans cette
+      // mise à jour, un paiement réel restait invisible partout où ça compte,
+      // silencieusement.
+      const { data: organization, error: orgErr } = await admin.from("organizations")
+        .select("account_id, app_module").eq("id", payment.organization_id).maybeSingle();
+      if (orgErr || !organization) {
+        console.error(`verifyAndApplyPayment: organisation introuvable pour le paiement ${payment.id}, account_subscriptions non mis à jour`, orgErr);
+      } else {
+        const { error: acctSubErr } = await admin.from("account_subscriptions")
+          .upsert({
+            account_id: organization.account_id,
+            app_module: organization.app_module,
+            plan_id: meta.plan_id,
+            status: "active",
+            trial_ends_at: null,
+            current_period_end: currentPeriodEnd,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "account_id,app_module" });
+        if (acctSubErr) {
+          console.error(`verifyAndApplyPayment: échec de la mise à jour account_subscriptions pour le paiement ${payment.id}`, acctSubErr);
+        }
+      }
     }
     return "paid";
   }
