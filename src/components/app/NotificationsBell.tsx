@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  Bell, Check, X, TrendingUp, AlertTriangle, UserPlus, FileClock, Clock,
+  Bell, Check, X, TrendingUp, AlertTriangle, UserPlus, FileClock, Clock, CalendarPlus, CalendarClock, Heart,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAppNotifications, type NotificationItem, type NotificationKind } from "@/lib/data/useAppNotifications";
@@ -10,10 +10,12 @@ import { cn } from "@/lib/utils";
 const ICONS: Record<NotificationKind, React.ComponentType<{ className?: string }>> = {
   big_sale: TrendingUp, stock_low: AlertTriangle, stock_out: AlertTriangle,
   new_member: UserPlus, quote_expiring: FileClock, trial_expiring: Clock,
+  hotel_reservation_created: CalendarPlus, hotel_arrival_tomorrow: CalendarClock, hotel_stay_thankyou: Heart,
 };
 const KIND_LABEL: Record<NotificationKind, string> = {
   big_sale: "Vente", stock_low: "Stock", stock_out: "Stock",
   new_member: "Équipe", quote_expiring: "Devis", trial_expiring: "Abonnement",
+  hotel_reservation_created: "Réservation", hotel_arrival_tomorrow: "Arrivées", hotel_stay_thankyou: "Séjour",
 };
 const KIND_CTA: Record<NotificationKind, { href: string; label: string }> = {
   big_sale: { href: "/app/ventes", label: "Voir les ventes" },
@@ -22,6 +24,9 @@ const KIND_CTA: Record<NotificationKind, { href: string; label: string }> = {
   new_member: { href: "/app/equipe", label: "Voir l'équipe" },
   quote_expiring: { href: "/app/devis", label: "Voir le devis" },
   trial_expiring: { href: "/app/abonnement", label: "Souscrire" },
+  hotel_reservation_created: { href: "/app/hotel/reservations", label: "Voir la réservation" },
+  hotel_arrival_tomorrow: { href: "/app/hotel/reservations", label: "Voir les réservations" },
+  hotel_stay_thankyou: { href: "/app/hotel/clients", label: "Voir le client" },
 };
 
 // Événements 100% ZegCaisse (ventes/stock/devis) — n'ont aucun sens côté
@@ -30,6 +35,9 @@ const KIND_CTA: Record<NotificationKind, { href: string; label: string }> = {
 // courante, quelle que soit l'app) ; new_member reste générique mais son
 // lien doit pointer vers l'Équipe de l'app courante, pas toujours ZegCaisse.
 const POS_ONLY_KINDS: NotificationKind[] = ["big_sale", "stock_low", "stock_out", "quote_expiring"];
+// Symétrique côté ZegHotel (Phase 5) — ne doivent jamais apparaître dans
+// le contexte ZegCaisse.
+const HOTEL_ONLY_KINDS: NotificationKind[] = ["hotel_reservation_created", "hotel_arrival_tomorrow", "hotel_stay_thankyou"];
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -48,7 +56,9 @@ export function NotificationsBell() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const inHotelContext = pathname.startsWith("/app/hotel");
 
-  const items = inHotelContext ? allItems.filter((n) => !POS_ONLY_KINDS.includes(n.kind)) : allItems;
+  const items = inHotelContext
+    ? allItems.filter((n) => !POS_ONLY_KINDS.includes(n.kind))
+    : allItems.filter((n) => !HOTEL_ONLY_KINDS.includes(n.kind));
   const unread = inHotelContext ? items.filter((n) => !n.read).length : allUnread;
 
   return (
