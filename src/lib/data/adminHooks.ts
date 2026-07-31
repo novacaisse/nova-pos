@@ -71,6 +71,7 @@ export const HOTEL_MODULES: { url: string; label: string }[] = [
   { url: "/app/hotel/maintenance", label: "Maintenance" },
   { url: "/app/hotel/clients", label: "Clients" },
   { url: "/app/hotel/corporate", label: "Comptes entreprise" },
+  { url: "/app/hotel/pos-interne", label: "Point de vente interne" },
   { url: "/app/hotel/rapports", label: "Rapports" },
 ];
 

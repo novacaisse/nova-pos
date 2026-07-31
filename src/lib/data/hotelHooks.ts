@@ -853,6 +853,75 @@ export function useAddFolioPayment() {
     onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" }),
   });
 }
+// ============ POINT DE VENTE INTERNE (ZegHotel Phase 7) ============
+// Notes ouvertes des séjours en cours (checked_in) — cible possible d'une
+// vente restaurant/bar/room service. Noms de clients via
+// hotel_guest_contact() (pas un embed direct sur hotel_guests, cf. Phase 1).
+export type HotelActiveFolio = {
+  folio_id: string; reservation_id: string; guest_name: string; room_numbers: string;
+};
+export function useHotelActiveFolios() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_active_folios", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelActiveFolio[]> => {
+      const { data: reservations, error } = await supabase.from("hotel_reservations")
+        .select("id, guest_id, reservation_rooms:hotel_reservation_rooms(room:hotel_rooms(number))")
+        .eq("organization_id", organizationId!).eq("status", "checked_in");
+      if (error) throw error;
+      const reservationIds = (reservations ?? []).map((r: any) => r.id);
+      if (!reservationIds.length) return [];
+
+      const [{ data: folios, error: folioErr }, { data: guestContacts, error: guestErr }] = await Promise.all([
+        supabase.from("hotel_folios").select("id, reservation_id").in("reservation_id", reservationIds).eq("status", "open"),
+        supabase.rpc("hotel_guest_contact", { _organization_id: organizationId! }),
+      ]);
+      if (folioErr) throw folioErr;
+      if (guestErr) throw guestErr;
+
+      const guestNameById = new Map(((guestContacts ?? []) as HotelGuestContact[]).map((g) => [g.id, g.full_name]));
+      const reservationById = new Map<string, any>((reservations ?? []).map((r: any) => [r.id, r]));
+
+      return (folios ?? []).flatMap((f: any) => {
+        const r = reservationById.get(f.reservation_id);
+        if (!r) return [];
+        const roomNumbers = (r.reservation_rooms ?? []).map((rr: any) => rr.room?.number).filter(Boolean).join(", ");
+        return [{
+          folio_id: f.id, reservation_id: f.reservation_id,
+          guest_name: guestNameById.get(r.guest_id) ?? "—", room_numbers: roomNumbers,
+        }];
+      });
+    },
+  });
+}
+
+// RPC atomique + security definer (migration 033) : front_desk n'a par
+// ailleurs aucun droit d'écriture sur stock_movements (aucun rôle
+// "cashier"/"stock" assignable côté ZegHotel) — cette fonction accorde
+// uniquement la capacité étroite "vendre un produit du catalogue contre
+// une note ouverte", pas un accès large à la table.
+export function usePostHotelPosCharge() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ folioId, items }: {
+      folioId: string;
+      items: { product_id: string | null; name: string; quantity: number; unit_price: number }[];
+    }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { error } = await supabase.rpc("post_hotel_pos_charge", {
+        p_organization_id: organizationId, p_folio_id: folioId, p_items: items,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
+    },
+  });
+}
+
 export function folioBalance(folio: HotelFolioDetail): number {
   const charges = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
   const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);

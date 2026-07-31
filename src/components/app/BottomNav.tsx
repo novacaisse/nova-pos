@@ -20,6 +20,7 @@ import {
   Sparkle,
   Wrench,
   Building2,
+  Coffee,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -62,6 +63,7 @@ const HOTEL_MORE: Item[] = [
   { label: "Maintenance", to: "/app/hotel/maintenance", icon: Wrench },
   { label: "Clients", to: "/app/hotel/clients", icon: Users },
   { label: "Entreprises", to: "/app/hotel/corporate", icon: Building2 },
+  { label: "POS interne", to: "/app/hotel/pos-interne", icon: Coffee },
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/hotel/parametres", icon: Settings },
@@ -109,12 +111,14 @@ export function BottomNav() {
     : PRIMARY.filter(included);
   const more = useHotelNav
     ? (myRole === "housekeeping"
-        ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports" && m.to !== "/app/hotel/clients" && m.to !== "/app/hotel/corporate")
+        ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne"].includes(m.to))
         // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de
         // hotel_guests_select (données d'identité restreintes à
-        // owner/manager/front_desk) — masqué ici aussi.
+        // owner/manager/front_desk). POS interne (Phase 7, migration 033) :
+        // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
+        // front_desk. Masqués ici aussi.
         : myRole === "accountant"
-          ? HOTEL_MORE.filter(included).filter((m) => m.to !== "/app/hotel/clients")
+          ? HOTEL_MORE.filter(included).filter((m) => !["/app/hotel/clients", "/app/hotel/pos-interne"].includes(m.to))
           : HOTEL_MORE.filter(included))
     : MORE.filter(included);
   // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes

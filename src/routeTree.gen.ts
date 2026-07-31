@@ -57,6 +57,7 @@ import { Route as AppProduitsProductIdRouteImport } from './routes/app.produits.
 import { Route as AppHotelRoomsRouteImport } from './routes/app.hotel.rooms'
 import { Route as AppHotelReservationsRouteImport } from './routes/app.hotel.reservations'
 import { Route as AppHotelRapportsRouteImport } from './routes/app.hotel.rapports'
+import { Route as AppHotelPosInterneRouteImport } from './routes/app.hotel.pos-interne'
 import { Route as AppHotelParametresRouteImport } from './routes/app.hotel.parametres'
 import { Route as AppHotelMaintenanceRouteImport } from './routes/app.hotel.maintenance'
 import { Route as AppHotelHousekeepingRouteImport } from './routes/app.hotel.housekeeping'
@@ -305,6 +306,11 @@ const AppHotelRapportsRoute = AppHotelRapportsRouteImport.update({
   path: '/rapports',
   getParentRoute: () => AppHotelRoute,
 } as any)
+const AppHotelPosInterneRoute = AppHotelPosInterneRouteImport.update({
+  id: '/pos-interne',
+  path: '/pos-interne',
+  getParentRoute: () => AppHotelRoute,
+} as any)
 const AppHotelParametresRoute = AppHotelParametresRouteImport.update({
   id: '/parametres',
   path: '/parametres',
@@ -382,6 +388,7 @@ export interface FileRoutesByFullPath {
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
   '/app/hotel/parametres': typeof AppHotelParametresRoute
+  '/app/hotel/pos-interne': typeof AppHotelPosInterneRoute
   '/app/hotel/rapports': typeof AppHotelRapportsRoute
   '/app/hotel/reservations': typeof AppHotelReservationsRoute
   '/app/hotel/rooms': typeof AppHotelRoomsRoute
@@ -432,6 +439,7 @@ export interface FileRoutesByTo {
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
   '/app/hotel/parametres': typeof AppHotelParametresRoute
+  '/app/hotel/pos-interne': typeof AppHotelPosInterneRoute
   '/app/hotel/rapports': typeof AppHotelRapportsRoute
   '/app/hotel/reservations': typeof AppHotelReservationsRoute
   '/app/hotel/rooms': typeof AppHotelRoomsRoute
@@ -489,6 +497,7 @@ export interface FileRoutesById {
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
   '/app/hotel/parametres': typeof AppHotelParametresRoute
+  '/app/hotel/pos-interne': typeof AppHotelPosInterneRoute
   '/app/hotel/rapports': typeof AppHotelRapportsRoute
   '/app/hotel/reservations': typeof AppHotelReservationsRoute
   '/app/hotel/rooms': typeof AppHotelRoomsRoute
@@ -547,6 +556,7 @@ export interface FileRouteTypes {
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
     | '/app/hotel/parametres'
+    | '/app/hotel/pos-interne'
     | '/app/hotel/rapports'
     | '/app/hotel/reservations'
     | '/app/hotel/rooms'
@@ -597,6 +607,7 @@ export interface FileRouteTypes {
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
     | '/app/hotel/parametres'
+    | '/app/hotel/pos-interne'
     | '/app/hotel/rapports'
     | '/app/hotel/reservations'
     | '/app/hotel/rooms'
@@ -653,6 +664,7 @@ export interface FileRouteTypes {
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
     | '/app/hotel/parametres'
+    | '/app/hotel/pos-interne'
     | '/app/hotel/rapports'
     | '/app/hotel/reservations'
     | '/app/hotel/rooms'
@@ -1013,6 +1025,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHotelRapportsRouteImport
       parentRoute: typeof AppHotelRoute
     }
+    '/app/hotel/pos-interne': {
+      id: '/app/hotel/pos-interne'
+      path: '/pos-interne'
+      fullPath: '/app/hotel/pos-interne'
+      preLoaderRoute: typeof AppHotelPosInterneRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
     '/app/hotel/parametres': {
       id: '/app/hotel/parametres'
       path: '/parametres'
@@ -1095,6 +1114,7 @@ interface AppHotelRouteChildren {
   AppHotelHousekeepingRoute: typeof AppHotelHousekeepingRoute
   AppHotelMaintenanceRoute: typeof AppHotelMaintenanceRoute
   AppHotelParametresRoute: typeof AppHotelParametresRoute
+  AppHotelPosInterneRoute: typeof AppHotelPosInterneRoute
   AppHotelRapportsRoute: typeof AppHotelRapportsRoute
   AppHotelReservationsRoute: typeof AppHotelReservationsRoute
   AppHotelRoomsRoute: typeof AppHotelRoomsRoute
@@ -1108,6 +1128,7 @@ const AppHotelRouteChildren: AppHotelRouteChildren = {
   AppHotelHousekeepingRoute: AppHotelHousekeepingRoute,
   AppHotelMaintenanceRoute: AppHotelMaintenanceRoute,
   AppHotelParametresRoute: AppHotelParametresRoute,
+  AppHotelPosInterneRoute: AppHotelPosInterneRoute,
   AppHotelRapportsRoute: AppHotelRapportsRoute,
   AppHotelReservationsRoute: AppHotelReservationsRoute,
   AppHotelRoomsRoute: AppHotelRoomsRoute,

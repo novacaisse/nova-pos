@@ -26,6 +26,7 @@ import {
   Sparkle,
   Wrench,
   Building2,
+  Coffee,
 } from "lucide-react";
 import {
   Sidebar,
@@ -65,6 +66,7 @@ const ICONS = {
   Sparkle,
   Wrench,
   Building2,
+  Coffee,
 } as const;
 
 type NavItem = {
@@ -102,6 +104,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Maintenance", url: "/app/hotel/maintenance", icon: "Wrench" },
     { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
     { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
+    { title: "Point de vente interne", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
   ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
@@ -148,6 +151,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // Comptes entreprise (ZegHotel Phase 4, migration 031) : housekeeping
   // n'a RLS-wise aucun accès (données financières hors de son périmètre).
   "/app/hotel/corporate": ["housekeeping"],
+  // Point de vente interne (ZegHotel Phase 7, migration 033) :
+  // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
+  // front_desk — housekeeping/accountant masqués ici en cohérence.
+  "/app/hotel/pos-interne": ["housekeeping", "accountant"],
 };
 
 export function AppSidebar() {
