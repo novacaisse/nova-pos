@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useMyRole } from "@/lib/data/hooks";
-import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
+import { getModulesForApp } from "@/lib/data/adminHooks";
+import { useCurrentPlanModules } from "@/lib/data/accountHooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import type { AppRole } from "@/lib/roles";
 import {
@@ -155,7 +156,10 @@ export function AppSidebar() {
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
 
-  const isGatableModule = (url: string) => PLAN_MODULES.some((m) => m.url === url);
+  // Phase 4 : le catalogue bridable dépend de l'app_module de l'établissement
+  // courant — avant ce correctif, PLAN_MODULES (ZegCaisse uniquement) était
+  // vérifié même côté ZegHotel, où aucun module n'était donc jamais bridé.
+  const isGatableModule = (url: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === url);
   const visible = (item: NavItem) =>
     (!myRole || !HIDDEN_FOR[item.url]?.includes(myRole))
     && (!planModules || !isGatableModule(item.url) || planModules.includes(item.url));

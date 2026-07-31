@@ -20,7 +20,8 @@ import {
   Sparkle,
   X,
 } from "lucide-react";
-import { useCurrentPlanModules, PLAN_MODULES } from "@/lib/data/adminHooks";
+import { getModulesForApp } from "@/lib/data/adminHooks";
+import { useCurrentPlanModules } from "@/lib/data/accountHooks";
 import { useMyRole } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { AppSwitcher } from "@/components/app/AppSwitcher";
@@ -77,7 +78,9 @@ export function BottomNav() {
   const { data: myRole } = useMyRole();
   const { currentOrganization } = useOrganization();
   const activeApps = currentOrganization?.active_apps ?? ["pos"];
-  const isGatableModule = (to: string) => PLAN_MODULES.some((m) => m.url === to);
+  // Phase 4 : catalogue par app_module (avant, PLAN_MODULES ZegCaisse était
+  // vérifié même côté ZegHotel, où aucun raccourci n'était donc jamais bridé).
+  const isGatableModule = (to: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === to);
   const included = (item: Item) => !planModules || !isGatableModule(item.to) || planModules.includes(item.to);
 
   // ZegCaisse et ZegHôtel sont deux activités distinctes : quand les deux
@@ -91,11 +94,16 @@ export function BottomNav() {
   const useHotelNav = isHotelOnlyRole
     || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext)));
 
+  // HOUSEKEEPING_PRIMARY reste toujours affiché tel quel pour ce rôle (ses
+  // deux seuls écrans opérationnels, pas des modules "métier" bridables par
+  // formule) — HOTEL_PRIMARY/HOTEL_MORE, eux, passent par `included` comme
+  // PRIMARY/MORE côté ZegCaisse (oubli corrigé en Phase 4 : ces deux tableaux
+  // n'étaient jusqu'ici jamais filtrés, donc jamais bridés par une formule).
   const primary = useHotelNav
-    ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY)
+    ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
     : PRIMARY.filter(included);
   const more = useHotelNav
-    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : HOTEL_MORE)
+    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : HOTEL_MORE.filter(included))
     : MORE.filter(included);
   // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes
   // (owner/manager/accountant) — front_desk/housekeeping n'ont RLS-wise
