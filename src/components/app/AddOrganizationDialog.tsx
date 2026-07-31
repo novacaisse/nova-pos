@@ -1,9 +1,11 @@
 // Formulaire "Ajouter une boutique / un établissement" — partagé entre
 // Paramètres ZegCaisse et Paramètres ZegHotel (les deux pages restent
 // distinctes, seul ce composant est réutilisé, paramétré par unitLabel
-// pour les libellés). Le futur provisioning (Phase 2, restructuration
-// compte/établissements) créera cette organisation sous le compte
-// existant plutôt qu'un nouveau compte — inchangé dans cette passe.
+// pour les libellés). Le provisioning (RPC provision_organization, Phase 2
+// restructuration compte/établissements) crée toujours cette organisation
+// sous le compte existant du propriétaire, jamais un nouveau compte, et
+// refuse (erreur affichée ci-dessous) si la limite d'établissements de la
+// formule active est atteinte.
 import { useState } from "react";
 import { Plus, X, Loader2 } from "lucide-react";
 

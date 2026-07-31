@@ -8,9 +8,11 @@ import { useOrganization } from "@/lib/auth/OrganizationProvider";
 // Mécanique commune (changer d'établissement) mais contenu/libellés
 // adaptés à l'application courante — "Boutique" côté ZegCaisse, "Hôtel"
 // côté ZegHotel (audit isolation ZegOS, Partie A). La liste elle-même ne
-// montre que les organisations pertinentes pour l'app courante (filtrage
-// par active_apps) — sinon un compte avec boutique + hôtel verrait l'une
-// dans le sélecteur de l'autre, contraire au principe d'isolation.
+// montre que les établissements du même compte que celui actuellement actif
+// et pertinents pour l'app courante (filtrage par account_id + app_module,
+// Phase 2 restructuration compte/établissements) — sinon un utilisateur
+// membre d'organisations de comptes différents, ou un compte avec boutique
+// + hôtel, verrait des établissements hors contexte dans le sélecteur.
 export function ShopSelector() {
   const [open, setOpen] = useState(false);
   const { organizations, currentOrganization, setCurrentOrganizationId, loading } = useOrganization();
@@ -39,7 +41,9 @@ export function ShopSelector() {
     );
   }
 
-  const sameAppOrgs = organizations.filter((s) => (s.active_apps ?? []).includes(appKey));
+  const sameAppOrgs = organizations.filter(
+    (s) => s.account_id === currentOrganization.account_id && s.app_module === appKey,
+  );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

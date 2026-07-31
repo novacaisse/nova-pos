@@ -6,8 +6,11 @@
 // - Vérifie server-side que l'appelant est owner de organization_id (jamais
 //   faire confiance à organization_id envoyé par le client, puisqu'on écrit
 //   ensuite avec le service role, qui contourne la RLS).
-// - Fait respecter plans.limits.users (nombre de organization_members déjà
-//   dans la boutique vs. limite de la formule active) — jamais uniquement côté UI.
+// - Fait respecter account_subscriptions/plans.max_users (Phase 2,
+//   restructuration compte/établissements) : compte les organization_members
+//   de TOUTES les organisations du compte pour l'app_module de organization_id,
+//   comparé à la limite de la formule de l'account_subscription correspondante
+//   — jamais uniquement côté UI.
 // - Si l'email existe déjà (compte créé via une inscription indépendante,
 //   ou déjà membre d'une autre boutique), on rattache ce compte existant
 //   plutôt que d'échouer — pas de mot de passe à définir dans ce cas.
@@ -69,17 +72,27 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    const { data: organization, error: orgErr } = await admin.from("organizations").select("plan").eq("id", organization_id).maybeSingle();
+    const { data: organization, error: orgErr } = await admin.from("organizations")
+      .select("account_id, app_module").eq("id", organization_id).maybeSingle();
     if (orgErr || !organization) return json({ error: "Boutique introuvable." }, 404);
 
+    const { data: sameAppOrgs, error: sameAppErr } = await admin.from("organizations")
+      .select("id").eq("account_id", organization.account_id).eq("app_module", organization.app_module);
+    if (sameAppErr) return json({ error: "Impossible de vérifier l'effectif." }, 500);
+    const sameAppOrgIds = (sameAppOrgs ?? []).map((o) => o.id);
+
     const { count: memberCount, error: countErr } = await admin
-      .from("organization_members").select("id", { count: "exact", head: true }).eq("organization_id", organization_id);
+      .from("organization_members").select("id", { count: "exact", head: true }).in("organization_id", sameAppOrgIds);
     if (countErr) return json({ error: "Impossible de vérifier l'effectif." }, 500);
 
-    const { data: plan } = await admin.from("plans").select("limits").eq("id", organization.plan).maybeSingle();
-    const userLimit = (plan?.limits as Record<string, unknown> | null)?.users;
+    const { data: accountSub } = await admin.from("account_subscriptions")
+      .select("plan_id").eq("account_id", organization.account_id).eq("app_module", organization.app_module).maybeSingle();
+    const { data: plan } = accountSub
+      ? await admin.from("plans").select("max_users, name").eq("id", accountSub.plan_id).maybeSingle()
+      : { data: null };
+    const userLimit = plan?.max_users;
     if (typeof userLimit === "number" && (memberCount ?? 0) >= userLimit) {
-      return json({ error: `Limite d'utilisateurs atteinte pour votre formule (${userLimit} maximum). Passez à une formule supérieure pour en ajouter.` }, 403);
+      return json({ error: `Limite d'utilisateurs atteinte pour votre formule ${plan?.name ?? ""} (${userLimit} maximum). Passez à une formule supérieure pour en ajouter.` }, 403);
     }
 
     // Compte déjà existant ? On le rattache plutôt que d'échouer.

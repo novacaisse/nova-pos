@@ -36,6 +36,13 @@ export type Plan = {
   features: string[]; limits: PlanLimits;
   is_active: boolean; is_recommended: boolean; sort_order: number;
   created_at: string;
+  // Colonnes physiques ajoutées par la migration 021 (restructuration
+  // compte/établissements) : limites par app_module d'un account_subscriptions,
+  // distinctes de limits.max_users ci-dessus (qui reste, lui, au niveau de
+  // l'organisation). null = illimité, jamais saisi en dur (Phase 3, mini-CMS).
+  app_module: "pos" | "hotel" | null;
+  max_establishments: number | null;
+  max_users: number | null;
 };
 
 // Modules "métier" pouvant être inclus/exclus par formule — le tableau de
