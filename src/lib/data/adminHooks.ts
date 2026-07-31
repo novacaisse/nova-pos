@@ -216,18 +216,16 @@ export function useSuspendOrganization() {
   });
 }
 
+// RPC security definer (migration 023) plutôt qu'écriture directe depuis le
+// client : garde aussi account_subscriptions (compte + app_module) en phase
+// avec organizations.trial_ends_at, même classe de correctif que la Phase 5
+// côté paiement — sans ça, la page Abonnement/le gating de modules
+// restaient figés sur l'ancien essai malgré la prolongation.
 export function useExtendTrial() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, days }: { id: string; days: number }) => {
-      const { data: organization, error: orgErr } = await supabase.from("organizations")
-        .select("trial_ends_at").eq("id", id).single();
-      if (orgErr) throw orgErr;
-      const now = new Date();
-      const base = organization.trial_ends_at && new Date(organization.trial_ends_at) > now ? new Date(organization.trial_ends_at) : now;
-      base.setDate(base.getDate() + days);
-      const { error } = await supabase.from("organizations")
-        .update({ trial_ends_at: base.toISOString(), plan: "trial" }).eq("id", id);
+      const { error } = await supabase.rpc("admin_extend_trial", { p_organization_id: id, p_days: days });
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_organizations"] }),
@@ -246,47 +244,25 @@ export function useDeleteOrganization() {
 }
 
 // Changement de formule forcé par le Super Admin (ex. downgrade manuel,
-// correction après un paiement validé à la main) — même colonne que
-// l'auto-service (souscription), même policy shops_update_admin.
+// correction après un paiement validé à la main).
 //
-// Garde `subscriptions` synchronisé avec `organizations.plan` (audit ZegOS
-// Phase 1, LOT C) : avant ce correctif, cette action ne touchait QUE
-// organizations.plan — la ligne `subscriptions` (status/plan/
-// current_period_end), lue par la page Abonnement et par ce même Paramètres
-// > Organisation, restait figée sur son état précédent (souvent encore
-// "trialing" avec une échéance déjà dépassée). Résultat observé : Paramètres
-// affichait "Plan starter" pendant qu'Abonnement affichait "Essai gratuit
-// expiré depuis 5 jours" pour la même organisation. On upsert donc aussi la
-// ligne d'abonnement en "active" avec la nouvelle formule, et on efface
-// trial_ends_at (plus pertinent une fois sur une vraie formule).
+// RPC security definer (migration 023) : la version précédente écrivait
+// directement organizations.plan puis subscriptions depuis le client pour
+// rester synchronisée (audit ZegOS Phase 1, LOT C) — mais les policies RLS
+// de `subscriptions` (owner/manager de LA boutique, jamais is_super_admin())
+// faisaient silencieusement échouer/no-opper cette seconde écriture dès
+// qu'un Super Admin (rarement membre de la boutique d'un client) l'utilisait.
+// La RPC, exécutée avec les privilèges de la fonction après vérification
+// is_super_admin() server-side, écrit organizations.plan, subscriptions ET
+// account_subscriptions (compte + app_module — sinon la page Abonnement/le
+// gating de modules restent figés sur l'ancienne formule, même bug que la
+// Phase 5 côté paiement réel) dans une seule transaction.
 export function useChangeOrganizationPlan() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, plan }: { id: string; plan: string }) => {
-      const { error } = await supabase.from("organizations")
-        .update({ plan, trial_ends_at: plan === "trial" ? undefined : null }).eq("id", id);
+      const { error } = await supabase.rpc("admin_change_organization_plan", { p_organization_id: id, p_plan: plan });
       if (error) throw error;
-
-      if (plan !== "trial") {
-        const { data: planDef } = await supabase.from("plans").select("price_month, currency").eq("id", plan).maybeSingle();
-        const { data: existing } = await supabase.from("subscriptions")
-          .select("id").eq("organization_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-        const periodEnd = new Date();
-        periodEnd.setDate(periodEnd.getDate() + 30);
-        const payload = {
-          plan, status: "active" as const,
-          amount: planDef?.price_month ?? 0, currency: planDef?.currency ?? "XOF",
-          current_period_end: periodEnd.toISOString(),
-        };
-        if (existing) {
-          const { error: updErr } = await supabase.from("subscriptions").update(payload).eq("id", existing.id);
-          if (updErr) throw updErr;
-        } else {
-          const { error: insErr } = await supabase.from("subscriptions")
-            .insert({ ...payload, organization_id: id, started_at: new Date().toISOString() });
-          if (insErr) throw insErr;
-        }
-      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_organizations"] }),
   });
