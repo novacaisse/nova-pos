@@ -3,11 +3,11 @@ import { Calendar, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-export type Period = "today" | "yesterday" | "week" | "last_week" | "month" | "last_month" | "year" | "custom";
+export type Period = "today" | "yesterday" | "week" | "last_week" | "month" | "last_month" | "year" | "last_year" | "custom";
 
 export const PERIOD_LABEL: Record<Period, string> = {
   today: "Aujourd'hui", yesterday: "Hier", week: "Cette semaine", last_week: "Semaine dernière",
-  month: "Ce mois", last_month: "Mois dernier", year: "Cette année", custom: "Personnalisé",
+  month: "Ce mois", last_month: "Mois dernier", year: "Cette année", last_year: "Année dernière", custom: "Personnalisé",
 };
 
 export function periodRange(period: Period, customFrom?: string, customTo?: string): { from: Date; to: Date } {
@@ -27,6 +27,7 @@ export function periodRange(period: Period, customFrom?: string, customTo?: stri
       return { from, to };
     }
     case "year": return { from: new Date(now.getFullYear(), 0, 1), to: end };
+    case "last_year": return { from: new Date(now.getFullYear() - 1, 0, 1), to: new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999) };
     case "custom": {
       const from = customFrom ? new Date(customFrom) : start;
       const to = customTo ? new Date(customTo + "T23:59:59") : end;

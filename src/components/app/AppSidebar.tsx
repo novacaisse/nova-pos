@@ -24,6 +24,10 @@ import {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  Wrench,
+  Building2,
+  Coffee,
+  Radio,
 } from "lucide-react";
 import {
   Sidebar,
@@ -61,6 +65,10 @@ const ICONS = {
   CalendarRange,
   DoorClosed,
   Sparkle,
+  Wrench,
+  Building2,
+  Coffee,
+  Radio,
 } as const;
 
 type NavItem = {
@@ -95,7 +103,12 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Réservations", url: "/app/hotel/reservations", icon: "CalendarRange" },
     { title: "Chambres", url: "/app/hotel/rooms", icon: "DoorClosed" },
     { title: "Housekeeping", url: "/app/hotel/housekeeping", icon: "Sparkle" },
+    { title: "Maintenance", url: "/app/hotel/maintenance", icon: "Wrench" },
+    { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
+    { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
+    { title: "Point de vente interne", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
+    { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
   ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
   // de commun dans la nav entre les deux applications (le paramètre
@@ -129,11 +142,26 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/rapports": ["front_desk", "housekeeping"],
   // Hôtel : housekeeping n'a RLS-wise aucun accès aux réservations/clients
   // (données financières/personnelles hors de son périmètre, cf. 020h/020g) ;
-  // accountant n'a pas accès aux tâches de ménage (020j).
+  // accountant n'a pas accès aux tâches de ménage (020j). Clients (ZegHotel
+  // Phase 1, migration 028) : accountant retiré de hotel_guests_select
+  // (données d'identité restreintes à owner/manager/front_desk) — masqué
+  // ici aussi, sinon écran vide plutôt qu'une vraie restriction visible.
   "/app/hotel": ["housekeeping"],
   "/app/hotel/reservations": ["housekeeping"],
   "/app/hotel/rapports": ["housekeeping"],
   "/app/hotel/housekeeping": ["accountant"],
+  "/app/hotel/clients": ["housekeeping", "accountant"],
+  // Comptes entreprise (ZegHotel Phase 4, migration 031) : housekeeping
+  // n'a RLS-wise aucun accès (données financières hors de son périmètre).
+  "/app/hotel/corporate": ["housekeeping"],
+  // Point de vente interne (ZegHotel Phase 7, migration 033) :
+  // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
+  // front_desk — housekeeping/accountant masqués ici en cohérence.
+  "/app/hotel/pos-interne": ["housekeeping", "accountant"],
+  // Canaux de distribution (ZegHotel Phase 8, migration 034) : hotel_channels_all
+  // n'accorde qu'owner/manager (table existante depuis 020g) — masqué pour
+  // les autres rôles hôtel en cohérence.
+  "/app/hotel/canaux": ["housekeeping", "accountant", "front_desk"],
 };
 
 export function AppSidebar() {

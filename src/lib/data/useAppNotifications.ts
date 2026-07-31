@@ -1,12 +1,16 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, useDismissNotification,
   useQuotes,
 } from "@/lib/data/hooks";
+import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { getTrialInfo } from "@/lib/trial";
 
-export type NotificationKind = "big_sale" | "stock_low" | "stock_out" | "new_member" | "quote_expiring" | "trial_expiring";
+export type NotificationKind =
+  | "big_sale" | "stock_low" | "stock_out" | "new_member" | "quote_expiring" | "trial_expiring"
+  | "hotel_reservation_created" | "hotel_stay_thankyou" | "hotel_arrival_tomorrow";
 
 export type NotificationItem = {
   id: string; kind: NotificationKind; title: string; body: string; created_at: string;
@@ -28,6 +32,26 @@ export function useAppNotifications() {
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
   const dismissReal = useDismissNotification();
+
+  // Rappel "arrivée demain" (J-1, ZegHotel Phase 5) : événement "temps qui
+  // passe" comme quote_expiring/trial_expiring ci-dessous, non déclenchable
+  // par trigger. Agrégé (pas une notification par réservation) pour éviter
+  // de devoir résoudre le nom du client ici (hotel_guests désormais
+  // restreint en RLS depuis la Phase 1 — accountant en particulier n'y a
+  // plus accès) ; le lien renvoie vers l'écran Réservations pour le détail.
+  // Sans effet pour une organisation ZegCaisse (aucune ligne hotel_reservations).
+  const { data: tomorrowArrivals = [] } = useQuery({
+    queryKey: ["hotel_arrivals_tomorrow", currentOrganization?.id],
+    enabled: !!currentOrganization?.id,
+    queryFn: async (): Promise<{ id: string }[]> => {
+      const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      const { data, error } = await supabase.from("hotel_reservations")
+        .select("id").eq("organization_id", currentOrganization!.id)
+        .eq("check_in", tomorrow).in("status", ["pending", "confirmed"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
 
   const virtualItems = useMemo(() => {
     const items: NotificationItem[] = [];
@@ -57,8 +81,17 @@ export function useAppNotifications() {
       });
     }
 
+    if (tomorrowArrivals.length > 0) {
+      items.push({
+        id: "virtual-hotel-arrivals-tomorrow", kind: "hotel_arrival_tomorrow",
+        title: "Arrivées demain",
+        body: `${tomorrowArrivals.length} réservation${tomorrowArrivals.length > 1 ? "s" : ""} attendue${tomorrowArrivals.length > 1 ? "s" : ""} demain.`,
+        created_at: new Date().toISOString(), read: false, virtual: true,
+      });
+    }
+
     return items.filter((it) => !dismissedVirtual.has(it.id));
-  }, [quotes, currentOrganization, dismissedVirtual]);
+  }, [quotes, currentOrganization, dismissedVirtual, tomorrowArrivals]);
 
   const items: NotificationItem[] = useMemo(() => [
     ...real.map((n): NotificationItem => ({

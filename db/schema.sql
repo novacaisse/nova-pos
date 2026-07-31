@@ -1829,7 +1829,12 @@ create table if not exists public.hotel_rate_plans (
   includes_breakfast boolean not null default false,
   refundable boolean not null default true,
   price_adjustment_pct numeric(5,2) not null default 0,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Nuitée ET horaire coexistent (ZegHotel Phase 1, migration 028) —
+  -- hourly_rate requis si billing_unit = 'hour'.
+  billing_unit text not null default 'night' check (billing_unit in ('night', 'hour')),
+  hourly_rate numeric(14,2),
+  constraint hotel_rate_plans_hourly_rate_check check (billing_unit <> 'hour' or hourly_rate is not null)
 );
 create index if not exists idx_hotel_rate_plans_org on public.hotel_rate_plans(organization_id);
 alter table public.hotel_rate_plans enable row level security;
@@ -1946,7 +1951,11 @@ create table if not exists public.hotel_channels (
   name text not null,
   is_active boolean not null default false,
   external_id text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Migration 034 — ZegHotel Phase 8 : gestion manuelle par canal (nom,
+  -- notes, tarif spécifique optionnel), pas de vraie intégration API.
+  notes text,
+  manual_rate numeric(14,2)
 );
 create index if not exists idx_hotel_channels_org on public.hotel_channels(organization_id);
 alter table public.hotel_channels enable row level security;
@@ -1972,20 +1981,48 @@ create table if not exists public.hotel_guests (
   nationality text,
   address text,
   notes text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Recommandé par rapport à un âge stocké, qui deviendrait faux avec le
+  -- temps (ZegHotel Phase 1, migration 028).
+  date_of_birth date
 );
 create index if not exists idx_hotel_guests_org on public.hotel_guests(organization_id);
 alter table public.hotel_guests enable row level security;
 -- Housekeeping exclu délibérément (rôle scopé "statuts chambres et
 -- tâches de nettoyage uniquement", voir 020g) — aucune donnée client/
--- financière ne doit lui être accessible.
+-- financière ne doit lui être accessible. accountant retiré ici (migration
+-- 028) : les données d'identité (CNI/passeport/adresse/date de naissance)
+-- sont désormais restreintes à owner/manager/front_desk — hotel_guest_contact()
+-- ci-dessous donne à accountant (et à tout futur usage similaire) une
+-- lecture "contact seul" sans jamais exposer les colonnes sensibles, y
+-- compris via un appel API direct (masquage fait en SQL, pas côté client).
 drop policy if exists hotel_guests_select on public.hotel_guests;
 create policy hotel_guests_select on public.hotel_guests for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
 drop policy if exists hotel_guests_write on public.hotel_guests;
 create policy hotel_guests_write on public.hotel_guests for all to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+
+create or replace function public.hotel_guest_contact(_organization_id uuid)
+returns table (
+  id uuid, organization_id uuid, full_name text, email text, phone text,
+  nationality text, notes text, created_at timestamptz
+)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.has_any_role_in_organization(_organization_id, array['owner', 'manager', 'front_desk', 'accountant']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+  return query
+    select g.id, g.organization_id, g.full_name, g.email, g.phone, g.nationality, g.notes, g.created_at
+    from public.hotel_guests g
+    where g.organization_id = _organization_id;
+end;
+$$;
+
+revoke all on function public.hotel_guest_contact(uuid) from public;
+grant execute on function public.hotel_guest_contact(uuid) to authenticated;
 
 -- =============== reservations ===============
 create table if not exists public.hotel_reservations (
@@ -2006,7 +2043,20 @@ create table if not exists public.hotel_reservations (
   created_at timestamptz not null default now(),
   cancelled_at timestamptz,
   cancellation_reason text,
-  check (check_out > check_in)
+  -- Nuitée ET horaire (ZegHotel Phase 1, migration 028) — check_in/check_out
+  -- (date) restent la source de vérité "jour occupé" pour le reste du
+  -- système (dashboard, rapports, moteur de tarification) quel que soit
+  -- billing_unit ; une réservation horaire les a égaux (même jour).
+  -- check_in_at/check_out_at = heures prévues (horaire uniquement, requis
+  -- dans ce cas) ; actual_* = heures réelles, posées au check-in/check-out.
+  billing_unit text not null default 'night' check (billing_unit in ('night', 'hour')),
+  check_in_at timestamptz,
+  check_out_at timestamptz,
+  actual_check_in_at timestamptz,
+  actual_check_out_at timestamptz,
+  constraint hotel_reservations_hourly_times_check
+    check (billing_unit <> 'hour' or (check_in_at is not null and check_out_at is not null and check_out_at > check_in_at)),
+  constraint hotel_reservations_dates_check check (check_out > check_in or billing_unit = 'hour')
 );
 create index if not exists idx_hotel_reservations_org on public.hotel_reservations(organization_id);
 create index if not exists idx_hotel_reservations_guest on public.hotel_reservations(guest_id);
@@ -2043,15 +2093,35 @@ create table if not exists public.hotel_reservation_rooms (
   check_out date not null,
   status text not null,
   created_at timestamptz not null default now(),
+  -- Nuitée ET horaire (ZegHotel Phase 1, migration 028) — dénormalisés
+  -- depuis la réservation parente (même mécanisme que check_in/check_out/
+  -- status ci-dessus). hourly_rate figé au moment de la réservation
+  -- (indépendant d'un changement ultérieur de la formule tarifaire) : sert
+  -- au calcul de la charge réelle au check-out.
+  billing_unit text not null default 'night',
+  check_in_at timestamptz,
+  check_out_at timestamptz,
+  hourly_rate numeric(14,2),
   unique (reservation_id, room_id),
   -- Bloque tout chevauchement de dates sur la même chambre tant que la
   -- réservation est "active" (pending/confirmed/checked_in) — cancelled/
   -- no_show/checked_out libèrent la chambre pour de nouvelles réservations
-  -- sur les mêmes dates.
-  exclude using gist (
+  -- sur les mêmes dates. greatest(check_out, check_in + 1) plutôt que
+  -- check_out seul : pour une réservation horaire, check_in = check_out
+  -- (même jour) donnerait un daterange VIDE (aucune collision détectée,
+  -- y compris avec une réservation nuitée qui occupe déjà toute la
+  -- journée) — comportement nuitée inchangé (check_out déjà > check_in).
+  constraint hotel_resv_rooms_excl exclude using gist (
     room_id with =,
-    daterange(check_in, check_out) with &&
-  ) where (status in ('pending','confirmed','checked_in'))
+    daterange(check_in, greatest(check_out, check_in + 1)) with &&
+  ) where (status in ('pending','confirmed','checked_in')),
+  -- Chevauchement fin entre réservations horaires sur la même chambre le
+  -- même jour (la contrainte ci-dessus couvre déjà toute collision
+  -- jour/nuitée) — n'entre en jeu que pour billing_unit = 'hour'.
+  constraint hotel_resv_rooms_hourly_excl exclude using gist (
+    room_id with =,
+    tstzrange(check_in_at, check_out_at) with &&
+  ) where (status in ('pending','confirmed','checked_in') and billing_unit = 'hour')
 );
 create index if not exists idx_hotel_resv_rooms_org on public.hotel_reservation_rooms(organization_id);
 create index if not exists idx_hotel_resv_rooms_reservation on public.hotel_reservation_rooms(reservation_id);
@@ -2065,9 +2135,9 @@ create policy hotel_resv_rooms_write on public.hotel_reservation_rooms for all t
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
 
--- Remplit automatiquement check_in/check_out/status à l'insertion depuis
--- la réservation parente — le client n'a jamais à les fournir ni à les
--- tenir synchronisés lui-même.
+-- Remplit automatiquement check_in/check_out/status/billing_unit/
+-- check_in_at/check_out_at à l'insertion depuis la réservation parente —
+-- le client n'a jamais à les fournir ni à les tenir synchronisés lui-même.
 create or replace function public.hotel_sync_reservation_room_on_insert()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
@@ -2080,6 +2150,9 @@ begin
   new.check_in := v_reservation.check_in;
   new.check_out := v_reservation.check_out;
   new.status := v_reservation.status;
+  new.billing_unit := v_reservation.billing_unit;
+  new.check_in_at := v_reservation.check_in_at;
+  new.check_out_at := v_reservation.check_out_at;
   return new;
 end;
 $$;
@@ -2088,18 +2161,23 @@ create trigger trg_hotel_resv_room_insert
   before insert on public.hotel_reservation_rooms
   for each row execute function public.hotel_sync_reservation_room_on_insert();
 
--- Répercute tout changement de dates/statut de la réservation sur les
--- lignes hotel_reservation_rooms existantes (ex. annulation : libère la
--- chambre pour de nouvelles réservations ; changement de dates : la
--- contrainte d'exclusion protège aussi contre un nouveau chevauchement).
+-- Répercute tout changement de dates/statut/billing_unit de la
+-- réservation sur les lignes hotel_reservation_rooms existantes (ex.
+-- annulation : libère la chambre pour de nouvelles réservations ;
+-- changement de dates : les contraintes d'exclusion protègent aussi
+-- contre un nouveau chevauchement).
 create or replace function public.hotel_sync_reservation_room_on_update()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if new.check_in is distinct from old.check_in
      or new.check_out is distinct from old.check_out
-     or new.status is distinct from old.status then
+     or new.status is distinct from old.status
+     or new.billing_unit is distinct from old.billing_unit
+     or new.check_in_at is distinct from old.check_in_at
+     or new.check_out_at is distinct from old.check_out_at then
     update public.hotel_reservation_rooms
-    set check_in = new.check_in, check_out = new.check_out, status = new.status
+    set check_in = new.check_in, check_out = new.check_out, status = new.status,
+        billing_unit = new.billing_unit, check_in_at = new.check_in_at, check_out_at = new.check_out_at
     where reservation_id = new.id;
   end if;
   return new;
@@ -2109,6 +2187,56 @@ drop trigger if exists trg_hotel_reservations_sync on public.hotel_reservations;
 create trigger trg_hotel_reservations_sync
   after update on public.hotel_reservations
   for each row execute function public.hotel_sync_reservation_room_on_update();
+
+-- Communications automatisées (ZegHotel Phase 5, migration 032) — table
+-- notifications strictement interne (user_id référence auth.users, un
+-- client hôtel n'a pas de compte) : ce qui suit, ce sont des RAPPELS pour
+-- le personnel ("confirmation à envoyer", "remerciement à envoyer"), pas
+-- un envoi réel de SMS/email au client. Même patron que
+-- notify_big_sale/notify_stock_level/notify_new_member plus haut. Le
+-- rappel "arrivée demain" (J-1, événement "temps qui passe") est calculé
+-- côté client dans useAppNotifications.ts, non déclenchable par trigger.
+create or replace function public.notify_hotel_reservation_created()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_guest_name text;
+begin
+  select full_name into v_guest_name from public.hotel_guests where id = new.guest_id;
+  insert into public.notifications (organization_id, title, body, kind)
+  values (
+    new.organization_id, 'Nouvelle réservation',
+    'Confirmation à envoyer à ' || coalesce(v_guest_name, 'un client') || ' — arrivée le ' || to_char(new.check_in, 'DD/MM/YYYY') || '.',
+    'hotel_reservation_created'
+  );
+  return new;
+end $$;
+
+drop trigger if exists trg_notify_hotel_reservation_created on public.hotel_reservations;
+create trigger trg_notify_hotel_reservation_created
+  after insert on public.hotel_reservations
+  for each row execute function public.notify_hotel_reservation_created();
+
+create or replace function public.notify_hotel_checkout()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_guest_name text;
+begin
+  if new.status = 'checked_out' and old.status is distinct from 'checked_out' then
+    select full_name into v_guest_name from public.hotel_guests where id = new.guest_id;
+    insert into public.notifications (organization_id, title, body, kind)
+    values (
+      new.organization_id, 'Séjour terminé',
+      'Message de remerciement à envoyer à ' || coalesce(v_guest_name, 'un client') || '.',
+      'hotel_stay_thankyou'
+    );
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_notify_hotel_checkout on public.hotel_reservations;
+create trigger trg_notify_hotel_checkout
+  after update on public.hotel_reservations
+  for each row execute function public.notify_hotel_checkout();
 
 -- Migration 020i — ZegHotel, étape 4/4 (partie facturation) : folios,
 -- charges et paiements. À exécuter après 020f/020g/020h.
@@ -2125,6 +2253,14 @@ create table if not exists public.hotel_folios (
   opened_at timestamptz not null default now(),
   closed_at timestamptz,
   created_at timestamptz not null default now(),
+  -- Facturation différée (ZegHotel Phase 4, migration 031) : clôture
+  -- différée simple — la réception peut clôturer une note avec un solde
+  -- impayé si la réservation est rattachée à un compte entreprise, en la
+  -- marquant "à facturer à l'entreprise". corporate_paid_at n'est qu'un
+  -- marqueur en attente/réglé pour le relevé, pas une nouvelle source de
+  -- vérité financière (folioBalance() reste calculée normalement).
+  billed_to_corporate boolean not null default false,
+  corporate_paid_at timestamptz,
   unique (reservation_id)
 );
 create index if not exists idx_hotel_folios_org on public.hotel_folios(organization_id);
@@ -2184,6 +2320,11 @@ revoke all on function public.hotel_compute_room_rate(uuid, date, date, uuid) fr
 grant execute on function public.hotel_compute_room_rate(uuid, date, date, uuid) to authenticated;
 
 -- =============== 2. Restrictions (séjour min / stop-vente / fermé à l'arrivée) ===============
+-- greatest(p_check_out, p_check_in + 1) plutôt que p_check_out seul : pour
+-- une réservation horaire (ZegHotel Phase 1, migration 028) p_check_in =
+-- p_check_out donnerait un daterange VIDE, laissant passer un stop-vente
+-- sans jamais bloquer. min_stay (séjour minimum, un concept nuitée) est
+-- ignoré pour un séjour de 0 nuit.
 create or replace function public.hotel_check_rate_restrictions(
   p_organization_id uuid,
   p_room_type_id uuid,
@@ -2193,13 +2334,14 @@ create or replace function public.hotel_check_rate_restrictions(
 language plpgsql stable set search_path = public as $$
 declare
   v_max_min_stay integer;
+  v_range daterange := daterange(p_check_in, greatest(p_check_out, p_check_in + 1));
 begin
   if exists (
     select 1 from public.hotel_rate_restrictions
     where organization_id = p_organization_id
       and (room_type_id = p_room_type_id or room_type_id is null)
       and stop_sell
-      and daterange(start_date, end_date, '[]') && daterange(p_check_in, p_check_out)
+      and daterange(start_date, end_date, '[]') && v_range
   ) then
     raise exception 'Ces dates sont fermées à la vente pour ce type de chambre.';
   end if;
@@ -2214,15 +2356,17 @@ begin
     raise exception 'Les arrivées ne sont pas autorisées à cette date pour ce type de chambre.';
   end if;
 
-  select max(min_stay) into v_max_min_stay
-  from public.hotel_rate_restrictions
-  where organization_id = p_organization_id
-    and (room_type_id = p_room_type_id or room_type_id is null)
-    and min_stay is not null
-    and p_check_in between start_date and end_date;
+  if p_check_out > p_check_in then
+    select max(min_stay) into v_max_min_stay
+    from public.hotel_rate_restrictions
+    where organization_id = p_organization_id
+      and (room_type_id = p_room_type_id or room_type_id is null)
+      and min_stay is not null
+      and p_check_in between start_date and end_date;
 
-  if v_max_min_stay is not null and (p_check_out - p_check_in) < v_max_min_stay then
-    raise exception 'Séjour minimum de % nuit(s) requis pour ces dates.', v_max_min_stay;
+    if v_max_min_stay is not null and (p_check_out - p_check_in) < v_max_min_stay then
+      raise exception 'Séjour minimum de % nuit(s) requis pour ces dates.', v_max_min_stay;
+    end if;
   end if;
 end;
 $$;
@@ -2240,6 +2384,15 @@ grant execute on function public.hotel_check_rate_restrictions(uuid, uuid, date,
 -- staff, comportement inchangé sinon). Security invoker : les policies
 -- RLS hotel_reservations_insert/hotel_resv_rooms_write/hotel_folios_write
 -- s'appliquent normalement.
+--
+-- Nuitée ET horaire (ZegHotel Phase 1, migration 028) : billing_unit et
+-- hourly_rate sont dérivés de la formule tarifaire choisie (p_rate_plan_id)
+-- — p_check_in_at/p_check_out_at (heures prévues) sont alors requis. Pour
+-- une réservation horaire, check_out (date) est forcé à check_in (même
+-- jour), et le tarif est estimé (arrondi à l'heure supérieure, 1h minimum)
+-- pour affichage seulement : le montant réel est recalculé et posté au
+-- check-out à partir de la durée effective (voir useCheckOutReservation
+-- côté client).
 create or replace function public.create_hotel_reservation(
   p_organization_id uuid,
   p_guest_id uuid,
@@ -2251,7 +2404,9 @@ create or replace function public.create_hotel_reservation(
   p_channel text default 'direct',
   p_adults integer default 1,
   p_children integer default 0,
-  p_notes text default null
+  p_notes text default null,
+  p_check_in_at timestamptz default null,
+  p_check_out_at timestamptz default null
 ) returns public.hotel_reservations
 language plpgsql as $$
 declare
@@ -2260,9 +2415,22 @@ declare
   v_room_id uuid;
   v_room_type_id uuid;
   v_rate numeric(14,2);
+  v_billing_unit text := 'night';
+  v_hourly_rate numeric(14,2);
+  v_billed_hours numeric;
 begin
   if p_rooms is null or jsonb_array_length(p_rooms) = 0 then
     raise exception 'Sélectionnez au moins une chambre.';
+  end if;
+
+  if p_rate_plan_id is not null then
+    select billing_unit, hourly_rate into v_billing_unit, v_hourly_rate
+    from public.hotel_rate_plans where id = p_rate_plan_id;
+    v_billing_unit := coalesce(v_billing_unit, 'night');
+  end if;
+
+  if v_billing_unit = 'hour' and (p_check_in_at is null or p_check_out_at is null or p_check_out_at <= p_check_in_at) then
+    raise exception 'Une réservation horaire nécessite une heure d''arrivée et de départ prévues valides.';
   end if;
 
   for v_room in select * from jsonb_array_elements(p_rooms) loop
@@ -2277,10 +2445,13 @@ begin
 
   insert into public.hotel_reservations (
     organization_id, guest_id, corporate_account_id, check_in, check_out,
-    rate_plan_id, channel, adults, children, notes, created_by
+    rate_plan_id, channel, adults, children, notes, created_by,
+    billing_unit, check_in_at, check_out_at
   ) values (
-    p_organization_id, p_guest_id, p_corporate_account_id, p_check_in, p_check_out,
-    p_rate_plan_id, coalesce(p_channel, 'direct'), coalesce(p_adults, 1), coalesce(p_children, 0), p_notes, auth.uid()
+    p_organization_id, p_guest_id, p_corporate_account_id, p_check_in,
+    case when v_billing_unit = 'hour' then p_check_in else p_check_out end,
+    p_rate_plan_id, coalesce(p_channel, 'direct'), coalesce(p_adults, 1), coalesce(p_children, 0), p_notes, auth.uid(),
+    v_billing_unit, p_check_in_at, p_check_out_at
   ) returning * into v_reservation;
 
   for v_room in select * from jsonb_array_elements(p_rooms) loop
@@ -2289,12 +2460,15 @@ begin
 
     if (v_room ? 'rate_amount') and (v_room->>'rate_amount') is not null then
       v_rate := (v_room->>'rate_amount')::numeric;
+    elsif v_billing_unit = 'hour' then
+      v_billed_hours := greatest(1, ceil(extract(epoch from (p_check_out_at - p_check_in_at)) / 3600.0));
+      v_rate := round(v_billed_hours * v_hourly_rate, 2);
     else
       v_rate := public.hotel_compute_room_rate(v_room_type_id, p_check_in, p_check_out, p_rate_plan_id);
     end if;
 
-    insert into public.hotel_reservation_rooms (organization_id, reservation_id, room_id, rate_amount)
-    values (p_organization_id, v_reservation.id, v_room_id, v_rate);
+    insert into public.hotel_reservation_rooms (organization_id, reservation_id, room_id, rate_amount, hourly_rate)
+    values (p_organization_id, v_reservation.id, v_room_id, v_rate, case when v_billing_unit = 'hour' then v_hourly_rate else null end);
   end loop;
 
   insert into public.hotel_folios (organization_id, reservation_id) values (p_organization_id, v_reservation.id);
@@ -2303,8 +2477,8 @@ begin
 end;
 $$;
 
-revoke all on function public.create_hotel_reservation(uuid, uuid, date, date, jsonb, uuid, uuid, text, integer, integer, text) from public;
-grant execute on function public.create_hotel_reservation(uuid, uuid, date, date, jsonb, uuid, uuid, text, integer, integer, text) to authenticated;
+revoke all on function public.create_hotel_reservation(uuid, uuid, date, date, jsonb, uuid, uuid, text, integer, integer, text, timestamptz, timestamptz) from public;
+grant execute on function public.create_hotel_reservation(uuid, uuid, date, date, jsonb, uuid, uuid, text, integer, integer, text, timestamptz, timestamptz) to authenticated;
 
 create table if not exists public.hotel_folio_charges (
   id uuid primary key default gen_random_uuid(),
@@ -2328,6 +2502,93 @@ drop policy if exists hotel_folio_charges_write on public.hotel_folio_charges;
 create policy hotel_folio_charges_write on public.hotel_folio_charges for all to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+
+-- ZegHotel Phase 2 (migration 029) : module Clients (/app/hotel/clients) —
+-- vue CRM des hotel_guests indépendante d'une réservation particulière.
+-- Agrège côté serveur (historique/total dépensé/dernière visite) plutôt
+-- que de faire remonter tous les folios/charges au client. Security
+-- invoker : les policies RLS existantes sur hotel_reservations/
+-- hotel_folios/hotel_folio_charges s'appliquent normalement.
+create or replace function public.hotel_guest_summary(_organization_id uuid)
+returns table (
+  guest_id uuid, total_stays bigint, total_spent numeric, last_check_in date
+)
+language sql stable set search_path = public as $$
+  select
+    r.guest_id,
+    count(distinct r.id) as total_stays,
+    coalesce(sum(fc.amount * fc.quantity), 0) as total_spent,
+    max(r.check_in) as last_check_in
+  from public.hotel_reservations r
+  left join public.hotel_folios f on f.reservation_id = r.id
+  left join public.hotel_folio_charges fc on fc.folio_id = f.id
+  where r.organization_id = _organization_id
+    and r.status <> 'cancelled'
+  group by r.guest_id;
+$$;
+
+revoke all on function public.hotel_guest_summary(uuid) from public;
+grant execute on function public.hotel_guest_summary(uuid) to authenticated;
+
+-- ZegHotel Phase 7 (migration 033) — Point de vente interne (restaurant/
+-- bar/room service) : facturer un article directement sur le folio d'un
+-- client en séjour. Réutilise products/categories/stock_levels/
+-- stock_movements (déjà scopé organization_id, inutilisé côté ZegHotel
+-- jusqu'ici). products_select/stock_levels_select sont déjà ouverts à
+-- tout membre, mais l'écriture de stock_movements est restreinte à
+-- owner/manager/stock ou cashier (aucun rôle assignable côté ZegHotel) —
+-- cette fonction security definer accorde uniquement la capacité étroite
+-- "vendre un produit du catalogue contre une note ouverte", pas un accès
+-- large à stock_movements. Le garde-fou anti-survente
+-- (apply_stock_movement(), migration 026) s'applique normalement.
+create or replace function public.post_hotel_pos_charge(
+  p_organization_id uuid,
+  p_folio_id uuid,
+  p_items jsonb
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_item jsonb;
+  v_product_id uuid;
+  v_quantity numeric(14,3);
+  v_folio public.hotel_folios;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner', 'manager', 'front_desk']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_folio from public.hotel_folios where id = p_folio_id and organization_id = p_organization_id;
+  if not found then
+    raise exception 'Note introuvable.';
+  end if;
+  if v_folio.status <> 'open' then
+    raise exception 'Impossible d''ajouter une charge à une note clôturée.';
+  end if;
+
+  if p_items is null or jsonb_array_length(p_items) = 0 then
+    raise exception 'Aucun article à facturer.';
+  end if;
+
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_product_id := nullif(v_item->>'product_id', '')::uuid;
+    v_quantity := (v_item->>'quantity')::numeric;
+    if v_quantity is null or v_quantity <= 0 then
+      raise exception 'Quantité invalide.';
+    end if;
+
+    insert into public.hotel_folio_charges (organization_id, folio_id, kind, description, amount, quantity)
+    values (p_organization_id, p_folio_id, 'extra', v_item->>'name', (v_item->>'unit_price')::numeric, round(v_quantity)::int);
+
+    if v_product_id is not null then
+      insert into public.stock_movements (organization_id, product_id, type, quantity, reason, created_by)
+      values (p_organization_id, v_product_id, 'sale', v_quantity, 'POS interne ZegHotel', auth.uid());
+    end if;
+  end loop;
+end;
+$$;
+
+revoke all on function public.post_hotel_pos_charge(uuid, uuid, jsonb) from public;
+grant execute on function public.post_hotel_pos_charge(uuid, uuid, jsonb) to authenticated;
 
 -- Nommée hotel_payments (pas payments) : public.payments existe déjà
 -- côté ZegCaisse (paiements de vente) — collision directe évitée.
@@ -2413,16 +2674,17 @@ create table if not exists public.hotel_maintenance_tickets (
 create index if not exists idx_hotel_maintenance_org on public.hotel_maintenance_tickets(organization_id);
 create index if not exists idx_hotel_maintenance_room on public.hotel_maintenance_tickets(room_id);
 alter table public.hotel_maintenance_tickets enable row level security;
--- Tout le monde qui peut voir une chambre peut signaler un incident
--- (housekeeping/front_desk en particulier) ; suivi/résolution réservé à
--- owner/manager/housekeeping (souvent la gouvernante qui gère aussi la
--- coordination avec un technicien).
+-- Module Maintenance détaché (ZegHotel Phase 3, migration 030) :
+-- accessible à TOUT le personnel hôtel pour signaler un incident
+-- (accountant ajouté) ; suivi/résolution réservé à owner/manager/
+-- housekeeping (souvent la gouvernante qui gère aussi la coordination
+-- avec un technicien).
 drop policy if exists hotel_maintenance_select on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_select on public.hotel_maintenance_tickets for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping','accountant']::public.app_role[]));
 drop policy if exists hotel_maintenance_insert on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_insert on public.hotel_maintenance_tickets for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping','accountant']::public.app_role[]));
 drop policy if exists hotel_maintenance_update on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_update on public.hotel_maintenance_tickets for update to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]))

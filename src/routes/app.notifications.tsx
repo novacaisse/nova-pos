@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Bell, TrendingUp, AlertTriangle, UserPlus, FileClock, Clock } from "lucide-react";
+import { Bell, TrendingUp, AlertTriangle, UserPlus, FileClock, Clock, CalendarPlus, CalendarClock, Heart } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useAppNotifications, type NotificationKind } from "@/lib/data/useAppNotifications";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ export const Route = createFileRoute("/app/notifications")({
 const ICONS: Record<NotificationKind, typeof Bell> = {
   big_sale: TrendingUp, stock_low: AlertTriangle, stock_out: AlertTriangle,
   new_member: UserPlus, quote_expiring: FileClock, trial_expiring: Clock,
+  hotel_reservation_created: CalendarPlus, hotel_arrival_tomorrow: CalendarClock, hotel_stay_thankyou: Heart,
 };
 const ICON_COLOR: Record<NotificationKind, string> = {
   big_sale: "text-success bg-success/15",
@@ -19,6 +20,9 @@ const ICON_COLOR: Record<NotificationKind, string> = {
   new_member: "text-accent-foreground bg-accent/25",
   quote_expiring: "text-primary bg-primary/15",
   trial_expiring: "text-primary bg-primary/15",
+  hotel_reservation_created: "text-primary bg-primary/15",
+  hotel_arrival_tomorrow: "text-accent-foreground bg-accent/25",
+  hotel_stay_thankyou: "text-success bg-success/15",
 };
 
 function timeAgo(iso: string) {

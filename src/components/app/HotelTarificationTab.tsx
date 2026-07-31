@@ -37,7 +37,10 @@ export function HotelTarificationTab() {
   const { data: ratePlans = [] } = useHotelRatePlans();
   const upsertPlan = useUpsertHotelRatePlan();
   const deletePlan = useDeleteHotelRatePlan();
-  const [newPlan, setNewPlan] = useState({ room_type_id: "", name: "", includes_breakfast: false, refundable: true, price_adjustment_pct: 0 });
+  const [newPlan, setNewPlan] = useState({
+    room_type_id: "", name: "", includes_breakfast: false, refundable: true, price_adjustment_pct: 0,
+    billing_unit: "night" as "night" | "hour", hourly_rate: 0,
+  });
 
   const { data: settings } = useHotelSettings();
   const updateSettings = useUpdateHotelSettings();
@@ -108,28 +111,48 @@ export function HotelTarificationTab() {
 
       <section className="rounded-2xl border border-border bg-card p-6">
         <h2 className="mb-1 font-display text-lg font-bold">Plans tarifaires</h2>
-        <p className="mb-4 text-xs text-muted-foreground">Ex. « Petit-déjeuner inclus », « Non-remboursable -10% ».</p>
+        <p className="mb-4 text-xs text-muted-foreground">
+          Ex. « Petit-déjeuner inclus », « Non-remboursable -10% », ou une formule à l'heure (courant pour certains
+          établissements) — le prix horaire est alors facturé au check-out, à partir de la durée réelle du séjour.
+        </p>
         <div className="mb-3 space-y-2">
           {ratePlans.map((p) => (
             <div key={p.id} className="flex items-center justify-between rounded-xl border border-border/60 p-3 text-sm">
-              <span>{roomTypes.find((t) => t.id === p.room_type_id)?.name ?? "—"} · {p.name} {p.includes_breakfast && "· PDJ inclus"} {!p.refundable && "· Non remboursable"}</span>
-              <span className="flex items-center gap-3 font-semibold">{p.price_adjustment_pct > 0 ? "+" : ""}{p.price_adjustment_pct}%
+              <span>
+                {roomTypes.find((t) => t.id === p.room_type_id)?.name ?? "—"} · {p.name} {p.includes_breakfast && "· PDJ inclus"} {!p.refundable && "· Non remboursable"}
+                {p.billing_unit === "hour" && <span className="ml-1 rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-bold uppercase text-accent-foreground">Horaire</span>}
+              </span>
+              <span className="flex items-center gap-3 font-semibold">
+                {p.billing_unit === "hour" ? `${formatMoney(p.hourly_rate ?? 0)}/h` : `${p.price_adjustment_pct > 0 ? "+" : ""}${p.price_adjustment_pct}%`}
                 <button onClick={() => deletePlan.mutate(p.id)} className="text-destructive hover:opacity-70"><Trash2 className="h-4 w-4" /></button>
               </span>
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
           <select value={newPlan.room_type_id} onChange={(e) => setNewPlan((s) => ({ ...s, room_type_id: e.target.value }))} className={inp}>
             <option value="">Type…</option>{roomTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <input placeholder="Nom du plan" value={newPlan.name} onChange={(e) => setNewPlan((s) => ({ ...s, name: e.target.value }))} className={inp} />
+          <select value={newPlan.billing_unit} onChange={(e) => setNewPlan((s) => ({ ...s, billing_unit: e.target.value as "night" | "hour" }))} className={inp}>
+            <option value="night">À la nuit</option>
+            <option value="hour">À l'heure</option>
+          </select>
+          {newPlan.billing_unit === "hour" ? (
+            <input type="number" onFocus={selectOnFocus} placeholder="Tarif/heure" value={newPlan.hourly_rate}
+              onChange={(e) => setNewPlan((s) => ({ ...s, hourly_rate: Number(e.target.value) }))} className={inp} />
+          ) : (
+            <input type="number" onFocus={selectOnFocus} placeholder="% ajust." value={newPlan.price_adjustment_pct}
+              onChange={(e) => setNewPlan((s) => ({ ...s, price_adjustment_pct: Number(e.target.value) }))} className={inp} />
+          )}
           <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={newPlan.includes_breakfast} onChange={(e) => setNewPlan((s) => ({ ...s, includes_breakfast: e.target.checked }))} /> PDJ inclus</label>
-          <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={newPlan.refundable} onChange={(e) => setNewPlan((s) => ({ ...s, refundable: e.target.checked }))} /> Remboursable</label>
           <div className="flex gap-2">
-            <input type="number" onFocus={selectOnFocus} placeholder="% ajust." value={newPlan.price_adjustment_pct} onChange={(e) => setNewPlan((s) => ({ ...s, price_adjustment_pct: Number(e.target.value) }))} className={inp} />
-            <button disabled={!newPlan.room_type_id || !newPlan.name.trim() || upsertPlan.isPending}
-              onClick={() => { upsertPlan.mutate(newPlan); setNewPlan({ room_type_id: "", name: "", includes_breakfast: false, refundable: true, price_adjustment_pct: 0 }); }}
+            <label className="flex flex-1 items-center gap-1.5 text-xs"><input type="checkbox" checked={newPlan.refundable} onChange={(e) => setNewPlan((s) => ({ ...s, refundable: e.target.checked }))} /> Remboursable</label>
+            <button disabled={!newPlan.room_type_id || !newPlan.name.trim() || (newPlan.billing_unit === "hour" && !newPlan.hourly_rate) || upsertPlan.isPending}
+              onClick={() => {
+                upsertPlan.mutate(newPlan);
+                setNewPlan({ room_type_id: "", name: "", includes_breakfast: false, refundable: true, price_adjustment_pct: 0, billing_unit: "night", hourly_rate: 0 });
+              }}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-4 w-4" /></button>
           </div>
         </div>

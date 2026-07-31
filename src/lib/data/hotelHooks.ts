@@ -26,9 +26,13 @@ export type HotelRoom = {
   // optionnel pour couvrir les rares lectures brutes de hotel_rooms seul.
   room_type?: HotelRoomType | null;
 };
+export type BillingUnit = "night" | "hour";
 export type HotelRatePlan = {
   id: string; organization_id: string; room_type_id: string; name: string;
   includes_breakfast: boolean; refundable: boolean; price_adjustment_pct: number;
+  // Nuitée ET horaire coexistent (ZegHotel Phase 1) — hourly_rate requis
+  // si billing_unit = 'hour' (imposé en base, migration 028).
+  billing_unit: BillingUnit; hourly_rate: number | null;
   created_at: string;
 };
 export type HotelSeasonalRate = {
@@ -56,11 +60,24 @@ export type HotelSettings = {
 export type HotelChannel = {
   id: string; organization_id: string; name: string; is_active: boolean;
   external_id: string | null; created_at: string;
+  // Migration 034 — ZegHotel Phase 8 : gestion manuelle par canal.
+  notes: string | null; manual_rate: number | null;
 };
 export type HotelGuest = {
   id: string; organization_id: string; full_name: string; email: string | null;
   phone: string | null; id_document_type: string | null; id_document_number: string | null;
   nationality: string | null; address: string | null; notes: string | null; created_at: string;
+  // Recommandé par rapport à un âge stocké, qui deviendrait faux avec le
+  // temps (ZegHotel Phase 1).
+  date_of_birth: string | null;
+};
+// Lecture "contact seul" (hotel_guest_contact(), migration 028) : pour les
+// rôles qui n'ont pas besoin des données d'identité (CNI/passeport/
+// adresse/date de naissance) — accountant en particulier. Masquage fait
+// en SQL (security definer), pas seulement côté client.
+export type HotelGuestContact = {
+  id: string; organization_id: string; full_name: string; email: string | null;
+  phone: string | null; nationality: string | null; notes: string | null; created_at: string;
 };
 export type ReservationStatus = "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled" | "no_show";
 export type HotelReservation = {
@@ -69,16 +86,31 @@ export type HotelReservation = {
   rate_plan_id: string | null; channel: string; adults: number; children: number;
   notes: string | null; created_by: string | null; created_at: string;
   cancelled_at: string | null; cancellation_reason: string | null;
+  // Nuitée ET horaire (ZegHotel Phase 1, migration 028) — check_in/check_out
+  // (date) restent la source de vérité "jour occupé" pour tout le reste du
+  // système (dashboard, rapports, moteur de tarification) quel que soit
+  // billing_unit. check_in_at/check_out_at = heures prévues (horaire
+  // uniquement) ; actual_* = heures réelles, posées au check-in/check-out,
+  // utilisées pour calculer la charge horaire réelle au check-out.
+  billing_unit: BillingUnit;
+  check_in_at: string | null; check_out_at: string | null;
+  actual_check_in_at: string | null; actual_check_out_at: string | null;
 };
 export type HotelReservationRoom = {
   id: string; organization_id: string; reservation_id: string; room_id: string;
   rate_amount: number; check_in: string; check_out: string; status: ReservationStatus;
   created_at: string;
+  billing_unit: BillingUnit; check_in_at: string | null; check_out_at: string | null;
+  // Figé à la réservation (indépendant d'un changement ultérieur de la
+  // formule tarifaire) — sert au calcul de la charge réelle au check-out.
+  hourly_rate: number | null;
 };
 export type FolioStatus = "open" | "closed";
 export type HotelFolio = {
   id: string; organization_id: string; reservation_id: string; status: FolioStatus;
   opened_at: string; closed_at: string | null; created_at: string;
+  // Facturation différée (ZegHotel Phase 4, migration 031).
+  billed_to_corporate: boolean; corporate_paid_at: string | null;
 };
 export type FolioChargeKind = "room" | "extra" | "penalty" | "tax" | "discount";
 export type HotelFolioCharge = {
@@ -370,7 +402,7 @@ export function useUpdateHotelSettings() {
   });
 }
 
-// ============ CHANNELS (structure V1) ============
+// ============ CHANNELS (Phase 8 — gestion manuelle, pas de sync API) ============
 export function useHotelChannels() {
   const organizationId = useOrganizationId();
   return useQuery({
@@ -382,6 +414,28 @@ export function useHotelChannels() {
       if (error) throw error;
       return data as HotelChannel[];
     },
+  });
+}
+export function useUpsertHotelChannel() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (c: Partial<HotelChannel> & { name: string }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.from("hotel_channels")
+        .upsert({ ...c, organization_id: organizationId }).select().single();
+      if (error) throw error; return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_channels", organizationId] }),
+  });
+}
+export function useDeleteHotelChannel() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("hotel_channels").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_channels", organizationId] }),
   });
 }
 
@@ -400,6 +454,23 @@ export function useHotelGuests(search?: string) {
     },
   });
 }
+// Lecture "contact seul" (nom/email/téléphone) via hotel_guest_contact()
+// (migration 028) — pour les contextes accessibles à accountant (dashboard
+// arrivées/départs) qui n'ont pas besoin des données d'identité
+// (CNI/passeport/adresse/date de naissance), désormais réservées à
+// owner/manager/front_desk directement sur hotel_guests.
+export function useHotelGuestContacts() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_guest_contacts", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelGuestContact[]> => {
+      const { data, error } = await supabase.rpc("hotel_guest_contact", { _organization_id: organizationId! });
+      if (error) throw error;
+      return (data ?? []) as HotelGuestContact[];
+    },
+  });
+}
 export function useUpsertHotelGuest() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
@@ -410,6 +481,80 @@ export function useUpsertHotelGuest() {
       if (error) throw error; return data as HotelGuest;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_guests", organizationId] }),
+  });
+}
+// on delete restrict sur hotel_reservations.guest_id : la suppression
+// échoue (erreur remontée à l'appelant) si le client a au moins une
+// réservation — voulu, un client avec un historique de séjours ne doit
+// pas pouvoir disparaître silencieusement (facturation/rapports).
+export function useDeleteHotelGuest() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("hotel_guests").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_guests", organizationId] }),
+  });
+}
+
+// ============ MODULE CLIENTS (ZegHotel Phase 2) ============
+// hotel_guest_summary() (migration 029) agrège côté serveur (nombre de
+// séjours, total dépensé, dernière arrivée) — évite de faire remonter tous
+// les folios/charges de l'établissement au client pour calculer des
+// totaux qui grossissent avec l'historique.
+export type HotelGuestSummary = {
+  guest_id: string; total_stays: number; total_spent: number; last_check_in: string | null;
+};
+export function useHotelGuestSummaries() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_guest_summary", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<Record<string, HotelGuestSummary>> => {
+      const { data, error } = await supabase.rpc("hotel_guest_summary", { _organization_id: organizationId! });
+      if (error) throw error;
+      return Object.fromEntries(((data ?? []) as HotelGuestSummary[]).map((s) => [s.guest_id, s]));
+    },
+  });
+}
+export type HotelGuestStay = {
+  reservation_id: string; check_in: string; check_out: string; status: ReservationStatus;
+  billing_unit: BillingUnit; total: number;
+};
+export function useHotelGuestStays(guestId: string | null) {
+  return useQuery({
+    queryKey: ["hotel_guest_stays", guestId],
+    enabled: !!guestId,
+    queryFn: async (): Promise<HotelGuestStay[]> => {
+      const { data: reservations, error } = await supabase.from("hotel_reservations")
+        .select("id, check_in, check_out, status, billing_unit")
+        .eq("guest_id", guestId!).order("check_in", { ascending: false });
+      if (error) throw error;
+      const reservationIds = (reservations ?? []).map((r: any) => r.id);
+      if (!reservationIds.length) return [];
+
+      const { data: folios, error: folioErr } = await supabase.from("hotel_folios")
+        .select("id, reservation_id").in("reservation_id", reservationIds);
+      if (folioErr) throw folioErr;
+      const folioIdByReservation = new Map<string, string>((folios ?? []).map((f: any) => [f.reservation_id, f.id]));
+      const folioIds = (folios ?? []).map((f: any) => f.id);
+
+      const totalByFolio = new Map<string, number>();
+      if (folioIds.length) {
+        const { data: charges, error: chargesErr } = await supabase.from("hotel_folio_charges")
+          .select("folio_id, amount, quantity").in("folio_id", folioIds);
+        if (chargesErr) throw chargesErr;
+        for (const c of (charges ?? []) as any[]) {
+          totalByFolio.set(c.folio_id, (totalByFolio.get(c.folio_id) ?? 0) + c.amount * c.quantity);
+        }
+      }
+
+      return (reservations ?? []).map((r: any) => ({
+        reservation_id: r.id, check_in: r.check_in, check_out: r.check_out, status: r.status, billing_unit: r.billing_unit,
+        total: totalByFolio.get(folioIdByReservation.get(r.id) ?? "") ?? 0,
+      }));
+    },
   });
 }
 
@@ -459,6 +604,10 @@ export type CreateReservationInput = {
   // tarifaire, migration 027). Un nombre = override manuel explicite,
   // toujours prioritaire.
   rooms: { room_id: string; rate_amount: number | null }[];
+  // Requis uniquement si la formule tarifaire choisie est horaire
+  // (billing_unit = 'hour', ZegHotel Phase 1) — le serveur les impose
+  // (migration 028), non nécessaires pour une réservation nuitée.
+  check_in_at?: string | null; check_out_at?: string | null;
 };
 // RPC atomique (migration 027) plutôt que 3 écritures client séparées
 // (hotel_reservations, hotel_reservation_rooms, hotel_folios) : vérifie
@@ -486,6 +635,8 @@ export function useCreateHotelReservation() {
         p_adults: input.adults ?? 1,
         p_children: input.children ?? 0,
         p_notes: input.notes ?? null,
+        p_check_in_at: input.check_in_at ?? null,
+        p_check_out_at: input.check_out_at ?? null,
       });
       if (error) throw error;
       return data as HotelReservation;
@@ -529,17 +680,27 @@ export function useUpdateHotelReservation() {
 // la charge "room" ci-dessus. Le mode de calcul exact (par personne, par
 // chambre, plafonné...) varie selon la réglementation locale ; à ajuster
 // dans ce hook si celui d'Emmanuel diffère.
+//
+// Nuitée ET horaire (ZegHotel Phase 1, migration 028) : une réservation
+// horaire n'a généralement pas d'heure de départ connue à l'avance — la
+// charge chambre n'est donc PAS postée ici pour elle (ni la taxe de
+// séjour, un concept nuitée par personne/par nuit qui ne s'applique pas à
+// un passage horaire), seulement actual_check_in_at est enregistré ; le
+// montant réel est calculé et posté au check-out (useCheckOutReservation)
+// à partir de la durée effectivement écoulée.
 export function useCheckInReservation() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       if (!organizationId) throw new Error("Aucune organisation sélectionnée");
-      const { error: resErr } = await supabase.from("hotel_reservations").update({ status: "checked_in" }).eq("id", id);
+      const { error: resErr } = await supabase.from("hotel_reservations")
+        .update({ status: "checked_in", actual_check_in_at: new Date().toISOString() }).eq("id", id);
       if (resErr) throw resErr;
 
       const { data: reservation, error: reservationErr } = await supabase.from("hotel_reservations")
-        .select("adults, children").eq("id", id).maybeSingle();
+        .select("adults, children, billing_unit").eq("id", id).maybeSingle();
       if (reservationErr) throw reservationErr;
+      if (reservation?.billing_unit === "hour") return;
 
       const { data: folio, error: folioErr } = await supabase.from("hotel_folios")
         .select("id").eq("reservation_id", id).maybeSingle();
@@ -595,12 +756,57 @@ export function useCheckInReservation() {
 // clôture financière du folio reste une action explicite séparée
 // (useCloseFolio), pour laisser la réception encaisser un solde en retard
 // avant de fermer la note.
+//
+// Horaire (ZegHotel Phase 1, migration 028) : c'est ICI, et seulement ici,
+// que la charge chambre est calculée et postée pour une réservation
+// horaire — à partir de la durée réellement écoulée entre
+// actual_check_in_at et maintenant, arrondie à l'heure supérieure (1h
+// minimum facturée ; règle documentée, pas encore configurable par
+// établissement). hourly_rate est celui figé sur hotel_reservation_rooms
+// à la réservation (indépendant d'un changement ultérieur de la formule
+// tarifaire) — pas une relecture de hotel_rate_plans.hourly_rate.
 export function useCheckOutReservation() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error: resErr } = await supabase.from("hotel_reservations").update({ status: "checked_out" }).eq("id", id);
+      const nowIso = new Date().toISOString();
+      const { data: reservation, error: resSelErr } = await supabase.from("hotel_reservations")
+        .select("billing_unit, actual_check_in_at").eq("id", id).maybeSingle();
+      if (resSelErr) throw resSelErr;
+
+      const { error: resErr } = await supabase.from("hotel_reservations")
+        .update({ status: "checked_out", actual_check_out_at: nowIso }).eq("id", id);
       if (resErr) throw resErr;
+
+      if (reservation?.billing_unit === "hour" && reservation.actual_check_in_at) {
+        const { data: folio, error: folioErr } = await supabase.from("hotel_folios")
+          .select("id").eq("reservation_id", id).maybeSingle();
+        if (folioErr) throw folioErr;
+        if (folio) {
+          const { data: existingRoomCharges, error: existErr } = await supabase.from("hotel_folio_charges")
+            .select("id").eq("folio_id", folio.id).eq("kind", "room").limit(1);
+          if (existErr) throw existErr;
+          if (!existingRoomCharges || existingRoomCharges.length === 0) {
+            const { data: chargeRooms, error: chargeRoomsErr } = await supabase.from("hotel_reservation_rooms")
+              .select("hourly_rate, room:hotel_rooms(number, room_type:hotel_room_types(name))")
+              .eq("reservation_id", id);
+            if (chargeRoomsErr) throw chargeRoomsErr;
+
+            const elapsedMs = new Date(nowIso).getTime() - new Date(reservation.actual_check_in_at).getTime();
+            const billedHours = Math.max(1, Math.ceil(elapsedMs / 3_600_000));
+            const charges = (chargeRooms ?? []).map((rr: any) => ({
+              organization_id: organizationId, folio_id: folio.id, kind: "room" as FolioChargeKind,
+              description: `Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""}`.trim(),
+              amount: rr.hourly_rate ?? 0, quantity: billedHours, charge_date: nowIso.slice(0, 10),
+            }));
+            if (charges.length) {
+              const { error: insErr } = await supabase.from("hotel_folio_charges").insert(charges);
+              if (insErr) throw insErr;
+            }
+          }
+        }
+      }
+
       const { data: rooms, error: roomsErr } = await supabase.from("hotel_reservation_rooms")
         .select("room_id").eq("reservation_id", id);
       if (roomsErr) throw roomsErr;
@@ -615,6 +821,7 @@ export function useCheckOutReservation() {
       qc.invalidateQueries({ queryKey: ["hotel_reservations", organizationId] });
       qc.invalidateQueries({ queryKey: ["hotel_reservation", id] });
       qc.invalidateQueries({ queryKey: ["hotel_rooms", organizationId] });
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" });
     },
   });
 }
@@ -670,10 +877,101 @@ export function useAddFolioPayment() {
     onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" }),
   });
 }
+// ============ POINT DE VENTE INTERNE (ZegHotel Phase 7) ============
+// Notes ouvertes des séjours en cours (checked_in) — cible possible d'une
+// vente restaurant/bar/room service. Noms de clients via
+// hotel_guest_contact() (pas un embed direct sur hotel_guests, cf. Phase 1).
+export type HotelActiveFolio = {
+  folio_id: string; reservation_id: string; guest_name: string; room_numbers: string;
+};
+export function useHotelActiveFolios() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_active_folios", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelActiveFolio[]> => {
+      const { data: reservations, error } = await supabase.from("hotel_reservations")
+        .select("id, guest_id, reservation_rooms:hotel_reservation_rooms(room:hotel_rooms(number))")
+        .eq("organization_id", organizationId!).eq("status", "checked_in");
+      if (error) throw error;
+      const reservationIds = (reservations ?? []).map((r: any) => r.id);
+      if (!reservationIds.length) return [];
+
+      const [{ data: folios, error: folioErr }, { data: guestContacts, error: guestErr }] = await Promise.all([
+        supabase.from("hotel_folios").select("id, reservation_id").in("reservation_id", reservationIds).eq("status", "open"),
+        supabase.rpc("hotel_guest_contact", { _organization_id: organizationId! }),
+      ]);
+      if (folioErr) throw folioErr;
+      if (guestErr) throw guestErr;
+
+      const guestNameById = new Map(((guestContacts ?? []) as HotelGuestContact[]).map((g) => [g.id, g.full_name]));
+      const reservationById = new Map<string, any>((reservations ?? []).map((r: any) => [r.id, r]));
+
+      return (folios ?? []).flatMap((f: any) => {
+        const r = reservationById.get(f.reservation_id);
+        if (!r) return [];
+        const roomNumbers = (r.reservation_rooms ?? []).map((rr: any) => rr.room?.number).filter(Boolean).join(", ");
+        return [{
+          folio_id: f.id, reservation_id: f.reservation_id,
+          guest_name: guestNameById.get(r.guest_id) ?? "—", room_numbers: roomNumbers,
+        }];
+      });
+    },
+  });
+}
+
+// RPC atomique + security definer (migration 033) : front_desk n'a par
+// ailleurs aucun droit d'écriture sur stock_movements (aucun rôle
+// "cashier"/"stock" assignable côté ZegHotel) — cette fonction accorde
+// uniquement la capacité étroite "vendre un produit du catalogue contre
+// une note ouverte", pas un accès large à la table.
+export function usePostHotelPosCharge() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ folioId, items }: {
+      folioId: string;
+      items: { product_id: string | null; name: string; quantity: number; unit_price: number }[];
+    }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { error } = await supabase.rpc("post_hotel_pos_charge", {
+        p_organization_id: organizationId, p_folio_id: folioId, p_items: items,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" });
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
+    },
+  });
+}
+
 export function folioBalance(folio: HotelFolioDetail): number {
   const charges = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
   const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
   return charges - paid;
+}
+
+// Nuits occupées par jour dans [rangeStart, rangeEnd) — une réservation
+// active (ni annulée ni no-show) compte une nuit par chambre par jour
+// couvert. Partagé entre app.hotel.index.tsx (Phase 6 — sélecteur de
+// période universel) et app.hotel.rapports.tsx (déjà en place).
+export function nightsInRange(reservations: HotelReservationRow[] | undefined, rangeStart: string, rangeEnd: string) {
+  let nights = 0; let revenue = 0;
+  for (const res of reservations ?? []) {
+    for (const rr of res.reservation_rooms) {
+      if (rr.status === "cancelled" || rr.status === "no_show") continue;
+      const start = rr.check_in < rangeStart ? rangeStart : rr.check_in;
+      const end = rr.check_out > rangeEnd ? rangeEnd : rr.check_out;
+      const n = Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 86400000);
+      if (n > 0) {
+        nights += n;
+        const totalNights = Math.max(1, (new Date(rr.check_out).getTime() - new Date(rr.check_in).getTime()) / 86400000);
+        revenue += (rr.rate_amount / totalNights) * n;
+      }
+    }
+  }
+  return { nights, revenue };
 }
 // Recalcule le solde depuis la base (pas depuis l'objet folio déjà en
 // mémoire côté client) avant de clôturer — sans ce garde-fous, une note
@@ -682,10 +980,16 @@ export function folioBalance(folio: HotelFolioDetail): number {
 // réglé. Une note avec un solde à régler autrement (remise, perte
 // commerciale) doit d'abord recevoir une charge "discount" qui l'amène à 0
 // — pas de clôture forcée en dehors de ce chemin.
+//
+// billToCorporate (ZegHotel Phase 4, migration 031) : seule exception au
+// solde-à-zéro — une réservation rattachée à un compte entreprise peut être
+// clôturée avec un solde positif restant, marqué "à facturer à
+// l'entreprise" (billed_to_corporate). Un solde négatif (trop perçu) reste
+// bloqué dans tous les cas, facturation différée ou non.
 export function useCloseFolio() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (folioId: string) => {
+    mutationFn: async ({ folioId, billToCorporate }: { folioId: string; billToCorporate?: boolean }) => {
       const chargesRes = await supabase.from("hotel_folio_charges").select("amount, quantity").eq("folio_id", folioId);
       if (chargesRes.error) throw chargesRes.error;
       const paymentsRes = await supabase.from("hotel_payments").select("amount, kind").eq("folio_id", folioId);
@@ -695,15 +999,108 @@ export function useCloseFolio() {
       const totalCharges = charges.reduce((s, c) => s + Number(c.amount) * Number(c.quantity), 0);
       const totalPaid = payments.reduce((s, p) => s + (p.kind === "refund" ? -Number(p.amount) : Number(p.amount)), 0);
       const balance = totalCharges - totalPaid;
-      if (Math.round(balance) !== 0) {
+      const canBillCorporate = billToCorporate && balance > 0;
+      if (Math.round(balance) !== 0 && !canBillCorporate) {
         throw new Error(`Impossible de clôturer : solde non nul (${balance > 0 ? "reste dû" : "trop perçu"}). Encaissez le solde ou ajoutez une charge d'ajustement avant de clôturer.`);
       }
 
       const { error } = await supabase.from("hotel_folios")
-        .update({ status: "closed", closed_at: new Date().toISOString() }).eq("id", folioId);
+        .update({ status: "closed", closed_at: new Date().toISOString(), billed_to_corporate: !!canBillCorporate })
+        .eq("id", folioId);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" }),
+    onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" || q.queryKey[0] === "hotel_corporate_invoices" }),
+  });
+}
+
+// Règlement d'une facture entreprise en attente (ZegHotel Phase 4) : si un
+// solde reste dû, enregistre un hotel_payments (bank_transfer) pour le
+// montant restant — folioBalance() retombe alors naturellement à 0, aucun
+// cas particulier ailleurs — puis marque corporate_paid_at (marqueur
+// en attente/réglé pour le relevé mensuel).
+export function useMarkCorporateInvoicePaid() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (folioId: string) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const chargesRes = await supabase.from("hotel_folio_charges").select("amount, quantity").eq("folio_id", folioId);
+      if (chargesRes.error) throw chargesRes.error;
+      const paymentsRes = await supabase.from("hotel_payments").select("amount, kind").eq("folio_id", folioId);
+      if (paymentsRes.error) throw paymentsRes.error;
+      const charges = (chargesRes.data ?? []) as { amount: number; quantity: number }[];
+      const payments = (paymentsRes.data ?? []) as { amount: number; kind: HotelPaymentKind }[];
+      const totalCharges = charges.reduce((s, c) => s + Number(c.amount) * Number(c.quantity), 0);
+      const totalPaid = payments.reduce((s, p) => s + (p.kind === "refund" ? -Number(p.amount) : Number(p.amount)), 0);
+      const balance = totalCharges - totalPaid;
+      if (balance > 0) {
+        const { error: payErr } = await supabase.from("hotel_payments").insert({
+          organization_id: organizationId, folio_id: folioId, amount: balance,
+          method: "bank_transfer", kind: "payment", reference: "Règlement compte entreprise",
+        });
+        if (payErr) throw payErr;
+      }
+      const { error } = await supabase.from("hotel_folios")
+        .update({ corporate_paid_at: new Date().toISOString() }).eq("id", folioId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "hotel_folio" || q.queryKey[0] === "hotel_corporate_invoices" }),
+  });
+}
+
+// Liste des notes facturées à un compte entreprise (ZegHotel Phase 4) —
+// noms de clients via hotel_guest_contact() (pas un embed direct sur
+// hotel_guests) : cet écran reste accessible à accountant, qui n'a plus
+// accès aux données d'identité depuis le durcissement RLS de la Phase 1.
+export type HotelCorporateInvoice = {
+  folio_id: string; reservation_id: string; corporate_account_id: string | null;
+  guest_name: string; check_out: string; closed_at: string | null;
+  total: number; corporate_paid_at: string | null;
+};
+export function useHotelCorporateInvoices() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_corporate_invoices", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelCorporateInvoice[]> => {
+      const { data: folios, error } = await supabase.from("hotel_folios")
+        .select("id, reservation_id, closed_at, corporate_paid_at")
+        .eq("organization_id", organizationId!).eq("billed_to_corporate", true)
+        .order("closed_at", { ascending: false });
+      if (error) throw error;
+      const folioIds = (folios ?? []).map((f: any) => f.id);
+      if (!folioIds.length) return [];
+      const reservationIds = (folios ?? []).map((f: any) => f.reservation_id);
+
+      const [{ data: reservations, error: resErr }, { data: charges, error: chErr }, { data: payments, error: payErr }, { data: guestContacts, error: guestErr }] = await Promise.all([
+        supabase.from("hotel_reservations").select("id, guest_id, corporate_account_id, check_out").in("id", reservationIds),
+        supabase.from("hotel_folio_charges").select("folio_id, amount, quantity").in("folio_id", folioIds),
+        supabase.from("hotel_payments").select("folio_id, amount, kind").in("folio_id", folioIds),
+        supabase.rpc("hotel_guest_contact", { _organization_id: organizationId! }),
+      ]);
+      if (resErr) throw resErr;
+      if (chErr) throw chErr;
+      if (payErr) throw payErr;
+      if (guestErr) throw guestErr;
+
+      const reservationById = new Map<string, any>((reservations ?? []).map((r: any) => [r.id, r]));
+      const guestNameById = new Map(((guestContacts ?? []) as HotelGuestContact[]).map((g) => [g.id, g.full_name]));
+      const totalByFolio = new Map<string, number>();
+      for (const c of (charges ?? []) as any[]) totalByFolio.set(c.folio_id, (totalByFolio.get(c.folio_id) ?? 0) + c.amount * c.quantity);
+      for (const p of (payments ?? []) as any[]) {
+        const delta = p.kind === "refund" ? p.amount : -p.amount;
+        totalByFolio.set(p.folio_id, (totalByFolio.get(p.folio_id) ?? 0) + delta);
+      }
+
+      return (folios ?? []).flatMap((f: any) => {
+        const r = reservationById.get(f.reservation_id);
+        if (!r) return [];
+        return [{
+          folio_id: f.id, reservation_id: f.reservation_id, corporate_account_id: r.corporate_account_id,
+          guest_name: guestNameById.get(r.guest_id) ?? "—", check_out: r.check_out, closed_at: f.closed_at,
+          total: totalByFolio.get(f.id) ?? 0, corporate_paid_at: f.corporate_paid_at,
+        }];
+      });
+    },
   });
 }
 
@@ -807,6 +1204,8 @@ export function useUpdateMaintenanceTicket() {
 }
 
 // ============ DASHBOARD ============
+export type HotelDashboardReservation = HotelReservation & { guest: HotelGuestContact | null };
+
 export function useHotelDashboardStats(today: string) {
   const organizationId = useOrganizationId();
   return useQuery({
@@ -821,21 +1220,32 @@ export function useHotelDashboardStats(today: string) {
       // silencieusement (React Query gardait `stats` à undefined) — d'où
       // le "0/0 chambres" permanent malgré totalRooms correctement récupéré
       // juste au-dessus dans le même Promise.all.
-      const [{ count: totalRooms }, { data: arrivals }, { data: departures }, { count: occupied }] = await Promise.all([
+      //
+      // guest:hotel_guests(*) remplacé par hotel_guest_contact() (migration
+      // 028) : ce tableau de bord est accessible à accountant, qui n'a plus
+      // accès à hotel_guests en RLS depuis le durcissement des données
+      // d'identité — l'embed PostgREST renverrait guest: null pour lui
+      // sinon (RLS bloque la ligne entière, pas seulement les colonnes
+      // sensibles), faisant disparaître le nom du client sur le dashboard.
+      const [{ count: totalRooms }, { data: arrivals }, { data: departures }, { count: occupied }, { data: guestContacts }] = await Promise.all([
         supabase.from("hotel_rooms").select("id", { count: "exact", head: true }).eq("organization_id", organizationId!),
-        supabase.from("hotel_reservations").select("*, guest:hotel_guests(*)").eq("organization_id", organizationId!)
+        supabase.from("hotel_reservations").select("*").eq("organization_id", organizationId!)
           .eq("check_in", today).in("status", ["pending", "confirmed"]),
-        supabase.from("hotel_reservations").select("*, guest:hotel_guests(*)").eq("organization_id", organizationId!)
+        supabase.from("hotel_reservations").select("*").eq("organization_id", organizationId!)
           .eq("check_out", today).eq("status", "checked_in"),
         supabase.from("hotel_reservations").select("id", { count: "exact", head: true }).eq("organization_id", organizationId!)
           .eq("status", "checked_in").lte("check_in", today).gt("check_out", today),
+        supabase.rpc("hotel_guest_contact", { _organization_id: organizationId! }),
       ]);
+      const guestById = new Map((guestContacts ?? []).map((g: HotelGuestContact) => [g.id, g]));
+      const withGuest = (rows: any[] | null): HotelDashboardReservation[] =>
+        (rows ?? []).map((r) => ({ ...r, guest: guestById.get(r.guest_id) ?? null }));
       return {
         totalRooms: totalRooms ?? 0,
         occupied: occupied ?? 0,
         occupancyPct: totalRooms ? Math.round(((occupied ?? 0) / totalRooms) * 100) : 0,
-        arrivals: (arrivals ?? []) as HotelReservationRow[],
-        departures: (departures ?? []) as HotelReservationRow[],
+        arrivals: withGuest(arrivals),
+        departures: withGuest(departures),
       };
     },
   });

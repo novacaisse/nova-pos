@@ -1,7 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { BedDouble, CalendarRange, DoorClosed, LogIn, LogOut, Sparkle, Users } from "lucide-react";
+import { useMemo, useState } from "react";
+import { BedDouble, CalendarRange, DoorClosed, LogIn, LogOut, Sparkle, Users, TrendingUp, Percent, Coins } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useHotelDashboardStats, useHotelRooms } from "@/lib/data/hotelHooks";
+import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
+import { useFormatMoney } from "@/lib/data/hooks";
+import { useHotelDashboardStats, useHotelRooms, useHotelReservations, nightsInRange } from "@/lib/data/hotelHooks";
 
 export const Route = createFileRoute("/app/hotel/")({
   component: HotelDashboard,
@@ -10,11 +13,31 @@ export const Route = createFileRoute("/app/hotel/")({
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
+function toISO(d: Date) { return d.toISOString().slice(0, 10); }
 
 function HotelDashboard() {
   const today = todayISO();
   const { data: stats, isLoading } = useHotelDashboardStats(today);
   const { data: rooms = [] } = useHotelRooms();
+  const formatMoney = useFormatMoney();
+
+  // Sélecteur de période universel (ZegHotel Phase 6) — les cartes
+  // "Arrivées/Départs aujourd'hui" ci-dessous restent volontairement fixes
+  // sur le jour courant (la réception a besoin de savoir qui arrive
+  // AUJOURD'HUI, quelle que soit la période choisie pour l'analyse) ; ce
+  // bloc-ci porte les indicateurs réellement période-dépendants (revenu,
+  // occupation) — même préréglages que ZegCaisse et /app/hotel/rapports.
+  const [period, setPeriod] = useState<Period>("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const { from: fromDate, to: toDate } = periodRange(period, customFrom, customTo);
+  const rangeStart = toISO(fromDate);
+  const rangeEnd = toISO(toDate);
+  const periodDays = Math.max(1, Math.round((toDate.getTime() - fromDate.getTime()) / 86400000));
+  const { data: periodReservations } = useHotelReservations(rangeStart, rangeEnd);
+  const { nights: periodNights, revenue: periodRevenue } = useMemo(
+    () => nightsInRange(periodReservations, rangeStart, rangeEnd), [periodReservations, rangeStart, rangeEnd]);
+  const periodOccupancyPct = rooms.length ? Math.round((periodNights / (rooms.length * periodDays)) * 100) : 0;
 
   if (!isLoading && rooms.length === 0) {
     return (
@@ -53,6 +76,20 @@ function HotelDashboard() {
             icon={<LogOut className="h-5 w-5" />} accent="success" />
           <StatCard label="Chambres" value={String(stats?.totalRooms ?? 0)}
             icon={<DoorClosed className="h-5 w-5" />} />
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-sm font-semibold">Indicateurs de la période</div>
+            <PeriodSelector period={period} onChange={setPeriod}
+              customFrom={customFrom} customTo={customTo}
+              onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label="Revenu hébergement" value={formatMoney(periodRevenue)} icon={<Coins className="h-5 w-5" />} accent="accent" />
+            <StatCard label="Nuits vendues" value={String(periodNights)} icon={<TrendingUp className="h-5 w-5" />} />
+            <StatCard label="Taux d'occupation (période)" value={`${periodOccupancyPct}%`} icon={<Percent className="h-5 w-5" />} accent="primary" />
+          </div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
