@@ -7,7 +7,7 @@
 // établissement, comme aujourd'hui.
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Search, Mail, Phone, Store, BedDouble } from "lucide-react";
+import { Search, Mail, Phone, Store, BedDouble, UtensilsCrossed } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useAdminAccounts, type AdminAccount } from "@/lib/data/adminHooks";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,10 @@ const STATUS_COLOR: Record<string, string> = {
   active: "bg-success/15 text-success", trialing: "bg-accent/25 text-accent-foreground",
   past_due: "bg-destructive/15 text-destructive", canceled: "bg-muted text-muted-foreground", expired: "bg-muted text-muted-foreground",
 };
+const APPS = ["pos", "hotel", "resto"] as const;
+const APP_LABEL: Record<(typeof APPS)[number], string> = { pos: "ZegCaisse", hotel: "ZegHotel", resto: "ZegResto" };
+const APP_UNIT_LABEL: Record<(typeof APPS)[number], string> = { pos: "boutique(s)", hotel: "établissement(s)", resto: "restaurant(s)" };
+const APP_ICON: Record<(typeof APPS)[number], typeof Store> = { pos: Store, hotel: BedDouble, resto: UtensilsCrossed };
 
 function AdminComptes() {
   const { data: accounts = [], isLoading } = useAdminAccounts();
@@ -38,6 +42,7 @@ function AdminComptes() {
   }, [accounts, q]);
 
   const withHotel = accounts.filter((a) => a.subscriptions.some((s) => s.app_module === "hotel")).length;
+  const withResto = accounts.filter((a) => a.subscriptions.some((s) => s.app_module === "resto")).length;
   const pastDue = accounts.filter((a) => a.subscriptions.some((s) => s.status === "past_due")).length;
 
   return (
@@ -45,9 +50,10 @@ function AdminComptes() {
       <PageHeader title="Comptes" subtitle="Unité de facturation réelle : compte → abonnement par application → établissements" />
 
       <div className="space-y-4 p-5 sm:p-8">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Comptes" value={String(accounts.length)} icon={<Store className="h-5 w-5" />} accent="primary" />
           <StatCard label="Avec ZegHotel actif" value={String(withHotel)} icon={<BedDouble className="h-5 w-5" />} accent="accent" />
+          <StatCard label="Avec ZegResto actif" value={String(withResto)} icon={<UtensilsCrossed className="h-5 w-5" />} accent="accent" />
           <StatCard label="Paiement en retard" value={String(pastDue)} icon={<Mail className="h-5 w-5" />} accent="destructive" />
         </div>
 
@@ -83,24 +89,25 @@ function AccountCard({ account }: { account: AdminAccount }) {
           </div>
         </div>
         <div className="flex gap-2 text-xs text-muted-foreground">
-          {(["pos", "hotel"] as const).map((app) => (
-            account.establishment_counts[app] ? (
+          {APPS.map((app) => {
+            const Icon = APP_ICON[app];
+            return account.establishment_counts[app] ? (
               <span key={app} className="flex items-center gap-1 rounded-full border border-border px-2 py-1">
-                {app === "pos" ? <Store className="h-3 w-3" /> : <BedDouble className="h-3 w-3" />}
-                {account.establishment_counts[app]} {app === "pos" ? "boutique(s)" : "établissement(s)"}
+                <Icon className="h-3 w-3" />
+                {account.establishment_counts[app]} {APP_UNIT_LABEL[app]}
               </span>
-            ) : null
-          ))}
+            ) : null;
+          })}
         </div>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {(["pos", "hotel"] as const).map((app) => {
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {APPS.map((app) => {
           const sub = account.subscriptions.find((s) => s.app_module === app);
           if (!sub && !account.establishment_counts[app]) return null;
           return (
             <div key={app} className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs">
-              <span className="font-semibold uppercase tracking-wide text-muted-foreground">{app === "pos" ? "ZegCaisse" : "ZegHotel"}</span>
+              <span className="font-semibold uppercase tracking-wide text-muted-foreground">{APP_LABEL[app]}</span>
               {sub ? (
                 <span className={cn("rounded-full px-2 py-0.5 font-bold uppercase", STATUS_COLOR[sub.status] ?? "bg-muted text-muted-foreground")}>
                   {sub.plan_id} · {STATUS_LABEL[sub.status] ?? sub.status}

@@ -51,7 +51,8 @@ create index if not exists idx_accounts_owner on public.accounts(owner_id);
 create table if not exists public.account_subscriptions (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.accounts(id) on delete cascade,
-  app_module text not null check (app_module in ('pos', 'hotel')),
+  -- Migration 036 (ZegResto) : 'resto' ajouté aux deux valeurs d'origine.
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto')),
   -- Pas de FK vers plans(id) : comme subscriptions.plan existant, cette
   -- colonne vaut aussi 'trial' pendant la période d'essai, une valeur qui
   -- n'existe pas comme ligne dans plans (seules les formules payantes
@@ -89,7 +90,8 @@ create table if not exists public.organizations (
   -- account_id regroupe les établissements d'un même compte, éventuellement
   -- sur des applications différentes (un compte peut avoir des boutiques
   -- ZegCaisse ET un établissement ZegHotel).
-  app_module text not null check (app_module in ('pos', 'hotel'))
+  -- Migration 036 (ZegResto) : 'resto' ajouté aux deux valeurs d'origine.
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto'))
 );
 create index if not exists idx_organizations_account on public.organizations(account_id);
 
@@ -784,7 +786,7 @@ create table if not exists public.plans (
   max_users integer
 );
 do $$ begin
-  alter table public.plans add constraint plans_app_module_check check (app_module is null or app_module in ('pos', 'hotel'));
+  alter table public.plans add constraint plans_app_module_check check (app_module is null or app_module in ('pos', 'hotel', 'resto'));
 exception when duplicate_object then null;
 end $$;
 
@@ -2692,6 +2694,17 @@ create policy hotel_maintenance_update on public.hotel_maintenance_tickets for u
 drop policy if exists hotel_maintenance_delete on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_delete on public.hotel_maintenance_tickets for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== ZegResto (migrations 035+) ===============
+-- Troisième application ZegOS, même socle que ZegCaisse/ZegHotel
+-- (organizations/organization_members/app_role), même pattern (tables
+-- préfixées resto_, RLS strict par organization_id + rôle).
+
+-- Migration 035 — ZegResto, étape 1/7 : rôles Serveur et Cuisinier.
+-- IMPORTANT — comme 020f (ZegHotel) : à exécuter seule, dans sa propre
+-- transaction, avant toute policy qui référence ces valeurs.
+alter type public.app_role add value if not exists 'server';
+alter type public.app_role add value if not exists 'cook';
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,

@@ -19,7 +19,7 @@ export type Organization = {
   // les établissements d'un même propriétaire, app_module distingue
   // ZegCaisse/ZegHotel pour le sélecteur d'en-tête et les limites de formule.
   account_id: string;
-  app_module: "pos" | "hotel";
+  app_module: "pos" | "hotel" | "resto";
 };
 
 type OrganizationCtx = {
