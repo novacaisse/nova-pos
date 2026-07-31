@@ -14,6 +14,12 @@ export type Organization = {
   suspended: boolean;
   // Applications ZegOS actives ('pos', 'hotel'…) — migration 020c/020g.
   active_apps: string[];
+  // Compte et app_module uniques de cet établissement (migration 021,
+  // restructuration compte/établissements, Phase 2) — account_id regroupe
+  // les établissements d'un même propriétaire, app_module distingue
+  // ZegCaisse/ZegHotel pour le sélecteur d'en-tête et les limites de formule.
+  account_id: string;
+  app_module: "pos" | "hotel";
 };
 
 type OrganizationCtx = {
@@ -53,7 +59,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     setError(null);
     const { data, error: fetchErr } = await supabase
       .from("organizations")
-      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at,suspended,active_apps")
+      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at,suspended,active_apps,account_id,app_module")
       .order("created_at", { ascending: true });
     if (fetchErr) {
       setError(fetchErr.message);
