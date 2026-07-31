@@ -532,9 +532,15 @@ export function useSales(opts: number | { limit?: number; from?: string; to?: st
   });
 }
 
-// createSale: inserts sale + items + payment + sale-type stock movements atomically enough.
+// RPC atomique (migration 026) plutôt que 4 écritures client séparées
+// (sales, sale_items, payments, stock_movements) : si le panier survend un
+// produit, apply_stock_movement() lève désormais une exception (garde-fou
+// ajoutée dans la même migration) — sans transaction, la vente restait déjà
+// créée et payée avec des mouvements de stock partiels pour le reste du
+// panier. Un appel RPC = une transaction Postgres : en cas de survente,
+// tout est annulé (sale, sale_items, payments, mouvements déjà insérés).
 export function useCreateSale() {
-  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       reference: string;
@@ -547,59 +553,19 @@ export function useCreateSale() {
       status?: Sale["status"];
     }) => {
       if (!organizationId) throw new Error("Aucune boutique sélectionnée");
-      const items = input.items.map((it) => {
-        const line = it.quantity * it.unit_price - (it.discount ?? 0);
-        return { ...it, discount: it.discount ?? 0, tax_rate: it.tax_rate ?? 0, total: line };
+      const { data, error } = await supabase.rpc("create_sale", {
+        p_organization_id: organizationId,
+        p_reference: input.reference,
+        p_customer_id: input.customer_id ?? null,
+        p_payment_method: input.payment_method,
+        p_paid: input.paid,
+        p_items: input.items,
+        p_discount: input.discount ?? 0,
+        p_notes: input.notes ?? null,
+        p_status: input.status ?? "completed",
       });
-      const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
-      const itemsDiscount = items.reduce((s, i) => s + (i.discount ?? 0), 0);
-      const discount = (input.discount ?? 0) + itemsDiscount;
-      const total = Math.max(0, subtotal - discount);
-      const change_due = Math.max(0, input.paid - total);
-
-      const { data: sale, error: e1 } = await supabase.from("sales").insert({
-        organization_id: organizationId,
-        reference: input.reference,
-        customer_id: input.customer_id ?? null,
-        cashier_id: user?.id,
-        status: input.status ?? "completed",
-        subtotal, discount, tax: 0, total,
-        paid: input.paid, change_due,
-        payment_method: input.payment_method,
-        notes: input.notes ?? null,
-      }).select().single();
-      if (e1) throw e1;
-
-      const itemsPayload = items.map((it) => ({
-        organization_id: organizationId, sale_id: sale.id,
-        product_id: it.product_id, name: it.name,
-        quantity: it.quantity, unit_price: it.unit_price,
-        discount: it.discount, tax_rate: it.tax_rate, total: it.total,
-      }));
-      const { error: e2 } = await supabase.from("sale_items").insert(itemsPayload);
-      if (e2) throw e2;
-
-      if (input.paid > 0) {
-        await supabase.from("payments").insert({
-          organization_id: organizationId, sale_id: sale.id,
-          method: input.payment_method === "mixed" ? "cash" : input.payment_method,
-          amount: input.paid,
-        });
-      }
-
-      // stock movements for real products
-      const stockRows = items
-        .filter((it) => it.product_id)
-        .map((it) => ({
-          organization_id: organizationId, product_id: it.product_id!,
-          type: "sale" as const, quantity: it.quantity,
-          reason: `Vente ${input.reference}`, reference: input.reference,
-          created_by: user?.id,
-        }));
-      if (stockRows.length) {
-        await supabase.from("stock_movements").insert(stockRows);
-      }
-      return sale;
+      if (error) throw error;
+      return data as Sale;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sales", organizationId] });
