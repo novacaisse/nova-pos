@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronLeft, ChevronRight, Plus, X, Loader2, User, LogIn, LogOut, Ban, CheckCircle2, Banknote, Printer,
@@ -20,6 +20,12 @@ import {
 import { cn, selectOnFocus } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/hotel/reservations")({
+  // ?openCreate=1 : ouvre directement le formulaire de nouvelle réservation
+  // — utilisé par le raccourci "Nouvelle réservation" du header (app.tsx),
+  // même mécanique que ?openAdd sur /app/parametres.
+  validateSearch: (search: Record<string, unknown>): { openCreate?: boolean } => ({
+    openCreate: search.openCreate === true || search.openCreate === "1" ? true : undefined,
+  }),
   component: ReservationsPage,
 });
 
@@ -41,6 +47,7 @@ function toISO(d: Date) { return d.toISOString().slice(0, 10); }
 function addDays(iso: string, n: number) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return toISO(d); }
 
 function ReservationsPage() {
+  const { openCreate } = Route.useSearch();
   const { data: myRole } = useMyRole();
   const { readOnly } = useReadOnlyMode();
   // Essai expiré (audit ZegOS Phase 1, LOT C) : plus aucune création/action
@@ -56,6 +63,10 @@ function ReservationsPage() {
 
   const [creating, setCreating] = useState<{ roomId?: string; date?: string } | null>(null);
   const [openReservationId, setOpenReservationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (openCreate && canWrite) setCreating({});
+  }, [openCreate, canWrite]);
 
   // Réservations actives par chambre (cancelled/no_show ne bloquent plus le planning).
   const bookingsByRoom = useMemo(() => {
