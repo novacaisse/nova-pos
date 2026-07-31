@@ -858,6 +858,28 @@ export function folioBalance(folio: HotelFolioDetail): number {
   const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
   return charges - paid;
 }
+
+// Nuits occupées par jour dans [rangeStart, rangeEnd) — une réservation
+// active (ni annulée ni no-show) compte une nuit par chambre par jour
+// couvert. Partagé entre app.hotel.index.tsx (Phase 6 — sélecteur de
+// période universel) et app.hotel.rapports.tsx (déjà en place).
+export function nightsInRange(reservations: HotelReservationRow[] | undefined, rangeStart: string, rangeEnd: string) {
+  let nights = 0; let revenue = 0;
+  for (const res of reservations ?? []) {
+    for (const rr of res.reservation_rooms) {
+      if (rr.status === "cancelled" || rr.status === "no_show") continue;
+      const start = rr.check_in < rangeStart ? rangeStart : rr.check_in;
+      const end = rr.check_out > rangeEnd ? rangeEnd : rr.check_out;
+      const n = Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 86400000);
+      if (n > 0) {
+        nights += n;
+        const totalNights = Math.max(1, (new Date(rr.check_out).getTime() - new Date(rr.check_in).getTime()) / 86400000);
+        revenue += (rr.rate_amount / totalNights) * n;
+      }
+    }
+  }
+  return { nights, revenue };
+}
 // Recalcule le solde depuis la base (pas depuis l'objet folio déjà en
 // mémoire côté client) avant de clôturer — sans ce garde-fous, une note
 // pouvait être clôturée avec un solde positif sans confirmation ni blocage,

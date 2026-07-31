@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { BarChart3, TrendingUp, Percent, Coins, Moon, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
-import { useHotelReservations, useHotelRooms, useRunNightAudit } from "@/lib/data/hotelHooks";
+import { useHotelReservations, useHotelRooms, useRunNightAudit, nightsInRange } from "@/lib/data/hotelHooks";
 
 export const Route = createFileRoute("/app/hotel/rapports")({
   component: HotelReportsPage,
@@ -12,66 +13,53 @@ export const Route = createFileRoute("/app/hotel/rapports")({
 function toISO(d: Date) { return d.toISOString().slice(0, 10); }
 function addDays(iso: string, n: number) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return toISO(d); }
 
-// Nuits occupées par jour dans [rangeStart, rangeEnd) — une réservation
-// active (ni annulée ni no-show) compte une nuit par chambre par jour couvert.
-function nightsInRange(reservations: ReturnType<typeof useHotelReservations>["data"], rangeStart: string, rangeEnd: string) {
-  let nights = 0; let revenue = 0;
-  for (const res of reservations ?? []) {
-    for (const rr of res.reservation_rooms) {
-      if (rr.status === "cancelled" || rr.status === "no_show") continue;
-      const start = rr.check_in < rangeStart ? rangeStart : rr.check_in;
-      const end = rr.check_out > rangeEnd ? rangeEnd : rr.check_out;
-      const n = Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 86400000);
-      if (n > 0) {
-        nights += n;
-        const totalNights = Math.max(1, (new Date(rr.check_out).getTime() - new Date(rr.check_in).getTime()) / 86400000);
-        revenue += (rr.rate_amount / totalNights) * n;
-      }
-    }
-  }
-  return { nights, revenue };
-}
-
 function HotelReportsPage() {
   const formatMoney = useFormatMoney();
   const { data: myRole } = useMyRole();
   const canRunAudit = myRole === "owner" || myRole === "manager";
   const nightAudit = useRunNightAudit();
   const [auditResult, setAuditResult] = useState<string | null>(null);
-  const [period, setPeriod] = useState<7 | 30>(30);
-  const rangeEnd = toISO(new Date());
-  const rangeStart = addDays(rangeEnd, -period);
+
+  // Sélecteur de période universel (ZegHotel Phase 6) — remplace le
+  // toggle 7/30 jours par les préréglages partagés avec ZegCaisse
+  // (Aujourd'hui, Hier, Cette semaine, Semaine dernière, Ce mois, Mois
+  // dernier, Cette année, Année dernière, Personnalisé).
+  const [period, setPeriod] = useState<Period>("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const { from: fromDate, to: toDate } = periodRange(period, customFrom, customTo);
+  const rangeStart = toISO(fromDate);
+  const rangeEnd = toISO(toDate);
+  const periodDays = Math.max(1, Math.round((toDate.getTime() - fromDate.getTime()) / 86400000));
 
   const { data: rooms = [] } = useHotelRooms();
   const { data: reservations } = useHotelReservations(rangeStart, rangeEnd);
 
-  // Prévision pickup : réservations déjà enregistrées pour les 7/30 prochains jours.
-  const forecastEnd7 = addDays(rangeEnd, 7);
-  const forecastEnd30 = addDays(rangeEnd, 30);
-  const { data: forecast7 } = useHotelReservations(rangeEnd, forecastEnd7);
-  const { data: forecast30 } = useHotelReservations(rangeEnd, forecastEnd30);
+  // Prévision pickup : réservations déjà enregistrées pour les 7/30 prochains jours
+  // à partir d'aujourd'hui — reste fixe, indépendant de la période sélectionnée
+  // (une prévision se lit toujours depuis "maintenant").
+  const today = toISO(new Date());
+  const forecastEnd7 = addDays(today, 7);
+  const forecastEnd30 = addDays(today, 30);
+  const { data: forecast7 } = useHotelReservations(today, forecastEnd7);
+  const { data: forecast30 } = useHotelReservations(today, forecastEnd30);
 
   const { nights, revenue } = useMemo(() => nightsInRange(reservations, rangeStart, rangeEnd), [reservations, rangeStart, rangeEnd]);
-  const availableRoomNights = rooms.length * period;
+  const availableRoomNights = rooms.length * periodDays;
   const occupancyPct = availableRoomNights ? Math.round((nights / availableRoomNights) * 100) : 0;
   const adr = nights ? revenue / nights : 0;
   const revpar = availableRoomNights ? revenue / availableRoomNights : 0;
 
-  const pickup7 = useMemo(() => nightsInRange(forecast7, rangeEnd, forecastEnd7).nights, [forecast7, rangeEnd, forecastEnd7]);
-  const pickup30 = useMemo(() => nightsInRange(forecast30, rangeEnd, forecastEnd30).nights, [forecast30, rangeEnd, forecastEnd30]);
+  const pickup7 = useMemo(() => nightsInRange(forecast7, today, forecastEnd7).nights, [forecast7, today, forecastEnd7]);
+  const pickup30 = useMemo(() => nightsInRange(forecast30, today, forecastEnd30).nights, [forecast30, today, forecastEnd30]);
 
   return (
     <div>
       <PageHeader title="Rapports" subtitle="Occupation, revenus et prévisions"
         actions={
-          <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
-            {([7, 30] as const).map((p) => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${period === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-                {p} jours
-              </button>
-            ))}
-          </div>
+          <PeriodSelector period={period} onChange={setPeriod}
+            customFrom={customFrom} customTo={customTo}
+            onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} />
         }
       />
       <div className="space-y-5 p-5 sm:p-8">
@@ -108,7 +96,7 @@ function HotelReportsPage() {
               <button
                 onClick={() => {
                   if (!confirm("Clôturer la journée ? Les réservations en attente d'arrivée aujourd'hui non check-in passeront en no-show.")) return;
-                  nightAudit.mutate(rangeEnd, {
+                  nightAudit.mutate(today, {
                     onSuccess: (r) => setAuditResult(r.noShowCount > 0 ? `${r.noShowCount} réservation(s) marquée(s) no-show.` : "Aucun no-show à traiter — journée clôturée."),
                     onError: (e: any) => setAuditResult(e?.message ?? "Erreur inconnue."),
                   });
