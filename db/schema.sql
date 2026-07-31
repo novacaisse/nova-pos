@@ -2441,6 +2441,33 @@ create policy hotel_folio_charges_write on public.hotel_folio_charges for all to
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
 
+-- ZegHotel Phase 2 (migration 029) : module Clients (/app/hotel/clients) —
+-- vue CRM des hotel_guests indépendante d'une réservation particulière.
+-- Agrège côté serveur (historique/total dépensé/dernière visite) plutôt
+-- que de faire remonter tous les folios/charges au client. Security
+-- invoker : les policies RLS existantes sur hotel_reservations/
+-- hotel_folios/hotel_folio_charges s'appliquent normalement.
+create or replace function public.hotel_guest_summary(_organization_id uuid)
+returns table (
+  guest_id uuid, total_stays bigint, total_spent numeric, last_check_in date
+)
+language sql stable set search_path = public as $$
+  select
+    r.guest_id,
+    count(distinct r.id) as total_stays,
+    coalesce(sum(fc.amount * fc.quantity), 0) as total_spent,
+    max(r.check_in) as last_check_in
+  from public.hotel_reservations r
+  left join public.hotel_folios f on f.reservation_id = r.id
+  left join public.hotel_folio_charges fc on fc.folio_id = f.id
+  where r.organization_id = _organization_id
+    and r.status <> 'cancelled'
+  group by r.guest_id;
+$$;
+
+revoke all on function public.hotel_guest_summary(uuid) from public;
+grant execute on function public.hotel_guest_summary(uuid) to authenticated;
+
 -- Nommée hotel_payments (pas payments) : public.payments existe déjà
 -- côté ZegCaisse (paiements de vente) — collision directe évitée.
 create table if not exists public.hotel_payments (

@@ -95,6 +95,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Réservations", url: "/app/hotel/reservations", icon: "CalendarRange" },
     { title: "Chambres", url: "/app/hotel/rooms", icon: "DoorClosed" },
     { title: "Housekeeping", url: "/app/hotel/housekeeping", icon: "Sparkle" },
+    { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
   ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
@@ -129,11 +130,15 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/rapports": ["front_desk", "housekeeping"],
   // Hôtel : housekeeping n'a RLS-wise aucun accès aux réservations/clients
   // (données financières/personnelles hors de son périmètre, cf. 020h/020g) ;
-  // accountant n'a pas accès aux tâches de ménage (020j).
+  // accountant n'a pas accès aux tâches de ménage (020j). Clients (ZegHotel
+  // Phase 1, migration 028) : accountant retiré de hotel_guests_select
+  // (données d'identité restreintes à owner/manager/front_desk) — masqué
+  // ici aussi, sinon écran vide plutôt qu'une vraie restriction visible.
   "/app/hotel": ["housekeeping"],
   "/app/hotel/reservations": ["housekeeping"],
   "/app/hotel/rapports": ["housekeeping"],
   "/app/hotel/housekeeping": ["accountant"],
+  "/app/hotel/clients": ["housekeeping", "accountant"],
 };
 
 export function AppSidebar() {

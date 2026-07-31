@@ -457,6 +457,80 @@ export function useUpsertHotelGuest() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_guests", organizationId] }),
   });
 }
+// on delete restrict sur hotel_reservations.guest_id : la suppression
+// échoue (erreur remontée à l'appelant) si le client a au moins une
+// réservation — voulu, un client avec un historique de séjours ne doit
+// pas pouvoir disparaître silencieusement (facturation/rapports).
+export function useDeleteHotelGuest() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("hotel_guests").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_guests", organizationId] }),
+  });
+}
+
+// ============ MODULE CLIENTS (ZegHotel Phase 2) ============
+// hotel_guest_summary() (migration 029) agrège côté serveur (nombre de
+// séjours, total dépensé, dernière arrivée) — évite de faire remonter tous
+// les folios/charges de l'établissement au client pour calculer des
+// totaux qui grossissent avec l'historique.
+export type HotelGuestSummary = {
+  guest_id: string; total_stays: number; total_spent: number; last_check_in: string | null;
+};
+export function useHotelGuestSummaries() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_guest_summary", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<Record<string, HotelGuestSummary>> => {
+      const { data, error } = await supabase.rpc("hotel_guest_summary", { _organization_id: organizationId! });
+      if (error) throw error;
+      return Object.fromEntries(((data ?? []) as HotelGuestSummary[]).map((s) => [s.guest_id, s]));
+    },
+  });
+}
+export type HotelGuestStay = {
+  reservation_id: string; check_in: string; check_out: string; status: ReservationStatus;
+  billing_unit: BillingUnit; total: number;
+};
+export function useHotelGuestStays(guestId: string | null) {
+  return useQuery({
+    queryKey: ["hotel_guest_stays", guestId],
+    enabled: !!guestId,
+    queryFn: async (): Promise<HotelGuestStay[]> => {
+      const { data: reservations, error } = await supabase.from("hotel_reservations")
+        .select("id, check_in, check_out, status, billing_unit")
+        .eq("guest_id", guestId!).order("check_in", { ascending: false });
+      if (error) throw error;
+      const reservationIds = (reservations ?? []).map((r: any) => r.id);
+      if (!reservationIds.length) return [];
+
+      const { data: folios, error: folioErr } = await supabase.from("hotel_folios")
+        .select("id, reservation_id").in("reservation_id", reservationIds);
+      if (folioErr) throw folioErr;
+      const folioIdByReservation = new Map<string, string>((folios ?? []).map((f: any) => [f.reservation_id, f.id]));
+      const folioIds = (folios ?? []).map((f: any) => f.id);
+
+      const totalByFolio = new Map<string, number>();
+      if (folioIds.length) {
+        const { data: charges, error: chargesErr } = await supabase.from("hotel_folio_charges")
+          .select("folio_id, amount, quantity").in("folio_id", folioIds);
+        if (chargesErr) throw chargesErr;
+        for (const c of (charges ?? []) as any[]) {
+          totalByFolio.set(c.folio_id, (totalByFolio.get(c.folio_id) ?? 0) + c.amount * c.quantity);
+        }
+      }
+
+      return (reservations ?? []).map((r: any) => ({
+        reservation_id: r.id, check_in: r.check_in, check_out: r.check_out, status: r.status, billing_unit: r.billing_unit,
+        total: totalByFolio.get(folioIdByReservation.get(r.id) ?? "") ?? 0,
+      }));
+    },
+  });
+}
 
 // ============ RESERVATIONS ============
 export type HotelReservationRow = HotelReservation & {

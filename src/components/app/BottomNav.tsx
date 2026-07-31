@@ -57,6 +57,7 @@ const HOTEL_PRIMARY: Item[] = [
   { label: "Ménage", to: "/app/hotel/housekeeping", icon: Sparkle },
 ];
 const HOTEL_MORE: Item[] = [
+  { label: "Clients", to: "/app/hotel/clients", icon: Users },
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/hotel/parametres", icon: Settings },
@@ -103,7 +104,14 @@ export function BottomNav() {
     ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
     : PRIMARY.filter(included);
   const more = useHotelNav
-    ? (myRole === "housekeeping" ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports") : HOTEL_MORE.filter(included))
+    ? (myRole === "housekeeping"
+        ? HOTEL_MORE.filter((m) => m.to !== "/app/hotel/rapports" && m.to !== "/app/hotel/clients")
+        // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de
+        // hotel_guests_select (données d'identité restreintes à
+        // owner/manager/front_desk) — masqué ici aussi.
+        : myRole === "accountant"
+          ? HOTEL_MORE.filter(included).filter((m) => m.to !== "/app/hotel/clients")
+          : HOTEL_MORE.filter(included))
     : MORE.filter(included);
   // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes
   // (owner/manager/accountant) — front_desk/housekeeping n'ont RLS-wise
