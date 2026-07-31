@@ -27,6 +27,7 @@ import {
   Wrench,
   Building2,
   Coffee,
+  Radio,
 } from "lucide-react";
 import {
   Sidebar,
@@ -67,6 +68,7 @@ const ICONS = {
   Wrench,
   Building2,
   Coffee,
+  Radio,
 } as const;
 
 type NavItem = {
@@ -106,6 +108,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
     { title: "Point de vente interne", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
+    { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
   ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
   // de commun dans la nav entre les deux applications (le paramètre
@@ -155,6 +158,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
   // front_desk — housekeeping/accountant masqués ici en cohérence.
   "/app/hotel/pos-interne": ["housekeeping", "accountant"],
+  // Canaux de distribution (ZegHotel Phase 8, migration 034) : hotel_channels_all
+  // n'accorde qu'owner/manager (table existante depuis 020g) — masqué pour
+  // les autres rôles hôtel en cohérence.
+  "/app/hotel/canaux": ["housekeeping", "accountant", "front_desk"],
 };
 
 export function AppSidebar() {

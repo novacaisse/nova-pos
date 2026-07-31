@@ -73,6 +73,7 @@ export const HOTEL_MODULES: { url: string; label: string }[] = [
   { url: "/app/hotel/corporate", label: "Comptes entreprise" },
   { url: "/app/hotel/pos-interne", label: "Point de vente interne" },
   { url: "/app/hotel/rapports", label: "Rapports" },
+  { url: "/app/hotel/canaux", label: "Canaux de distribution" },
 ];
 
 // Point d'entrée unique pour récupérer le catalogue de modules bridables

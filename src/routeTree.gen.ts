@@ -64,6 +64,7 @@ import { Route as AppHotelHousekeepingRouteImport } from './routes/app.hotel.hou
 import { Route as AppHotelEquipeRouteImport } from './routes/app.hotel.equipe'
 import { Route as AppHotelCorporateRouteImport } from './routes/app.hotel.corporate'
 import { Route as AppHotelClientsRouteImport } from './routes/app.hotel.clients'
+import { Route as AppHotelCanauxRouteImport } from './routes/app.hotel.canaux'
 
 const TarifsRoute = TarifsRouteImport.update({
   id: '/tarifs',
@@ -341,6 +342,11 @@ const AppHotelClientsRoute = AppHotelClientsRouteImport.update({
   path: '/clients',
   getParentRoute: () => AppHotelRoute,
 } as any)
+const AppHotelCanauxRoute = AppHotelCanauxRouteImport.update({
+  id: '/canaux',
+  path: '/canaux',
+  getParentRoute: () => AppHotelRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -382,6 +388,7 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
+  '/app/hotel/canaux': typeof AppHotelCanauxRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
@@ -433,6 +440,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/souscription': typeof SouscriptionIndexRoute
+  '/app/hotel/canaux': typeof AppHotelCanauxRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
@@ -491,6 +499,7 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
+  '/app/hotel/canaux': typeof AppHotelCanauxRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
@@ -550,6 +559,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/souscription/'
+    | '/app/hotel/canaux'
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
@@ -601,6 +611,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/app'
     | '/souscription'
+    | '/app/hotel/canaux'
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
@@ -658,6 +669,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/souscription/'
+    | '/app/hotel/canaux'
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
@@ -1074,6 +1086,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHotelClientsRouteImport
       parentRoute: typeof AppHotelRoute
     }
+    '/app/hotel/canaux': {
+      id: '/app/hotel/canaux'
+      path: '/canaux'
+      fullPath: '/app/hotel/canaux'
+      preLoaderRoute: typeof AppHotelCanauxRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
   }
 }
 
@@ -1108,6 +1127,7 @@ const AdminRouteChildren: AdminRouteChildren = {
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppHotelRouteChildren {
+  AppHotelCanauxRoute: typeof AppHotelCanauxRoute
   AppHotelClientsRoute: typeof AppHotelClientsRoute
   AppHotelCorporateRoute: typeof AppHotelCorporateRoute
   AppHotelEquipeRoute: typeof AppHotelEquipeRoute
@@ -1122,6 +1142,7 @@ interface AppHotelRouteChildren {
 }
 
 const AppHotelRouteChildren: AppHotelRouteChildren = {
+  AppHotelCanauxRoute: AppHotelCanauxRoute,
   AppHotelClientsRoute: AppHotelClientsRoute,
   AppHotelCorporateRoute: AppHotelCorporateRoute,
   AppHotelEquipeRoute: AppHotelEquipeRoute,
@@ -1248,7 +1269,9 @@ import type { startInstance } from './start.ts'
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
+
     router: Awaited<ReturnType<typeof getRouter>>
+
     config: Awaited<ReturnType<typeof startInstance.getOptions>>
   }
 }

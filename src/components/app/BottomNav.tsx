@@ -21,6 +21,7 @@ import {
   Wrench,
   Building2,
   Coffee,
+  Radio,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -64,6 +65,7 @@ const HOTEL_MORE: Item[] = [
   { label: "Clients", to: "/app/hotel/clients", icon: Users },
   { label: "Entreprises", to: "/app/hotel/corporate", icon: Building2 },
   { label: "POS interne", to: "/app/hotel/pos-interne", icon: Coffee },
+  { label: "Canaux", to: "/app/hotel/canaux", icon: Radio },
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/hotel/parametres", icon: Settings },
@@ -111,15 +113,18 @@ export function BottomNav() {
     : PRIMARY.filter(included);
   const more = useHotelNav
     ? (myRole === "housekeeping"
-        ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne"].includes(m.to))
+        ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
         // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de
         // hotel_guests_select (données d'identité restreintes à
         // owner/manager/front_desk). POS interne (Phase 7, migration 033) :
         // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
-        // front_desk. Masqués ici aussi.
+        // front_desk. Canaux (Phase 8, migration 034) : hotel_channels_all
+        // n'accorde qu'owner/manager. Masqués ici aussi.
         : myRole === "accountant"
-          ? HOTEL_MORE.filter(included).filter((m) => !["/app/hotel/clients", "/app/hotel/pos-interne"].includes(m.to))
-          : HOTEL_MORE.filter(included))
+          ? HOTEL_MORE.filter(included).filter((m) => !["/app/hotel/clients", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
+          : myRole === "front_desk"
+            ? HOTEL_MORE.filter(included).filter((m) => m.to !== "/app/hotel/canaux")
+            : HOTEL_MORE.filter(included))
     : MORE.filter(included);
   // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes
   // (owner/manager/accountant) — front_desk/housekeeping n'ont RLS-wise

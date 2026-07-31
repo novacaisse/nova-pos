@@ -1951,7 +1951,11 @@ create table if not exists public.hotel_channels (
   name text not null,
   is_active boolean not null default false,
   external_id text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Migration 034 — ZegHotel Phase 8 : gestion manuelle par canal (nom,
+  -- notes, tarif spécifique optionnel), pas de vraie intégration API.
+  notes text,
+  manual_rate numeric(14,2)
 );
 create index if not exists idx_hotel_channels_org on public.hotel_channels(organization_id);
 alter table public.hotel_channels enable row level security;
