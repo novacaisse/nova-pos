@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Bell, Check, X, TrendingUp, AlertTriangle, UserPlus, FileClock, Clock,
 } from "lucide-react";
@@ -24,6 +24,13 @@ const KIND_CTA: Record<NotificationKind, { href: string; label: string }> = {
   trial_expiring: { href: "/app/abonnement", label: "Souscrire" },
 };
 
+// Événements 100% ZegCaisse (ventes/stock/devis) — n'ont aucun sens côté
+// ZegHotel et ne doivent jamais y apparaître (audit isolation ZegOS, Partie
+// A). trial_expiring reste générique (abonnement de l'organisation
+// courante, quelle que soit l'app) ; new_member reste générique mais son
+// lien doit pointer vers l'Équipe de l'app courante, pas toujours ZegCaisse.
+const POS_ONLY_KINDS: NotificationKind[] = ["big_sale", "stock_low", "stock_out", "quote_expiring"];
+
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
@@ -37,7 +44,12 @@ function timeAgo(iso: string) {
 
 export function NotificationsBell() {
   const [open, setOpen] = useState(false);
-  const { items, unread, markOneRead, dismiss, markAllAsRead } = useAppNotifications();
+  const { items: allItems, unread: allUnread, markOneRead, dismiss, markAllAsRead } = useAppNotifications();
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const inHotelContext = pathname.startsWith("/app/hotel");
+
+  const items = inHotelContext ? allItems.filter((n) => !POS_ONLY_KINDS.includes(n.kind)) : allItems;
+  const unread = inHotelContext ? items.filter((n) => !n.read).length : allUnread;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -79,7 +91,9 @@ export function NotificationsBell() {
             <ul className="divide-y divide-border">
               {items.map((n: NotificationItem) => {
                 const Icon = ICONS[n.kind];
-                const cta = KIND_CTA[n.kind];
+                const cta = n.kind === "new_member" && inHotelContext
+                  ? { ...KIND_CTA[n.kind], href: "/app/hotel/equipe" }
+                  : KIND_CTA[n.kind];
                 return (
                   <li
                     key={n.id}

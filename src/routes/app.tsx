@@ -1,11 +1,12 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Loader2, Store, RotateCw, Mail, LogOut, ShoppingCart } from "lucide-react";
+import { Loader2, Store, RotateCw, Mail, LogOut, ShoppingCart, CalendarPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ShopSelector } from "@/components/app/ShopSelector";
 import { GlobalSearch } from "@/components/app/GlobalSearch";
+import { HotelGlobalSearch } from "@/components/app/HotelGlobalSearch";
 import { AiBubble } from "@/components/app/AiBubble";
 import { ThemeToggle } from "@/components/app/ThemeToggle";
 import { NotificationsBell } from "@/components/app/NotificationsBell";
@@ -84,6 +85,12 @@ function AppLayout() {
     return <SuspendedScreen onSignOut={signOut} />;
   }
 
+  // ZegCaisse et ZegHôtel sont deux applications 100% autonomes (audit
+  // isolation ZegOS, Partie A) — la recherche globale et le raccourci
+  // d'action rapide du header ne doivent jamais montrer du contenu ou des
+  // routes de l'autre application selon le contexte courant.
+  const inHotelContext = pathname.startsWith("/app/hotel");
+
   return (
     <SidebarProvider defaultOpen>
       <div className="flex min-h-screen w-full bg-background">
@@ -99,14 +106,22 @@ function AppLayout() {
               <SidebarTrigger className="hidden h-10 w-10 rounded-xl md:inline-flex" />
               <div className="hidden sm:block"><ShopSelector /></div>
               <div className="ml-2 hidden max-w-md flex-1 md:block">
-                <GlobalSearch />
+                {inHotelContext ? <HotelGlobalSearch /> : <GlobalSearch />}
               </div>
               <div className="ml-auto flex items-center gap-2">
-                <Link to="/app/caisse"
-                  className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
-                  aria-label="Aller à la caisse">
-                  <ShoppingCart className="h-4 w-4" /> PDV
-                </Link>
+                {inHotelContext ? (
+                  <Link to="/app/hotel/reservations" search={{ openCreate: true }}
+                    className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
+                    aria-label="Nouvelle réservation">
+                    <CalendarPlus className="h-4 w-4" /> Nouvelle réservation
+                  </Link>
+                ) : (
+                  <Link to="/app/caisse"
+                    className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
+                    aria-label="Aller à la caisse">
+                    <ShoppingCart className="h-4 w-4" /> PDV
+                  </Link>
+                )}
                 <ThemeToggle />
                 <NotificationsBell />
                 <AiBubble />
