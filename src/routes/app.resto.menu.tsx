@@ -1,15 +1,20 @@
 // Gestion du menu ZegResto (Phase 1) — catégories, articles, modificateurs
-// (ex. "Cuisson", "Suppléments") assignables à un article. photo_url est un
-// champ URL texte en V1 (pas d'upload direct — aurait nécessité un nouveau
-// bucket Supabase Storage hors scope de ce chantier SQL ; à revoir si
-// besoin, sur le modèle de product-images). Recette (Phase 4) : ingrédients
-// = produits ZegCaisse existants (catalogue products/stock_levels déjà en
-// place), pas de table "ingrédients" séparée — voir migration 040.
+// (ex. "Cuisson", "Suppléments") assignables à un article. Recette
+// (Phase 4) : ingrédients = produits ZegCaisse existants (catalogue
+// products/stock_levels déjà en place), pas de table "ingrédients" séparée
+// — voir migration 040. Photo (V2, migration 042) : vrai upload (bucket
+// resto-menu-photos) via ImageUploadField, plus un champ URL texte —
+// nécessite que l'article existe déjà (a un id) pour connaître le chemin
+// {organization_id}/{menu_item_id}, même contrainte que product-images ;
+// pour un nouvel article, enregistrer d'abord (nom + prix), puis rouvrir
+// pour ajouter la photo.
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Plus, X, Save, Trash2, Loader2, UtensilsCrossed, Tag, SlidersHorizontal, EyeOff, Boxes } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
+import { ImageUploadField } from "@/components/app/ImageUploadField";
 import { useFormatMoney, useMyRole, useProducts } from "@/lib/data/hooks";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import {
   useRestoMenuCategories, useUpsertRestoMenuCategory, useDeleteRestoMenuCategory,
   useRestoMenuItems, useUpsertRestoMenuItem, useDeleteRestoMenuItem,
@@ -93,13 +98,18 @@ function ArticlesTab({ canManage }: { canManage: boolean }) {
           {filtered.map((i) => (
             <div key={i.id} className={cn("rounded-2xl border border-border bg-card p-4", !i.disponible && "opacity-60")}>
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 truncate font-semibold">
-                    {!i.disponible && <EyeOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-                    {i.nom}
+                <div className="flex min-w-0 flex-1 gap-2.5">
+                  {i.photo_url && (
+                    <img src={i.photo_url} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 truncate font-semibold">
+                      {!i.disponible && <EyeOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                      {i.nom}
+                    </div>
+                    <div className="text-xs text-muted-foreground">{categoryName(i.category_id)}</div>
+                    {i.description && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{i.description}</div>}
                   </div>
-                  <div className="text-xs text-muted-foreground">{categoryName(i.category_id)}</div>
-                  {i.description && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{i.description}</div>}
                 </div>
                 <span className="shrink-0 font-bold text-primary">{formatMoney(i.prix)}</span>
               </div>
@@ -129,6 +139,7 @@ function ItemDialog({ initial, categories, onClose, onSave }: {
   initial: Partial<RestoMenuItem>; categories: { id: string; nom: string }[]; onClose: () => void;
   onSave: (i: Partial<RestoMenuItem> & { nom: string; prix: number }) => Promise<RestoMenuItem>;
 }) {
+  const { currentOrganization } = useOrganization();
   const [form, setForm] = useState<Partial<RestoMenuItem>>(initial);
   const [saving, setSaving] = useState(false);
   const { data: modifiers = [] } = useRestoModifiers();
@@ -178,8 +189,14 @@ function ItemDialog({ initial, categories, onClose, onSave }: {
               {categories.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
             </select>
           </label>
-          <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Photo (URL)</div>
-            <input value={form.photo_url ?? ""} onChange={(e) => setForm({ ...form, photo_url: e.target.value || null })} placeholder="https://…" className={inp} /></label>
+          {initial.id && currentOrganization ? (
+            <ImageUploadField label="Photo" bucket="resto-menu-photos" path={`${currentOrganization.id}/${initial.id}`}
+              value={form.photo_url ?? null} onChange={(url) => setForm({ ...form, photo_url: url })} />
+          ) : (
+            <div className="rounded-xl border border-dashed border-border p-3 text-xs text-muted-foreground">
+              Enregistrez d'abord l'article (nom + prix) pour pouvoir ajouter une photo.
+            </div>
+          )}
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={form.disponible ?? true} onChange={(e) => setForm({ ...form, disponible: e.target.checked })} className="h-4 w-4 rounded border-border" />
             <span className="text-xs font-semibold uppercase text-muted-foreground">Disponible à la vente</span>

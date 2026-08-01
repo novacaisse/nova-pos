@@ -1720,6 +1720,36 @@ drop policy if exists app_branding_delete on storage.objects;
 create policy app_branding_delete on storage.objects for delete to authenticated
   using (bucket_id = 'app-branding' and public.is_super_admin());
 
+-- Bucket pour les photos d'articles du menu ZegResto (migration 042,
+-- V2) : public en lecture, écriture restreinte owner/manager (même rôles
+-- que l'écriture sur resto_menu_items). Convention de chemin obligatoire
+-- côté client : {organization_id}/{menu_item_id}.
+insert into storage.buckets (id, name, public)
+values ('resto-menu-photos', 'resto-menu-photos', true)
+on conflict (id) do nothing;
+
+create policy resto_menu_photos_select on storage.objects for select
+  using (bucket_id = 'resto-menu-photos');
+create policy resto_menu_photos_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+create policy resto_menu_photos_update on storage.objects for update to authenticated
+  using (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  )
+  with check (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+create policy resto_menu_photos_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+
 -- =============== ZEGHOTEL (migrations 020f-020j) ===============
 -- Regroupé ici en un seul bloc par module plutôt qu'éclaté dans les
 -- sections ENUMS/TABLES/RLS/TRIGGERS ci-dessus (qui restent, elles,
