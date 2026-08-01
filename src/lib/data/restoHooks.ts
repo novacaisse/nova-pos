@@ -470,3 +470,51 @@ export function useUpdateKitchenTicketStatut() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] }),
   });
 }
+
+// ============ RÉSERVATIONS (Phase 3 — staff ; le formulaire public
+// /resto/reserver/$slug est hors contexte organisation, il n'utilise pas
+// ce fichier — voir directement resto.reserver.$slug.tsx) ============
+export type ReservationStatut = "pending" | "confirmee" | "annulee" | "honoree";
+export type RestoReservation = {
+  id: string; organization_id: string; table_id: string | null;
+  nom_client: string; telephone_client: string | null; date_heure: string;
+  nombre_couverts: number; statut: ReservationStatut; source: "staff" | "public";
+  notes: string | null; created_at: string;
+  table?: RestoTable | null;
+};
+export function useRestoReservations() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["resto_reservations", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<RestoReservation[]> => {
+      const { data, error } = await supabase.from("resto_reservations")
+        .select("*, table:resto_tables(*)").eq("organization_id", organizationId!).order("date_heure");
+      if (error) throw error;
+      return data as RestoReservation[];
+    },
+  });
+}
+export function useUpsertRestoReservation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (r: Partial<RestoReservation> & { nom_client: string; date_heure: string; nombre_couverts: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { table, ...rest } = r as any;
+      const { data, error } = await supabase.from("resto_reservations")
+        .upsert({ ...rest, organization_id: organizationId }).select().single();
+      if (error) throw error; return data as RestoReservation;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] }),
+  });
+}
+export function useDeleteRestoReservation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("resto_reservations").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] }),
+  });
+}
