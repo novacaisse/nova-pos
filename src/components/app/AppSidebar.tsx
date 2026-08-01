@@ -128,6 +128,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Cuisine", url: "/app/resto/cuisine", icon: "ChefHat" },
     { title: "Menu", url: "/app/resto/menu", icon: "BookOpen" },
     { title: "Réservations", url: "/app/resto/reservations", icon: "CalendarRange" },
+    { title: "Rapports", url: "/app/resto/rapports", icon: "BarChart3" },
   ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
   // de commun dans la nav entre les deux applications (le paramètre
@@ -141,9 +142,8 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Équipe", url: "/app/hotel/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/hotel/parametres", icon: "Settings" },
   ],
-  // Équipe (/app/resto/equipe) rejoint ce groupe à la Phase 6, une fois la
-  // route posée — Paramètres existe dès la Phase 0 (stub minimal).
   adminResto: [
+    { title: "Équipe", url: "/app/resto/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/resto/parametres", icon: "Settings" },
   ],
 };
@@ -199,6 +199,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/resto/menu": ["server", "cook"],
   "/app/resto/parametres": ["server", "cook"],
   "/app/resto/reservations": ["cook"],
+  // Rapports financiers explicitement hors du périmètre server (décision
+  // produit du prompt ZegResto) ; cook reste cantonné au KDS partout.
+  "/app/resto/rapports": ["server", "cook"],
+  "/app/resto/equipe": ["cook"],
 };
 
 export function AppSidebar() {

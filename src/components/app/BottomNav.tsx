@@ -93,6 +93,8 @@ const RESTO_PRIMARY: Item[] = [
 const RESTO_MORE: Item[] = [
   { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
   { label: "Menu", to: "/app/resto/menu", icon: BookOpen },
+  { label: "Rapports", to: "/app/resto/rapports", icon: BarChart3 },
+  { label: "Équipe", to: "/app/resto/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/resto/parametres", icon: Settings },
 ];
 // cook n'a qu'un seul écran opérationnel (le KDS) — même traitement que

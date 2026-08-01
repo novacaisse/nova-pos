@@ -669,3 +669,85 @@ export function useAddRestoBillPayment() {
     },
   });
 }
+
+// ============ DASHBOARD & RAPPORTS (Phase 6) ============
+export function useRestoDashboardStats() {
+  const organizationId = useOrganizationId();
+  const qc = useQueryClient();
+  useRestoRealtimeInvalidate("resto_orders", () => qc.invalidateQueries({ queryKey: ["resto_dashboard", organizationId] }));
+  return useQuery({
+    queryKey: ["resto_dashboard", organizationId],
+    enabled: !!organizationId,
+    refetchInterval: 30_000, // filet de sécurité si le channel realtime se déconnecte
+
+    queryFn: async () => {
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const [tablesRes, openOrdersRes, todayBillsRes, pendingResRes] = await Promise.all([
+        supabase.from("resto_tables").select("statut").eq("organization_id", organizationId!),
+        supabase.from("resto_orders").select("id", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).not("statut", "in", "(fermee,annulee)"),
+        supabase.from("resto_bills").select("total, order_id")
+          .eq("organization_id", organizationId!).eq("statut", "payee").gte("created_at", todayStart.toISOString()),
+        supabase.from("resto_reservations").select("id", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).eq("statut", "pending"),
+      ]);
+      const tables = tablesRes.data ?? [];
+      const bills = todayBillsRes.data ?? [];
+      return {
+        tablesTotal: tables.length,
+        tablesOccupied: tables.filter((t: any) => t.statut === "occupee").length,
+        openOrders: openOrdersRes.count ?? 0,
+        revenueToday: bills.reduce((s: number, b: any) => s + Number(b.total), 0),
+        ordersToday: bills.length,
+        pendingReservations: pendingResRes.count ?? 0,
+      };
+    },
+  });
+}
+
+export function useRestoReportData(from: Date, to: Date) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["resto_report", organizationId, from.toISOString(), to.toISOString()],
+    enabled: !!organizationId,
+    queryFn: async () => {
+      const { data: orders, error } = await supabase.from("resto_orders")
+        .select("id, created_at, closed_at, resto_bills(total)")
+        .eq("organization_id", organizationId!).eq("statut", "fermee")
+        .gte("closed_at", from.toISOString()).lte("closed_at", to.toISOString());
+      if (error) throw error;
+      const closedOrders = (orders ?? []) as any[];
+      const orderIds = closedOrders.map((o) => o.id);
+
+      let items: any[] = [];
+      if (orderIds.length) {
+        const { data, error: itemsErr } = await supabase.from("resto_order_items")
+          .select("menu_item_id, quantite, prix_unitaire, statut_ligne, menu_item:resto_menu_items(nom)")
+          .in("order_id", orderIds).neq("statut_ligne", "annulee");
+        if (itemsErr) throw itemsErr;
+        items = data ?? [];
+      }
+
+      const revenue = closedOrders.reduce((s, o) => s + Number(o.resto_bills?.[0]?.total ?? 0), 0);
+      const orderCount = closedOrders.length;
+      const avgTicket = orderCount > 0 ? revenue / orderCount : 0;
+      const serviceDurations = closedOrders
+        .filter((o) => o.closed_at)
+        .map((o) => (new Date(o.closed_at).getTime() - new Date(o.created_at).getTime()) / 60000);
+      const avgServiceMin = serviceDurations.length ? serviceDurations.reduce((s, d) => s + d, 0) / serviceDurations.length : 0;
+
+      const byItem = new Map<string, { nom: string; quantite: number; ca: number }>();
+      for (const it of items) {
+        const key = it.menu_item_id ?? "?";
+        const nom = it.menu_item?.nom ?? "Article supprimé";
+        const entry = byItem.get(key) ?? { nom, quantite: 0, ca: 0 };
+        entry.quantite += Number(it.quantite);
+        entry.ca += Number(it.prix_unitaire) * Number(it.quantite);
+        byItem.set(key, entry);
+      }
+      const topItems = [...byItem.values()].sort((a, b) => b.quantite - a.quantite).slice(0, 10);
+
+      return { revenue, orderCount, avgTicket, avgServiceMin, topItems };
+    },
+  });
+}
