@@ -24,6 +24,7 @@ import { Route as SouscriptionConfirmationRouteImport } from './routes/souscript
 import { Route as AppVentesRouteImport } from './routes/app.ventes'
 import { Route as AppSupportRouteImport } from './routes/app.support'
 import { Route as AppStockRouteImport } from './routes/app.stock'
+import { Route as AppRestoRouteImport } from './routes/app.resto'
 import { Route as AppRapportsRouteImport } from './routes/app.rapports'
 import { Route as AppProfilRouteImport } from './routes/app.profil'
 import { Route as AppProduitsRouteImport } from './routes/app.produits'
@@ -49,9 +50,19 @@ import { Route as AdminComptesRouteImport } from './routes/admin.comptes'
 import { Route as AdminBoutiquesRouteImport } from './routes/admin.boutiques'
 import { Route as AdminAbonnementsRouteImport } from './routes/admin.abonnements'
 import { Route as AppVentesIndexRouteImport } from './routes/app.ventes.index'
+import { Route as AppRestoIndexRouteImport } from './routes/app.resto.index'
 import { Route as AppProduitsIndexRouteImport } from './routes/app.produits.index'
 import { Route as AppHotelIndexRouteImport } from './routes/app.hotel.index'
+import { Route as RestoReserverSlugRouteImport } from './routes/resto.reserver.$slug'
 import { Route as AppVentesNouvelleRouteImport } from './routes/app.ventes.nouvelle'
+import { Route as AppRestoSalleRouteImport } from './routes/app.resto.salle'
+import { Route as AppRestoReservationsRouteImport } from './routes/app.resto.reservations'
+import { Route as AppRestoRapportsRouteImport } from './routes/app.resto.rapports'
+import { Route as AppRestoParametresRouteImport } from './routes/app.resto.parametres'
+import { Route as AppRestoMenuRouteImport } from './routes/app.resto.menu'
+import { Route as AppRestoEquipeRouteImport } from './routes/app.resto.equipe'
+import { Route as AppRestoCuisineRouteImport } from './routes/app.resto.cuisine'
+import { Route as AppRestoCommandesRouteImport } from './routes/app.resto.commandes'
 import { Route as AppProduitsNouveauRouteImport } from './routes/app.produits.nouveau'
 import { Route as AppProduitsProductIdRouteImport } from './routes/app.produits.$productId'
 import { Route as AppHotelRoomsRouteImport } from './routes/app.hotel.rooms'
@@ -140,6 +151,11 @@ const AppSupportRoute = AppSupportRouteImport.update({
 const AppStockRoute = AppStockRouteImport.update({
   id: '/stock',
   path: '/stock',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRestoRoute = AppRestoRouteImport.update({
+  id: '/resto',
+  path: '/resto',
   getParentRoute: () => AppRoute,
 } as any)
 const AppRapportsRoute = AppRapportsRouteImport.update({
@@ -267,6 +283,11 @@ const AppVentesIndexRoute = AppVentesIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppVentesRoute,
 } as any)
+const AppRestoIndexRoute = AppRestoIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRestoRoute,
+} as any)
 const AppProduitsIndexRoute = AppProduitsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -277,10 +298,55 @@ const AppHotelIndexRoute = AppHotelIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppHotelRoute,
 } as any)
+const RestoReserverSlugRoute = RestoReserverSlugRouteImport.update({
+  id: '/resto/reserver/$slug',
+  path: '/resto/reserver/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppVentesNouvelleRoute = AppVentesNouvelleRouteImport.update({
   id: '/nouvelle',
   path: '/nouvelle',
   getParentRoute: () => AppVentesRoute,
+} as any)
+const AppRestoSalleRoute = AppRestoSalleRouteImport.update({
+  id: '/salle',
+  path: '/salle',
+  getParentRoute: () => AppRestoRoute,
+} as any)
+const AppRestoReservationsRoute = AppRestoReservationsRouteImport.update({
+  id: '/reservations',
+  path: '/reservations',
+  getParentRoute: () => AppRestoRoute,
+} as any)
+const AppRestoRapportsRoute = AppRestoRapportsRouteImport.update({
+  id: '/rapports',
+  path: '/rapports',
+  getParentRoute: () => AppRestoRoute,
+} as any)
+const AppRestoParametresRoute = AppRestoParametresRouteImport.update({
+  id: '/parametres',
+  path: '/parametres',
+  getParentRoute: () => AppRestoRoute,
+} as any)
+const AppRestoMenuRoute = AppRestoMenuRouteImport.update({
+  id: '/menu',
+  path: '/menu',
+  getParentRoute: () => AppRestoRoute,
+} as any)
+const AppRestoEquipeRoute = AppRestoEquipeRouteImport.update({
+  id: '/equipe',
+  path: '/equipe',
+  getParentRoute: () => AppRestoRoute,
+} as any)
+const AppRestoCuisineRoute = AppRestoCuisineRouteImport.update({
+  id: '/cuisine',
+  path: '/cuisine',
+  getParentRoute: () => AppRestoRoute,
+} as any)
+const AppRestoCommandesRoute = AppRestoCommandesRouteImport.update({
+  id: '/commandes',
+  path: '/commandes',
+  getParentRoute: () => AppRestoRoute,
 } as any)
 const AppProduitsNouveauRoute = AppProduitsNouveauRouteImport.update({
   id: '/nouveau',
@@ -381,6 +447,7 @@ export interface FileRoutesByFullPath {
   '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
+  '/app/resto': typeof AppRestoRouteWithChildren
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
   '/app/ventes': typeof AppVentesRouteWithChildren
@@ -401,9 +468,19 @@ export interface FileRoutesByFullPath {
   '/app/hotel/rooms': typeof AppHotelRoomsRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/resto/commandes': typeof AppRestoCommandesRoute
+  '/app/resto/cuisine': typeof AppRestoCuisineRoute
+  '/app/resto/equipe': typeof AppRestoEquipeRoute
+  '/app/resto/menu': typeof AppRestoMenuRoute
+  '/app/resto/parametres': typeof AppRestoParametresRoute
+  '/app/resto/rapports': typeof AppRestoRapportsRoute
+  '/app/resto/reservations': typeof AppRestoReservationsRoute
+  '/app/resto/salle': typeof AppRestoSalleRoute
   '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
+  '/resto/reserver/$slug': typeof RestoReserverSlugRoute
   '/app/hotel/': typeof AppHotelIndexRoute
   '/app/produits/': typeof AppProduitsIndexRoute
+  '/app/resto/': typeof AppRestoIndexRoute
   '/app/ventes/': typeof AppVentesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -453,9 +530,19 @@ export interface FileRoutesByTo {
   '/app/hotel/rooms': typeof AppHotelRoomsRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/resto/commandes': typeof AppRestoCommandesRoute
+  '/app/resto/cuisine': typeof AppRestoCuisineRoute
+  '/app/resto/equipe': typeof AppRestoEquipeRoute
+  '/app/resto/menu': typeof AppRestoMenuRoute
+  '/app/resto/parametres': typeof AppRestoParametresRoute
+  '/app/resto/rapports': typeof AppRestoRapportsRoute
+  '/app/resto/reservations': typeof AppRestoReservationsRoute
+  '/app/resto/salle': typeof AppRestoSalleRoute
   '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
+  '/resto/reserver/$slug': typeof RestoReserverSlugRoute
   '/app/hotel': typeof AppHotelIndexRoute
   '/app/produits': typeof AppProduitsIndexRoute
+  '/app/resto': typeof AppRestoIndexRoute
   '/app/ventes': typeof AppVentesIndexRoute
 }
 export interface FileRoutesById {
@@ -492,6 +579,7 @@ export interface FileRoutesById {
   '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
+  '/app/resto': typeof AppRestoRouteWithChildren
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
   '/app/ventes': typeof AppVentesRouteWithChildren
@@ -512,9 +600,19 @@ export interface FileRoutesById {
   '/app/hotel/rooms': typeof AppHotelRoomsRoute
   '/app/produits/$productId': typeof AppProduitsProductIdRoute
   '/app/produits/nouveau': typeof AppProduitsNouveauRoute
+  '/app/resto/commandes': typeof AppRestoCommandesRoute
+  '/app/resto/cuisine': typeof AppRestoCuisineRoute
+  '/app/resto/equipe': typeof AppRestoEquipeRoute
+  '/app/resto/menu': typeof AppRestoMenuRoute
+  '/app/resto/parametres': typeof AppRestoParametresRoute
+  '/app/resto/rapports': typeof AppRestoRapportsRoute
+  '/app/resto/reservations': typeof AppRestoReservationsRoute
+  '/app/resto/salle': typeof AppRestoSalleRoute
   '/app/ventes/nouvelle': typeof AppVentesNouvelleRoute
+  '/resto/reserver/$slug': typeof RestoReserverSlugRoute
   '/app/hotel/': typeof AppHotelIndexRoute
   '/app/produits/': typeof AppProduitsIndexRoute
+  '/app/resto/': typeof AppRestoIndexRoute
   '/app/ventes/': typeof AppVentesIndexRoute
 }
 export interface FileRouteTypes {
@@ -552,6 +650,7 @@ export interface FileRouteTypes {
     | '/app/produits'
     | '/app/profil'
     | '/app/rapports'
+    | '/app/resto'
     | '/app/stock'
     | '/app/support'
     | '/app/ventes'
@@ -572,9 +671,19 @@ export interface FileRouteTypes {
     | '/app/hotel/rooms'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/resto/commandes'
+    | '/app/resto/cuisine'
+    | '/app/resto/equipe'
+    | '/app/resto/menu'
+    | '/app/resto/parametres'
+    | '/app/resto/rapports'
+    | '/app/resto/reservations'
+    | '/app/resto/salle'
     | '/app/ventes/nouvelle'
+    | '/resto/reserver/$slug'
     | '/app/hotel/'
     | '/app/produits/'
+    | '/app/resto/'
     | '/app/ventes/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -624,9 +733,19 @@ export interface FileRouteTypes {
     | '/app/hotel/rooms'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/resto/commandes'
+    | '/app/resto/cuisine'
+    | '/app/resto/equipe'
+    | '/app/resto/menu'
+    | '/app/resto/parametres'
+    | '/app/resto/rapports'
+    | '/app/resto/reservations'
+    | '/app/resto/salle'
     | '/app/ventes/nouvelle'
+    | '/resto/reserver/$slug'
     | '/app/hotel'
     | '/app/produits'
+    | '/app/resto'
     | '/app/ventes'
   id:
     | '__root__'
@@ -662,6 +781,7 @@ export interface FileRouteTypes {
     | '/app/produits'
     | '/app/profil'
     | '/app/rapports'
+    | '/app/resto'
     | '/app/stock'
     | '/app/support'
     | '/app/ventes'
@@ -682,9 +802,19 @@ export interface FileRouteTypes {
     | '/app/hotel/rooms'
     | '/app/produits/$productId'
     | '/app/produits/nouveau'
+    | '/app/resto/commandes'
+    | '/app/resto/cuisine'
+    | '/app/resto/equipe'
+    | '/app/resto/menu'
+    | '/app/resto/parametres'
+    | '/app/resto/rapports'
+    | '/app/resto/reservations'
+    | '/app/resto/salle'
     | '/app/ventes/nouvelle'
+    | '/resto/reserver/$slug'
     | '/app/hotel/'
     | '/app/produits/'
+    | '/app/resto/'
     | '/app/ventes/'
   fileRoutesById: FileRoutesById
 }
@@ -697,6 +827,7 @@ export interface RootRouteChildren {
   InscriptionRoute: typeof InscriptionRoute
   SouscriptionRoute: typeof SouscriptionRouteWithChildren
   TarifsRoute: typeof TarifsRoute
+  RestoReserverSlugRoute: typeof RestoReserverSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -804,6 +935,13 @@ declare module '@tanstack/react-router' {
       path: '/stock'
       fullPath: '/app/stock'
       preLoaderRoute: typeof AppStockRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/resto': {
+      id: '/app/resto'
+      path: '/resto'
+      fullPath: '/app/resto'
+      preLoaderRoute: typeof AppRestoRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/rapports': {
@@ -981,6 +1119,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVentesIndexRouteImport
       parentRoute: typeof AppVentesRoute
     }
+    '/app/resto/': {
+      id: '/app/resto/'
+      path: '/'
+      fullPath: '/app/resto/'
+      preLoaderRoute: typeof AppRestoIndexRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
     '/app/produits/': {
       id: '/app/produits/'
       path: '/'
@@ -995,12 +1140,75 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHotelIndexRouteImport
       parentRoute: typeof AppHotelRoute
     }
+    '/resto/reserver/$slug': {
+      id: '/resto/reserver/$slug'
+      path: '/resto/reserver/$slug'
+      fullPath: '/resto/reserver/$slug'
+      preLoaderRoute: typeof RestoReserverSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/ventes/nouvelle': {
       id: '/app/ventes/nouvelle'
       path: '/nouvelle'
       fullPath: '/app/ventes/nouvelle'
       preLoaderRoute: typeof AppVentesNouvelleRouteImport
       parentRoute: typeof AppVentesRoute
+    }
+    '/app/resto/salle': {
+      id: '/app/resto/salle'
+      path: '/salle'
+      fullPath: '/app/resto/salle'
+      preLoaderRoute: typeof AppRestoSalleRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
+    '/app/resto/reservations': {
+      id: '/app/resto/reservations'
+      path: '/reservations'
+      fullPath: '/app/resto/reservations'
+      preLoaderRoute: typeof AppRestoReservationsRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
+    '/app/resto/rapports': {
+      id: '/app/resto/rapports'
+      path: '/rapports'
+      fullPath: '/app/resto/rapports'
+      preLoaderRoute: typeof AppRestoRapportsRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
+    '/app/resto/parametres': {
+      id: '/app/resto/parametres'
+      path: '/parametres'
+      fullPath: '/app/resto/parametres'
+      preLoaderRoute: typeof AppRestoParametresRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
+    '/app/resto/menu': {
+      id: '/app/resto/menu'
+      path: '/menu'
+      fullPath: '/app/resto/menu'
+      preLoaderRoute: typeof AppRestoMenuRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
+    '/app/resto/equipe': {
+      id: '/app/resto/equipe'
+      path: '/equipe'
+      fullPath: '/app/resto/equipe'
+      preLoaderRoute: typeof AppRestoEquipeRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
+    '/app/resto/cuisine': {
+      id: '/app/resto/cuisine'
+      path: '/cuisine'
+      fullPath: '/app/resto/cuisine'
+      preLoaderRoute: typeof AppRestoCuisineRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
+    '/app/resto/commandes': {
+      id: '/app/resto/commandes'
+      path: '/commandes'
+      fullPath: '/app/resto/commandes'
+      preLoaderRoute: typeof AppRestoCommandesRouteImport
+      parentRoute: typeof AppRestoRoute
     }
     '/app/produits/nouveau': {
       id: '/app/produits/nouveau'
@@ -1176,6 +1384,34 @@ const AppProduitsRouteWithChildren = AppProduitsRoute._addFileChildren(
   AppProduitsRouteChildren,
 )
 
+interface AppRestoRouteChildren {
+  AppRestoCommandesRoute: typeof AppRestoCommandesRoute
+  AppRestoCuisineRoute: typeof AppRestoCuisineRoute
+  AppRestoEquipeRoute: typeof AppRestoEquipeRoute
+  AppRestoMenuRoute: typeof AppRestoMenuRoute
+  AppRestoParametresRoute: typeof AppRestoParametresRoute
+  AppRestoRapportsRoute: typeof AppRestoRapportsRoute
+  AppRestoReservationsRoute: typeof AppRestoReservationsRoute
+  AppRestoSalleRoute: typeof AppRestoSalleRoute
+  AppRestoIndexRoute: typeof AppRestoIndexRoute
+}
+
+const AppRestoRouteChildren: AppRestoRouteChildren = {
+  AppRestoCommandesRoute: AppRestoCommandesRoute,
+  AppRestoCuisineRoute: AppRestoCuisineRoute,
+  AppRestoEquipeRoute: AppRestoEquipeRoute,
+  AppRestoMenuRoute: AppRestoMenuRoute,
+  AppRestoParametresRoute: AppRestoParametresRoute,
+  AppRestoRapportsRoute: AppRestoRapportsRoute,
+  AppRestoReservationsRoute: AppRestoReservationsRoute,
+  AppRestoSalleRoute: AppRestoSalleRoute,
+  AppRestoIndexRoute: AppRestoIndexRoute,
+}
+
+const AppRestoRouteWithChildren = AppRestoRoute._addFileChildren(
+  AppRestoRouteChildren,
+)
+
 interface AppVentesRouteChildren {
   AppVentesNouvelleRoute: typeof AppVentesNouvelleRoute
   AppVentesIndexRoute: typeof AppVentesIndexRoute
@@ -1205,6 +1441,7 @@ interface AppRouteChildren {
   AppProduitsRoute: typeof AppProduitsRouteWithChildren
   AppProfilRoute: typeof AppProfilRoute
   AppRapportsRoute: typeof AppRapportsRoute
+  AppRestoRoute: typeof AppRestoRouteWithChildren
   AppStockRoute: typeof AppStockRoute
   AppSupportRoute: typeof AppSupportRoute
   AppVentesRoute: typeof AppVentesRouteWithChildren
@@ -1226,6 +1463,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppProduitsRoute: AppProduitsRouteWithChildren,
   AppProfilRoute: AppProfilRoute,
   AppRapportsRoute: AppRapportsRoute,
+  AppRestoRoute: AppRestoRouteWithChildren,
   AppStockRoute: AppStockRoute,
   AppSupportRoute: AppSupportRoute,
   AppVentesRoute: AppVentesRouteWithChildren,
@@ -1257,6 +1495,7 @@ const rootRouteChildren: RootRouteChildren = {
   InscriptionRoute: InscriptionRoute,
   SouscriptionRoute: SouscriptionRouteWithChildren,
   TarifsRoute: TarifsRoute,
+  RestoReserverSlugRoute: RestoReserverSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

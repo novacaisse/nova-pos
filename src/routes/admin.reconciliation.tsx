@@ -48,7 +48,7 @@ function ReconciliationCard({ row }: { row: ReconciliationRow }) {
         <div>
           <div className="font-display text-base font-bold">{row.organization_name}</div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            Compte : {row.account_name ?? "—"} {row.app_module && `· ${row.app_module === "pos" ? "ZegCaisse" : "ZegHotel"}`}
+            Compte : {row.account_name ?? "—"} {row.app_module && `· ${row.app_module === "pos" ? "ZegCaisse" : row.app_module === "hotel" ? "ZegHotel" : "ZegResto"}`}
           </div>
         </div>
       </div>
