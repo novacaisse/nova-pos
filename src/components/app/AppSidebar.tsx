@@ -31,6 +31,7 @@ import {
   UtensilsCrossed,
   LayoutGrid,
   BookOpen,
+  ChefHat,
 } from "lucide-react";
 import {
   Sidebar,
@@ -75,6 +76,7 @@ const ICONS = {
   UtensilsCrossed,
   LayoutGrid,
   BookOpen,
+  ChefHat,
 } as const;
 
 type NavItem = {
@@ -116,12 +118,14 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
     { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
   ],
-  // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu) —
-  // commandes/cuisine/réservations/rapports rejoignent ce groupe aux
-  // phases suivantes, une fois leurs routes réellement posées.
+  // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu ;
+  // Phase 2 : Commandes + Cuisine) — réservations/rapports rejoignent ce
+  // groupe aux phases suivantes, une fois leurs routes réellement posées.
   resto: [
     { title: "Tableau de bord", url: "/app/resto", icon: "UtensilsCrossed" },
     { title: "Salle", url: "/app/resto/salle", icon: "LayoutGrid" },
+    { title: "Commandes", url: "/app/resto/commandes", icon: "Receipt" },
+    { title: "Cuisine", url: "/app/resto/cuisine", icon: "ChefHat" },
     { title: "Menu", url: "/app/resto/menu", icon: "BookOpen" },
   ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
@@ -181,12 +185,16 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // n'accorde qu'owner/manager (table existante depuis 020g) — masqué pour
   // les autres rôles hôtel en cohérence.
   "/app/hotel/canaux": ["housekeeping", "accountant", "front_desk"],
-  // ZegResto (Phase 1) : le Cuisinier n'a accès qu'au KDS (/app/resto/cuisine,
+  // ZegResto : le Cuisinier n'a accès qu'au KDS (/app/resto/cuisine,
   // Phase 2) — masqué de tout le reste de la nav resto. Le Serveur a accès
-  // au plan de salle et à la prise de commande mais pas au menu ni aux
-  // paramètres (décision produit explicite du prompt ZegResto).
+  // au plan de salle et à la prise de commande mais pas au menu, aux
+  // paramètres ni à la cuisine (décision produit explicite du prompt
+  // ZegResto — le statut du ticket reste visible depuis le détail de la
+  // commande côté Commandes, pas besoin du KDS dédié).
   "/app/resto": ["cook"],
   "/app/resto/salle": ["cook"],
+  "/app/resto/commandes": ["cook"],
+  "/app/resto/cuisine": ["server"],
   "/app/resto/menu": ["server", "cook"],
   "/app/resto/parametres": ["server", "cook"],
 };
