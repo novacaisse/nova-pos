@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { playKdsSound } from "@/lib/kdsSound";
 
 function useOrganizationId() {
   const { currentOrganization } = useOrganization();
@@ -1072,6 +1073,9 @@ export type RestoSettings = {
   loyalty_earn_amount_per_point: number;
   loyalty_redeem_value_per_point: number;
   loyalty_min_points_to_redeem: number;
+  cash_float_default: number;
+  cash_float_required: boolean;
+  reservation_sound_enabled: boolean;
   updated_at: string;
 };
 export const RESTO_SETTINGS_DEFAULTS: Omit<RestoSettings, "organization_id" | "updated_at"> = {
@@ -1084,6 +1088,9 @@ export const RESTO_SETTINGS_DEFAULTS: Omit<RestoSettings, "organization_id" | "u
   loyalty_earn_amount_per_point: 100,
   loyalty_redeem_value_per_point: 1,
   loyalty_min_points_to_redeem: 1,
+  cash_float_default: 0,
+  cash_float_required: false,
+  reservation_sound_enabled: true,
 };
 
 export function useRestoSettings() {
@@ -1110,4 +1117,33 @@ export function useUpdateRestoSettings() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_settings", organizationId] }),
   });
+}
+// Alerte sonore "nouvelle réservation" (migration 046) — écoute directement
+// les événements INSERT (payload disponible, contrairement au pattern
+// invalidate-only de useRestoRealtimeInvalidate) pour ne sonner que sur une
+// réservation source='public' (une réservation saisie par le staff
+// lui-même n'a pas à s'auto-notifier). Réutilise la palette KDS
+// (kds_sound_choice/kds_sound_volume) — à appeler une fois depuis l'écran
+// Réservations.
+export function useRestoNewReservationSoundAlert() {
+  const organizationId = useOrganizationId();
+  const { data: settingsRow } = useRestoSettings();
+  const enabled = settingsRow?.reservation_sound_enabled ?? RESTO_SETTINGS_DEFAULTS.reservation_sound_enabled;
+  const soundChoice = settingsRow?.kds_sound_choice ?? RESTO_SETTINGS_DEFAULTS.kds_sound_choice;
+  const soundVolume = settingsRow?.kds_sound_volume ?? RESTO_SETTINGS_DEFAULTS.kds_sound_volume;
+
+  useEffect(() => {
+    if (!organizationId || !enabled) return;
+    const channel = supabase
+      .channel(`resto_reservations_sound_${organizationId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "resto_reservations", filter: `organization_id=eq.${organizationId}` },
+        (payload: any) => {
+          if (payload.new?.source === "public") playKdsSound(soundChoice, soundVolume);
+        },
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [organizationId, enabled, soundChoice, soundVolume]);
 }

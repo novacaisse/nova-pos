@@ -7,7 +7,7 @@ import { Plus, X, Save, Trash2, Loader2, CalendarClock, Check, Ban, Users, Phone
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
   useRestoReservations, useUpsertRestoReservation, useDeleteRestoReservation, useRestoTables,
-  useRestoLinkedOrganizations, useRestoReservationsConsolidated,
+  useRestoLinkedOrganizations, useRestoReservationsConsolidated, useRestoNewReservationSoundAlert,
   type RestoReservation, type ReservationStatut, type RestoLinkedOrganization,
 } from "@/lib/data/restoHooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -26,6 +26,7 @@ const STATUT_COLOR: Record<ReservationStatut, string> = {
 };
 
 function ReservationsPage() {
+  useRestoNewReservationSoundAlert();
   const { currentOrganization } = useOrganization();
   const { data: linkedOrgs = [] } = useRestoLinkedOrganizations();
   const otherOrgs = linkedOrgs.filter((o) => o.id !== currentOrganization?.id);

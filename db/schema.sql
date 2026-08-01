@@ -3390,6 +3390,17 @@ create table if not exists public.resto_settings (
   loyalty_earn_amount_per_point numeric(14,2) not null default 100 check (loyalty_earn_amount_per_point > 0),
   loyalty_redeem_value_per_point numeric(14,4) not null default 1 check (loyalty_redeem_value_per_point >= 0),
   loyalty_min_points_to_redeem integer not null default 1 check (loyalty_min_points_to_redeem >= 0),
+  -- Fond de caisse (migration 046) : réglage de configuration uniquement
+  -- (montant par défaut + bascule "ouverture obligatoire"), pas un suivi de
+  -- session de caisse complet (aucune fonctionnalité de ce type n'existe
+  -- ailleurs dans ZegOS, ZegCaisse compris — écart volontaire, non demandé
+  -- comme livrable séparé).
+  cash_float_default numeric(14,2) not null default 0 check (cash_float_default >= 0),
+  cash_float_required boolean not null default false,
+  -- Alerte sonore nouvelle réservation (migration 046) : réutilise la même
+  -- palette que le KDS (kds_sound_choice/kds_sound_volume) plutôt que
+  -- dupliquer choix+volume par type d'alerte.
+  reservation_sound_enabled boolean not null default true,
   updated_at timestamptz not null default now()
 );
 alter table public.resto_settings enable row level security;
