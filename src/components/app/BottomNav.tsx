@@ -22,6 +22,9 @@ import {
   Building2,
   Coffee,
   Radio,
+  UtensilsCrossed,
+  LayoutGrid,
+  BookOpen,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -78,6 +81,19 @@ const HOUSEKEEPING_PRIMARY: Item[] = [
   { label: "Ménage", to: "/app/hotel/housekeeping", icon: Sparkle },
 ];
 
+// server/cook n'ont RLS-wise aucun accès aux tables ZegCaisse/ZegHotel —
+// même logique que front_desk/housekeeping ci-dessus, pour ZegResto.
+// Construit au fil des phases (Phase 1 : Salle + Menu) — commandes/cuisine
+// rejoignent ces tableaux à la Phase 2.
+const RESTO_PRIMARY: Item[] = [
+  { label: "Bord", to: "/app/resto", icon: UtensilsCrossed },
+  { label: "Salle", to: "/app/resto/salle", icon: LayoutGrid },
+];
+const RESTO_MORE: Item[] = [
+  { label: "Menu", to: "/app/resto/menu", icon: BookOpen },
+  { label: "Paramètres", to: "/app/resto/parametres", icon: Settings },
+];
+
 export function BottomNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -98,10 +114,13 @@ export function BottomNav() {
   // AppSidebar. front_desk/housekeeping n'ont de toute façon accès qu'à
   // ZegHôtel (RLS), donc toujours ce menu pour eux.
   const isHotelOnlyRole = myRole === "housekeeping" || myRole === "front_desk";
+  const isRestoOnlyRole = myRole === "server" || myRole === "cook";
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
-  const useHotelNav = isHotelOnlyRole
-    || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext)));
+  const inRestoContext = pathname.startsWith("/app/resto");
+  const useHotelNav = !isRestoOnlyRole && (isHotelOnlyRole
+    || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext))));
+  const useRestoNav = isRestoOnlyRole || (!useHotelNav && (activeApps.includes("resto") || inRestoContext));
 
   // HOUSEKEEPING_PRIMARY reste toujours affiché tel quel pour ce rôle (ses
   // deux seuls écrans opérationnels, pas des modules "métier" bridables par
@@ -110,7 +129,11 @@ export function BottomNav() {
   // n'étaient jusqu'ici jamais filtrés, donc jamais bridés par une formule).
   const primary = useHotelNav
     ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
-    : PRIMARY.filter(included);
+    : useRestoNav
+      // cook : Bord/Salle masqués (accès KDS uniquement — /app/resto/cuisine
+      // arrive à la Phase 2, cette liste sera alors une vraie COOK_PRIMARY).
+      ? (myRole === "cook" ? [] : RESTO_PRIMARY.filter(included))
+      : PRIMARY.filter(included);
   const more = useHotelNav
     ? (myRole === "housekeeping"
         ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
@@ -125,11 +148,16 @@ export function BottomNav() {
           : myRole === "front_desk"
             ? HOTEL_MORE.filter(included).filter((m) => m.to !== "/app/hotel/canaux")
             : HOTEL_MORE.filter(included))
-    : MORE.filter(included);
-  // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes
-  // (owner/manager/accountant) — front_desk/housekeeping n'ont RLS-wise
-  // aucun accès à ZegCaisse, inutile de leur proposer de "basculer".
-  const showSwitcher = bothAppsActive && !isHotelOnlyRole;
+    : useRestoNav
+      // server : pas d'accès menu ni paramètres (décision produit ZegResto).
+      // cook : rien tant que /app/resto/cuisine n'existe pas (Phase 2).
+      ? (myRole === "server" || myRole === "cook" ? [] : RESTO_MORE.filter(included))
+      : MORE.filter(included);
+  // Le switcher n'a de sens que pour un rôle qui a accès à plusieurs mondes
+  // (owner/manager/accountant) — front_desk/housekeeping/server/cook n'ont
+  // RLS-wise aucun accès aux autres applications, inutile de leur proposer
+  // de "basculer".
+  const showSwitcher = bothAppsActive && !isHotelOnlyRole && !isRestoOnlyRole;
 
   return (
     <>

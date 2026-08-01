@@ -28,6 +28,9 @@ import {
   Building2,
   Coffee,
   Radio,
+  UtensilsCrossed,
+  LayoutGrid,
+  BookOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -69,6 +72,9 @@ const ICONS = {
   Building2,
   Coffee,
   Radio,
+  UtensilsCrossed,
+  LayoutGrid,
+  BookOpen,
 } as const;
 
 type NavItem = {
@@ -110,6 +116,14 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
     { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
   ],
+  // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu) —
+  // commandes/cuisine/réservations/rapports rejoignent ce groupe aux
+  // phases suivantes, une fois leurs routes réellement posées.
+  resto: [
+    { title: "Tableau de bord", url: "/app/resto", icon: "UtensilsCrossed" },
+    { title: "Salle", url: "/app/resto/salle", icon: "LayoutGrid" },
+    { title: "Menu", url: "/app/resto/menu", icon: "BookOpen" },
+  ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
   // de commun dans la nav entre les deux applications (le paramètre
   // "Applications" pour activer/désactiver/basculer vit maintenant comme
@@ -121,6 +135,11 @@ const NAV: Record<string, NavItem[]> = {
   adminHotel: [
     { title: "Équipe", url: "/app/hotel/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/hotel/parametres", icon: "Settings" },
+  ],
+  // Équipe (/app/resto/equipe) rejoint ce groupe à la Phase 6, une fois la
+  // route posée — Paramètres existe dès la Phase 0 (stub minimal).
+  adminResto: [
+    { title: "Paramètres", url: "/app/resto/parametres", icon: "Settings" },
   ],
 };
 
@@ -162,6 +181,14 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // n'accorde qu'owner/manager (table existante depuis 020g) — masqué pour
   // les autres rôles hôtel en cohérence.
   "/app/hotel/canaux": ["housekeeping", "accountant", "front_desk"],
+  // ZegResto (Phase 1) : le Cuisinier n'a accès qu'au KDS (/app/resto/cuisine,
+  // Phase 2) — masqué de tout le reste de la nav resto. Le Serveur a accès
+  // au plan de salle et à la prise de commande mais pas au menu ni aux
+  // paramètres (décision produit explicite du prompt ZegResto).
+  "/app/resto": ["cook"],
+  "/app/resto/salle": ["cook"],
+  "/app/resto/menu": ["server", "cook"],
+  "/app/resto/parametres": ["server", "cook"],
 };
 
 export function AppSidebar() {
@@ -178,8 +205,10 @@ export function AppSidebar() {
   // Administration (Équipe/Paramètres) inclus, on bascule via <AppSwitcher />.
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
-  const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext);
-  const showHotel = activeApps.includes("hotel") && (!bothAppsActive || inHotelContext);
+  const inRestoContext = pathname.startsWith("/app/resto");
+  const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext) && !inRestoContext;
+  const showHotel = activeApps.includes("hotel") && (!bothAppsActive || inHotelContext) && !inRestoContext;
+  const showResto = activeApps.includes("resto") || inRestoContext;
 
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
@@ -277,8 +306,10 @@ export function AppSidebar() {
         {showPos && renderGroup("Opération", NAV.operation)}
         {showPos && renderGroup("Catalogue", NAV.catalogue)}
         {showHotel && renderGroup("Hôtel", NAV.hotel)}
+        {showResto && renderGroup("Restaurant", NAV.resto)}
         {showPos && renderGroup("Administration", NAV.adminPos)}
         {showHotel && renderGroup("Administration", NAV.adminHotel)}
+        {showResto && renderGroup("Administration", NAV.adminResto)}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-3">
