@@ -2,6 +2,7 @@
 // conventions que hooks.ts (ZegCaisse) et hotelHooks.ts (ZegHotel) : RLS
 // fait foi côté serveur, le filtre organization_id ici est ceinture +
 // bretelles. Toutes les tables sont préfixées resto_ (migrations 035-041).
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -295,5 +296,177 @@ export function useSetRestoMenuItemModifiers() {
       }
     },
     onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_menu_item_modifiers", vars.menuItemId] }),
+  });
+}
+
+// ============ COMMANDES & CUISINE (Phase 2 — flux temps réel) ============
+export type OrderType = "salle" | "emporter" | "livraison";
+export type OrderStatut = "ouverte" | "envoyee" | "servie" | "fermee" | "annulee";
+export type OrderLineStatut = "en_attente" | "servie" | "annulee";
+export type KitchenTicketStatut = "en_attente" | "en_preparation" | "pret";
+
+export type RestoOrder = {
+  id: string; organization_id: string; table_id: string | null; type: OrderType;
+  statut: OrderStatut; server_id: string | null; created_at: string; closed_at: string | null;
+  table?: RestoTable | null;
+};
+export type ChosenModifier = { option_id: string; nom: string; impact_prix: number };
+export type RestoOrderItem = {
+  id: string; organization_id: string; order_id: string; menu_item_id: string | null;
+  quantite: number; modifiers_choisis: ChosenModifier[]; statut_ligne: OrderLineStatut;
+  prix_unitaire: number; created_at: string;
+  menu_item?: RestoMenuItem | null;
+};
+export type RestoKitchenTicket = {
+  id: string; organization_id: string; order_id: string; statut: KitchenTicketStatut;
+  created_at: string; ready_at: string | null;
+  order?: RestoOrder | null;
+};
+
+// Écrans "temps réel" (Commandes, Cuisine) : la RLS suffit à sécuriser
+// l'accès, mais rien n'y déclenchait de refetch avant cette Phase 2 — même
+// souci que le KDS lui-même. Un seul hook générique, réutilisé par les
+// écrans plutôt que dupliqué : s'abonne à un channel Postgres Changes filtré
+// par organization_id et appelle `onChange` à chaque événement — chaque
+// appelant décide QUELLES query keys invalider (ex. resto_order_items est
+// caché par order_id, pas par organization_id : un simple [table,
+// organizationId] générique ne matcherait pas ces caches).
+function useRestoRealtimeInvalidate(table: string, onChange: () => void) {
+  const organizationId = useOrganizationId();
+  useEffect(() => {
+    if (!organizationId) return;
+    const channel = supabase
+      .channel(`resto_${table}_${organizationId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table, filter: `organization_id=eq.${organizationId}` },
+        onChange,
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationId, table]);
+}
+
+export function useRestoOrders(includeClosed = false) {
+  const organizationId = useOrganizationId();
+  const qc = useQueryClient();
+  useRestoRealtimeInvalidate("resto_orders", () => qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] }));
+  useRestoRealtimeInvalidate("resto_order_items", () => {
+    qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+    qc.invalidateQueries({ queryKey: ["resto_order_items"] });
+  });
+  return useQuery({
+    queryKey: ["resto_orders", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<RestoOrder[]> => {
+      let q = supabase.from("resto_orders").select("*, table:resto_tables(*)").eq("organization_id", organizationId!);
+      if (!includeClosed) q = q.not("statut", "in", "(fermee,annulee)");
+      const { data, error } = await q.order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as RestoOrder[];
+    },
+  });
+}
+export function useUpsertRestoOrder() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (o: Partial<RestoOrder> & { type: OrderType }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { table, ...rest } = o as any;
+      const { data, error } = await supabase.from("resto_orders")
+        .upsert({ ...rest, organization_id: organizationId }).select().single();
+      if (error) throw error; return data as RestoOrder;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] }),
+  });
+}
+
+export function useRestoOrderItems(orderId: string | null) {
+  return useQuery({
+    queryKey: ["resto_order_items", orderId],
+    enabled: !!orderId,
+    queryFn: async (): Promise<RestoOrderItem[]> => {
+      const { data, error } = await supabase.from("resto_order_items")
+        .select("*, menu_item:resto_menu_items(*)").eq("order_id", orderId!).order("created_at");
+      if (error) throw error;
+      return data as RestoOrderItem[];
+    },
+  });
+}
+export function useAddRestoOrderItem() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (i: { orderId: string; menuItemId: string; quantite: number; modifiers?: ChosenModifier[] }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("add_resto_order_item", {
+        p_organization_id: organizationId, p_order_id: i.orderId, p_menu_item_id: i.menuItemId,
+        p_quantite: i.quantite, p_modifiers: i.modifiers ?? [],
+      });
+      if (error) throw error;
+      return data as RestoOrderItem;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] });
+    },
+  });
+}
+export function useUpdateRestoOrderItemStatut() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, statut_ligne }: { id: string; orderId: string; statut_ligne: OrderLineStatut }) => {
+      const { error } = await supabase.from("resto_order_items").update({ statut_ligne }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] }),
+  });
+}
+
+export function useRestoKitchenTickets() {
+  const organizationId = useOrganizationId();
+  const qc = useQueryClient();
+  useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] }));
+  return useQuery({
+    queryKey: ["resto_kitchen_tickets", organizationId],
+    enabled: !!organizationId,
+    refetchInterval: 15_000, // filet de sécurité si le channel realtime se déconnecte
+    queryFn: async (): Promise<RestoKitchenTicket[]> => {
+      const { data, error } = await supabase.from("resto_kitchen_tickets")
+        .select("*, order:resto_orders(*, table:resto_tables(*))")
+        .eq("organization_id", organizationId!).neq("statut", "pret").order("created_at");
+      if (error) throw error;
+      return data as RestoKitchenTicket[];
+    },
+  });
+}
+// Ticket d'une commande précise, y compris "pret" (contrairement à
+// useRestoKitchenTickets, dédié au KDS qui n'affiche que ce qui reste à
+// préparer) — utilisé par l'écran Commandes pour savoir si un plat est
+// prêt à servir.
+export function useRestoOrderKitchenTicket(orderId: string | null) {
+  const qc = useQueryClient();
+  useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_ticket_for_order"] }));
+  return useQuery({
+    queryKey: ["resto_kitchen_ticket_for_order", orderId],
+    enabled: !!orderId,
+    queryFn: async (): Promise<RestoKitchenTicket | null> => {
+      const { data, error } = await supabase.from("resto_kitchen_tickets")
+        .select("*").eq("order_id", orderId!).maybeSingle();
+      if (error) throw error;
+      return data as RestoKitchenTicket | null;
+    },
+  });
+}
+export function useUpdateKitchenTicketStatut() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, statut }: { id: string; statut: KitchenTicketStatut }) => {
+      const { error } = await supabase.from("resto_kitchen_tickets")
+        .update({ statut, ready_at: statut === "pret" ? new Date().toISOString() : null }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] }),
   });
 }

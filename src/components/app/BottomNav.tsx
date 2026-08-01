@@ -25,6 +25,7 @@ import {
   UtensilsCrossed,
   LayoutGrid,
   BookOpen,
+  ChefHat,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -83,15 +84,21 @@ const HOUSEKEEPING_PRIMARY: Item[] = [
 
 // server/cook n'ont RLS-wise aucun accès aux tables ZegCaisse/ZegHotel —
 // même logique que front_desk/housekeeping ci-dessus, pour ZegResto.
-// Construit au fil des phases (Phase 1 : Salle + Menu) — commandes/cuisine
-// rejoignent ces tableaux à la Phase 2.
 const RESTO_PRIMARY: Item[] = [
   { label: "Bord", to: "/app/resto", icon: UtensilsCrossed },
   { label: "Salle", to: "/app/resto/salle", icon: LayoutGrid },
+  { label: "Commandes", to: "/app/resto/commandes", icon: Receipt },
 ];
 const RESTO_MORE: Item[] = [
+  { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
   { label: "Menu", to: "/app/resto/menu", icon: BookOpen },
   { label: "Paramètres", to: "/app/resto/parametres", icon: Settings },
+];
+// cook n'a qu'un seul écran opérationnel (le KDS) — même traitement que
+// HOUSEKEEPING_PRIMARY côté ZegHotel : jamais filtré par formule, toujours
+// affiché tel quel pour ce rôle.
+const COOK_PRIMARY: Item[] = [
+  { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
 ];
 
 export function BottomNav() {
@@ -130,9 +137,7 @@ export function BottomNav() {
   const primary = useHotelNav
     ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
     : useRestoNav
-      // cook : Bord/Salle masqués (accès KDS uniquement — /app/resto/cuisine
-      // arrive à la Phase 2, cette liste sera alors une vraie COOK_PRIMARY).
-      ? (myRole === "cook" ? [] : RESTO_PRIMARY.filter(included))
+      ? (myRole === "cook" ? COOK_PRIMARY : RESTO_PRIMARY.filter(included))
       : PRIMARY.filter(included);
   const more = useHotelNav
     ? (myRole === "housekeeping"
@@ -149,8 +154,10 @@ export function BottomNav() {
             ? HOTEL_MORE.filter(included).filter((m) => m.to !== "/app/hotel/canaux")
             : HOTEL_MORE.filter(included))
     : useRestoNav
-      // server : pas d'accès menu ni paramètres (décision produit ZegResto).
-      // cook : rien tant que /app/resto/cuisine n'existe pas (Phase 2).
+      // server : pas d'accès cuisine/menu/paramètres (décision produit
+      // ZegResto — le statut du ticket reste visible depuis Commandes).
+      // cook : COOK_PRIMARY couvre déjà son seul écran (Cuisine), rien de
+      // plus dans "Plus".
       ? (myRole === "server" || myRole === "cook" ? [] : RESTO_MORE.filter(included))
       : MORE.filter(included);
   // Le switcher n'a de sens que pour un rôle qui a accès à plusieurs mondes
