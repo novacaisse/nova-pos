@@ -575,3 +575,97 @@ export function useDeleteRecipeIngredient() {
     onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_recipe", vars.menuItemId] }),
   });
 }
+
+// ============ FACTURATION (Phase 5 — notes, partage, paiements) ============
+export type BillStatut = "ouverte" | "payee" | "annulee";
+export type SplitMode = "aucun" | "egal" | "detaille";
+export type PaymentMethode = "mobile_money" | "cash" | "carte";
+export type RestoBill = {
+  id: string; order_id: string; organization_id: string; total: number;
+  statut: BillStatut; split_mode: SplitMode; created_at: string;
+};
+export type RestoBillSplit = { id: string; organization_id: string; bill_id: string; split_index: number; montant: number };
+export type RestoBillPayment = {
+  id: string; organization_id: string; bill_id: string; split_id: string | null;
+  methode: PaymentMethode; montant: number; statut: "validee" | "annulee"; created_at: string;
+};
+
+export function useRestoBill(orderId: string | null) {
+  return useQuery({
+    queryKey: ["resto_bill", orderId],
+    enabled: !!orderId,
+    queryFn: async (): Promise<RestoBill | null> => {
+      const { data, error } = await supabase.from("resto_bills").select("*").eq("order_id", orderId!).maybeSingle();
+      if (error) throw error;
+      return data as RestoBill | null;
+    },
+  });
+}
+export function useCreateRestoBill() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, splitMode, splitCount }: { orderId: string; splitMode: SplitMode; splitCount?: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("create_resto_bill", {
+        p_organization_id: organizationId, p_order_id: orderId, p_split_mode: splitMode, p_split_count: splitCount ?? null,
+      });
+      if (error) throw error;
+      return data as RestoBill;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_bill", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+    },
+  });
+}
+export function useRestoBillSplits(billId: string | null) {
+  return useQuery({
+    queryKey: ["resto_bill_splits", billId],
+    enabled: !!billId,
+    queryFn: async (): Promise<RestoBillSplit[]> => {
+      const { data, error } = await supabase.from("resto_bill_splits").select("*").eq("bill_id", billId!).order("split_index");
+      if (error) throw error;
+      return data as RestoBillSplit[];
+    },
+  });
+}
+export function useRestoBillPayments(billId: string | null) {
+  return useQuery({
+    queryKey: ["resto_bill_payments", billId],
+    enabled: !!billId,
+    queryFn: async (): Promise<RestoBillPayment[]> => {
+      const { data, error } = await supabase.from("resto_bill_payments").select("*").eq("bill_id", billId!).order("created_at");
+      if (error) throw error;
+      return data as RestoBillPayment[];
+    },
+  });
+}
+export function useSetRestoBillSplitItems() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ billId, assignments }: { billId: string; assignments: { order_item_id: string; split_index: number }[] }) => {
+      const { error } = await supabase.rpc("set_resto_bill_split_items", { p_bill_id: billId, p_assignments: assignments });
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_bill_splits", vars.billId] }),
+  });
+}
+export function useAddRestoBillPayment() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ billId, montant, methode, splitId }: { billId: string; montant: number; methode: PaymentMethode; splitId?: string }) => {
+      const { data, error } = await supabase.rpc("add_resto_bill_payment", {
+        p_bill_id: billId, p_montant: montant, p_methode: methode, p_split_id: splitId ?? null,
+      });
+      if (error) throw error;
+      return data as RestoBill;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_bill_payments", vars.billId] });
+      qc.invalidateQueries({ queryKey: ["resto_bill_splits", vars.billId] });
+      qc.invalidateQueries({ queryKey: ["resto_bill"] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_tables", organizationId] });
+    },
+  });
+}

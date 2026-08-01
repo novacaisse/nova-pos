@@ -3194,6 +3194,220 @@ create policy resto_recipe_ingredients_write on public.resto_recipe_ingredients 
       and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
   ));
 
+-- Migration 041 — ZegResto : Facturation (notes, partage, paiements).
+-- Comme pour resto_order_items/resto_kitchen_tickets, organization_id est
+-- ajouté sur resto_bill_splits/resto_bill_split_items/resto_bill_payments
+-- (non listées dans le schéma de la demande initiale).
+
+create table if not exists public.resto_bills (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.resto_orders(id) on delete cascade,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  total numeric(14,2) not null default 0,
+  statut text not null default 'ouverte' check (statut in ('ouverte', 'payee', 'annulee')),
+  split_mode text not null default 'aucun' check (split_mode in ('aucun', 'egal', 'detaille')),
+  created_at timestamptz not null default now(),
+  unique (order_id)
+);
+create index if not exists idx_resto_bills_org on public.resto_bills(organization_id);
+alter table public.resto_bills enable row level security;
+
+create policy resto_bills_select on public.resto_bills for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+create policy resto_bills_insert on public.resto_bills for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_bills_update on public.resto_bills for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_bills_delete on public.resto_bills for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Un split par "convive" (mode égal : montant réparti par create_resto_bill() ;
+-- mode détaillé : montant recalculé depuis resto_bill_split_items par
+-- set_resto_bill_split_items() — jamais les deux mécanismes en même temps).
+create table if not exists public.resto_bill_splits (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  bill_id uuid not null references public.resto_bills(id) on delete cascade,
+  split_index integer not null,
+  montant numeric(14,2) not null default 0,
+  created_at timestamptz not null default now(),
+  unique (bill_id, split_index)
+);
+create index if not exists idx_resto_bill_splits_org on public.resto_bill_splits(organization_id);
+create index if not exists idx_resto_bill_splits_bill on public.resto_bill_splits(bill_id);
+alter table public.resto_bill_splits enable row level security;
+
+create policy resto_bill_splits_select on public.resto_bill_splits for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+create policy resto_bill_splits_write on public.resto_bill_splits for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+
+-- Mode détaillé uniquement — peuplée uniquement par set_resto_bill_split_items()
+-- (aucune policy insert/update/delete to authenticated : jamais d'écriture
+-- directe côté client, la cohérence avec resto_bill_splits.montant doit
+-- rester atomique).
+create table if not exists public.resto_bill_split_items (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  bill_id uuid not null references public.resto_bills(id) on delete cascade,
+  split_index integer not null,
+  order_item_id uuid not null references public.resto_order_items(id) on delete cascade,
+  unique (bill_id, order_item_id)
+);
+create index if not exists idx_resto_bill_split_items_org on public.resto_bill_split_items(organization_id);
+create index if not exists idx_resto_bill_split_items_bill on public.resto_bill_split_items(bill_id);
+alter table public.resto_bill_split_items enable row level security;
+
+create policy resto_bill_split_items_select on public.resto_bill_split_items for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+
+create table if not exists public.resto_bill_payments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  bill_id uuid not null references public.resto_bills(id) on delete cascade,
+  split_id uuid references public.resto_bill_splits(id) on delete set null,
+  methode text not null check (methode in ('mobile_money', 'cash', 'carte')),
+  montant numeric(14,2) not null check (montant > 0),
+  statut text not null default 'validee' check (statut in ('validee', 'annulee')),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_bill_payments_org on public.resto_bill_payments(organization_id);
+create index if not exists idx_resto_bill_payments_bill on public.resto_bill_payments(bill_id);
+alter table public.resto_bill_payments enable row level security;
+
+create policy resto_bill_payments_select on public.resto_bill_payments for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+-- Pas de policy insert : les paiements ne sont enregistrés que via
+-- add_resto_bill_payment() (security definer plus bas).
+create policy resto_bill_payments_update on public.resto_bill_payments for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create or replace function public.create_resto_bill(
+  p_organization_id uuid,
+  p_order_id uuid,
+  p_split_mode text default 'aucun',
+  p_split_count integer default null
+) returns public.resto_bills
+language plpgsql security invoker set search_path = public as $$
+declare
+  v_total numeric(14,2);
+  v_bill public.resto_bills;
+  v_part numeric(14,2);
+  i integer;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+  select coalesce(sum(prix_unitaire * quantite), 0) into v_total
+  from public.resto_order_items where order_id = p_order_id and statut_ligne <> 'annulee';
+
+  insert into public.resto_bills (order_id, organization_id, total, split_mode)
+  values (p_order_id, p_organization_id, v_total, coalesce(p_split_mode, 'aucun'))
+  returning * into v_bill;
+
+  if p_split_mode = 'egal' and p_split_count is not null and p_split_count > 1 then
+    v_part := trunc(v_total / p_split_count, 2);
+    for i in 1..p_split_count loop
+      insert into public.resto_bill_splits (organization_id, bill_id, split_index, montant)
+      values (p_organization_id, v_bill.id, i, case when i = p_split_count then v_total - v_part * (p_split_count - 1) else v_part end);
+    end loop;
+  end if;
+
+  return v_bill;
+end;
+$$;
+revoke all on function public.create_resto_bill(uuid, uuid, text, integer) from public;
+grant execute on function public.create_resto_bill(uuid, uuid, text, integer) to authenticated;
+
+create or replace function public.set_resto_bill_split_items(
+  p_bill_id uuid,
+  p_assignments jsonb
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_bill public.resto_bills;
+  v_assignment jsonb;
+  v_split_index integer;
+begin
+  select * into v_bill from public.resto_bills where id = p_bill_id;
+  if not found then raise exception 'Note introuvable.'; end if;
+  if not public.has_any_role_in_organization(v_bill.organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  delete from public.resto_bill_split_items where bill_id = p_bill_id;
+  delete from public.resto_bill_splits where bill_id = p_bill_id;
+
+  for v_assignment in select * from jsonb_array_elements(coalesce(p_assignments, '[]'::jsonb)) loop
+    insert into public.resto_bill_split_items (organization_id, bill_id, split_index, order_item_id)
+    values (v_bill.organization_id, p_bill_id, (v_assignment->>'split_index')::integer, (v_assignment->>'order_item_id')::uuid);
+  end loop;
+
+  for v_split_index in
+    select distinct (a->>'split_index')::integer from jsonb_array_elements(coalesce(p_assignments, '[]'::jsonb)) a
+  loop
+    insert into public.resto_bill_splits (organization_id, bill_id, split_index, montant)
+    select v_bill.organization_id, p_bill_id, v_split_index,
+      coalesce(sum(oi.prix_unitaire * oi.quantite), 0)
+    from public.resto_bill_split_items bsi
+    join public.resto_order_items oi on oi.id = bsi.order_item_id
+    where bsi.bill_id = p_bill_id and bsi.split_index = v_split_index;
+  end loop;
+end;
+$$;
+revoke all on function public.set_resto_bill_split_items(uuid, jsonb) from public;
+grant execute on function public.set_resto_bill_split_items(uuid, jsonb) to authenticated;
+
+-- security definer (contrairement à add_sale_payment) car resto_bill_payments
+-- n'a aucune policy insert directe — voir plus haut.
+create or replace function public.add_resto_bill_payment(
+  p_bill_id uuid,
+  p_montant numeric,
+  p_methode text,
+  p_split_id uuid default null
+) returns public.resto_bills
+language plpgsql security definer set search_path = public as $$
+declare
+  v_bill public.resto_bills;
+  v_total_paid numeric(14,2);
+  v_table_id uuid;
+begin
+  if p_montant is null or p_montant <= 0 then
+    raise exception 'Montant invalide.';
+  end if;
+
+  select * into v_bill from public.resto_bills where id = p_bill_id for update;
+  if not found then raise exception 'Note introuvable.'; end if;
+  if not public.has_any_role_in_organization(v_bill.organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+  if v_bill.statut = 'payee' then raise exception 'Cette note est déjà réglée.'; end if;
+  if v_bill.statut = 'annulee' then raise exception 'Cette note a été annulée.'; end if;
+
+  insert into public.resto_bill_payments (organization_id, bill_id, split_id, methode, montant, statut)
+  values (v_bill.organization_id, p_bill_id, p_split_id, p_methode, p_montant, 'validee');
+
+  select coalesce(sum(montant), 0) into v_total_paid
+  from public.resto_bill_payments where bill_id = p_bill_id and statut = 'validee';
+
+  if v_total_paid >= v_bill.total then
+    update public.resto_bills set statut = 'payee' where id = p_bill_id returning * into v_bill;
+    update public.resto_orders set statut = 'fermee', closed_at = now() where id = v_bill.order_id
+    returning table_id into v_table_id;
+    if v_table_id is not null then
+      update public.resto_tables set statut = 'libre' where id = v_table_id and statut <> 'libre';
+    end if;
+  end if;
+
+  return v_bill;
+end;
+$$;
+revoke all on function public.add_resto_bill_payment(uuid, numeric, text, uuid) from public;
+grant execute on function public.add_resto_bill_payment(uuid, numeric, text, uuid) to authenticated;
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages) + les 15 tables
