@@ -472,6 +472,23 @@ export function useCreateRestoOrderCourse() {
     onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] }),
   });
 }
+// Marquer une étape "servie" une fois apportée à table — UPDATE direct
+// (pas de RPC nécessaire : resto_order_courses n'a pas de colonne
+// sensible et owner/manager/server ont déjà accès UPDATE par RLS,
+// contrairement à resto_order_items qui contient prix_unitaire/quantite).
+export function useMarkRestoCourseServed() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId }: { courseId: string; orderId: string }) => {
+      const { error } = await supabase.from("resto_order_courses").update({ statut: "servie" }).eq("id", courseId);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+    },
+  });
+}
 // send_resto_course() (RPC security definer) : envoi explicite en cuisine —
 // crée/relance le ticket cuisine de l'étape, remplace l'ancien auto-fire à
 // l'ajout d'article (V1).
@@ -511,21 +528,22 @@ export function useRestoKitchenTickets() {
     },
   });
 }
-// Ticket d'une commande précise, y compris "pret" (contrairement à
-// useRestoKitchenTickets, dédié au KDS qui n'affiche que ce qui reste à
-// préparer) — utilisé par l'écran Commandes pour savoir si un plat est
-// prêt à servir.
-export function useRestoOrderKitchenTicket(orderId: string | null) {
+// Tickets d'une commande précise (un par étape/course depuis la migration
+// 043 — une commande à plusieurs étapes a plusieurs tickets), y compris
+// "pret" (contrairement à useRestoKitchenTickets, dédié au KDS qui
+// n'affiche que ce qui reste à préparer) — utilisé par l'écran Commandes
+// pour savoir, étape par étape, si un plat est prêt à servir.
+export function useRestoOrderKitchenTickets(orderId: string | null) {
   const qc = useQueryClient();
-  useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_ticket_for_order"] }));
+  useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets_for_order"] }));
   return useQuery({
-    queryKey: ["resto_kitchen_ticket_for_order", orderId],
+    queryKey: ["resto_kitchen_tickets_for_order", orderId],
     enabled: !!orderId,
-    queryFn: async (): Promise<RestoKitchenTicket | null> => {
+    queryFn: async (): Promise<RestoKitchenTicket[]> => {
       const { data, error } = await supabase.from("resto_kitchen_tickets")
-        .select("*").eq("order_id", orderId!).maybeSingle();
+        .select("*").eq("order_id", orderId!).order("created_at");
       if (error) throw error;
-      return data as RestoKitchenTicket | null;
+      return data as RestoKitchenTicket[];
     },
   });
 }
