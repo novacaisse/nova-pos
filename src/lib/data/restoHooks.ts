@@ -676,6 +676,8 @@ export type PaymentMethode = "mobile_money" | "cash" | "carte";
 export type RestoBill = {
   id: string; order_id: string; organization_id: string; total: number;
   statut: BillStatut; split_mode: SplitMode; created_at: string;
+  loyalty_account_id: string | null; loyalty_discount: number;
+  loyalty_points_earned: number; loyalty_points_redeemed: number;
 };
 export type RestoBillSplit = { id: string; organization_id: string; bill_id: string; split_index: number; montant: number };
 export type RestoBillPayment = {
@@ -763,6 +765,56 @@ export function useAddRestoBillPayment() {
   });
 }
 
+// ============ FIDÉLITÉ (migration 045) — identité indépendante de
+// ZegResto, clé = numéro de téléphone (pas de FK vers public.customers,
+// cf. ARCHITECTURE.md). Solde/écriture jamais en direct côté client au-delà
+// de la lecture : tout crédit/débit de points passe par
+// apply_resto_bill_loyalty()/add_resto_bill_payment(). ============
+export type RestoLoyaltyAccount = {
+  id: string; organization_id: string; telephone: string; nom: string | null;
+  points_balance: number; created_at: string; updated_at: string;
+};
+export type RestoLoyaltyTransaction = {
+  id: string; organization_id: string; account_id: string; bill_id: string | null;
+  type: "earn" | "spend"; points: number; montant: number; created_at: string;
+};
+
+// Recherche par téléphone (saisie à la facturation) — null tant qu'aucun
+// compte n'existe pour ce numéro (première visite : apply_resto_bill_loyalty()
+// en créera un avec un solde à 0).
+export function useRestoLoyaltyAccountByPhone(telephone: string | null) {
+  const organizationId = useOrganizationId();
+  const phone = telephone?.trim() || null;
+  return useQuery({
+    queryKey: ["resto_loyalty_account_by_phone", organizationId, phone],
+    enabled: !!organizationId && !!phone,
+    queryFn: async (): Promise<RestoLoyaltyAccount | null> => {
+      const { data, error } = await supabase.from("resto_loyalty_accounts")
+        .select("*").eq("organization_id", organizationId!).eq("telephone", phone!).maybeSingle();
+      if (error) throw error;
+      return data as RestoLoyaltyAccount | null;
+    },
+  });
+}
+export function useApplyRestoBillLoyalty() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ billId, telephone, nom, redeemPoints }: { billId: string; orderId: string; telephone: string; nom?: string; redeemPoints: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("apply_resto_bill_loyalty", {
+        p_organization_id: organizationId, p_bill_id: billId, p_telephone: telephone,
+        p_nom: nom || null, p_redeem_points: redeemPoints,
+      });
+      if (error) throw error;
+      return data as RestoBill;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_bill", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_loyalty_account_by_phone"] });
+    },
+  });
+}
+
 // ============ DASHBOARD & RAPPORTS (Phase 6) ============
 export function useRestoDashboardStats() {
   const organizationId = useOrganizationId();
@@ -845,11 +897,11 @@ export function useRestoReportData(from: Date, to: Date) {
   });
 }
 
-// ============ PARAMÈTRES (resto_settings — migration 044) : réglages KDS
-// pour l'instant, complétés par les chantiers suivants (Ticket & Caisse,
-// Sons & Notifications, fidélité). Ligne créée à la volée par le premier
-// upsert (comme hotel_settings) — data null tant que personne n'a encore
-// modifié les réglages, valeurs par défaut appliquées côté consommateur. ===
+// ============ PARAMÈTRES (resto_settings — migrations 044/045) : réglages
+// KDS + fidélité, complétés par le chantier 8 (Ticket & Caisse, Sons &
+// Notifications). Ligne créée à la volée par le premier upsert (comme
+// hotel_settings) — data null tant que personne n'a encore modifié les
+// réglages, valeurs par défaut appliquées côté consommateur. ===
 export type RestoSoundChoice = "chime" | "bell" | "soft";
 export type RestoSettings = {
   organization_id: string;
@@ -858,6 +910,10 @@ export type RestoSettings = {
   kds_sound_enabled: boolean;
   kds_sound_choice: RestoSoundChoice;
   kds_sound_volume: number;
+  loyalty_enabled: boolean;
+  loyalty_earn_amount_per_point: number;
+  loyalty_redeem_value_per_point: number;
+  loyalty_min_points_to_redeem: number;
   updated_at: string;
 };
 export const RESTO_SETTINGS_DEFAULTS: Omit<RestoSettings, "organization_id" | "updated_at"> = {
@@ -866,6 +922,10 @@ export const RESTO_SETTINGS_DEFAULTS: Omit<RestoSettings, "organization_id" | "u
   kds_sound_enabled: true,
   kds_sound_choice: "chime",
   kds_sound_volume: 0.6,
+  loyalty_enabled: false,
+  loyalty_earn_amount_per_point: 100,
+  loyalty_redeem_value_per_point: 1,
+  loyalty_min_points_to_redeem: 1,
 };
 
 export function useRestoSettings() {

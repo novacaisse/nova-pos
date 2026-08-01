@@ -23,7 +23,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, X, Loader2, Receipt, CheckCircle2, Ban, Utensils, CreditCard, Smartphone, Wallet, Users,
-  Search, Send, ChefHat, Image as ImageIcon, Circle,
+  Search, Send, ChefHat, Image as ImageIcon, Circle, Gift,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
@@ -34,8 +34,9 @@ import {
   useRestoMenuItemModifiers, useRestoBill, useCreateRestoBill, useRestoBillSplits, useRestoBillPayments,
   useSetRestoBillSplitItems, useAddRestoBillPayment,
   useRestoOrderCourses, useCreateRestoOrderCourse, useSendRestoCourse, useMarkRestoCourseServed,
+  useRestoSettings, RESTO_SETTINGS_DEFAULTS, useRestoLoyaltyAccountByPhone, useApplyRestoBillLoyalty,
   type RestoOrder, type OrderType, type ChosenModifier, type KitchenTicketStatut, type SplitMode, type PaymentMethode,
-  type RestoOrderItem, type RestoOrderCourse, type RestoKitchenTicket, type RestoMenuItem,
+  type RestoOrderItem, type RestoOrderCourse, type RestoKitchenTicket, type RestoMenuItem, type RestoBill,
 } from "@/lib/data/restoHooks";
 import { cn } from "@/lib/utils";
 
@@ -616,7 +617,7 @@ function BillModal({ orderId, items, existingBill, onClose }: {
               </button>
             </div>
           ) : (
-            <BillPaymentPanel bill={activeBill} items={items} formatMoney={formatMoney} onFullyPaid={onClose} />
+            <BillPaymentPanel bill={activeBill} items={items} orderId={orderId} formatMoney={formatMoney} onFullyPaid={onClose} />
           )}
         </div>
       </div>
@@ -624,8 +625,8 @@ function BillModal({ orderId, items, existingBill, onClose }: {
   );
 }
 
-function BillPaymentPanel({ bill, items, formatMoney, onFullyPaid }: {
-  bill: NonNullable<ReturnType<typeof useRestoBill>["data"]>; items: RestoOrderItem[];
+function BillPaymentPanel({ bill, items, orderId, formatMoney, onFullyPaid }: {
+  bill: NonNullable<ReturnType<typeof useRestoBill>["data"]>; items: RestoOrderItem[]; orderId: string;
   formatMoney: (n: number) => string; onFullyPaid: () => void;
 }) {
   const { data: splits = [] } = useRestoBillSplits(bill.split_mode !== "aucun" ? bill.id : null);
@@ -636,7 +637,8 @@ function BillPaymentPanel({ bill, items, formatMoney, onFullyPaid }: {
   const [error, setError] = useState<string | null>(null);
 
   const totalPaid = payments.filter((p) => p.statut === "validee").reduce((s, p) => s + p.montant, 0);
-  const remaining = Math.max(0, bill.total - totalPaid);
+  const netTotal = Math.max(0, bill.total - bill.loyalty_discount);
+  const remaining = Math.max(0, netTotal - totalPaid);
 
   // Pré-remplit "1 convive par article" au premier rendu, sans écraser une
   // modification déjà faite par l'utilisateur (dépend de la liste d'ids,
@@ -699,8 +701,20 @@ function BillPaymentPanel({ bill, items, formatMoney, onFullyPaid }: {
 
   return (
     <div className="space-y-4">
+      {/* Fidélité limitée au mode "Aucun partage" : combiner remise fidélité
+         et répartition entre convives (égale ou détaillée) n'a pas été
+         demandé explicitement et introduirait une ambiguïté (qui bénéficie
+         de la remise ?) — scope volontairement réduit, documenté dans le
+         résumé de fin de chantier. */}
+      {bill.split_mode === "aucun" && (
+        <LoyaltySection bill={bill} orderId={orderId} formatMoney={formatMoney} />
+      )}
+
       <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm">
         <div className="flex justify-between"><span>Total</span><span className="font-semibold">{formatMoney(bill.total)}</span></div>
+        {bill.loyalty_discount > 0 && (
+          <div className="flex justify-between text-success"><span>Remise fidélité</span><span>-{formatMoney(bill.loyalty_discount)}</span></div>
+        )}
         <div className="flex justify-between text-muted-foreground"><span>Réglé</span><span>{formatMoney(totalPaid)}</span></div>
         <div className="mt-1 flex justify-between border-t border-border pt-1 font-bold"><span>Reste</span><span>{formatMoney(remaining)}</span></div>
       </div>
@@ -730,6 +744,62 @@ function BillPaymentPanel({ bill, items, formatMoney, onFullyPaid }: {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Programme de fidélité (migration 045) : accrual automatique à
+// l'encaissement intégral (add_resto_bill_payment(), pas d'action ici) —
+// cette section ne sert qu'au rattachement du client par téléphone et à
+// l'échange optionnel de points contre une remise, via apply_resto_bill_loyalty()
+// (ré-appelable, rembourse l'échange précédent avant d'appliquer le nouveau).
+function LoyaltySection({ bill, orderId, formatMoney }: { bill: RestoBill; orderId: string; formatMoney: (n: number) => string }) {
+  const { data: settingsRow } = useRestoSettings();
+  const settings = { ...RESTO_SETTINGS_DEFAULTS, ...settingsRow };
+  const [phone, setPhone] = useState("");
+  const [redeemPoints, setRedeemPoints] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const { data: account } = useRestoLoyaltyAccountByPhone(phone.trim() || null);
+  const apply = useApplyRestoBillLoyalty();
+
+  if (!settings.loyalty_enabled) return null;
+
+  const balance = account?.points_balance ?? 0;
+  const canRedeem = phone.trim().length > 0 && balance >= settings.loyalty_min_points_to_redeem;
+
+  const submit = async () => {
+    setError(null);
+    try { await apply.mutateAsync({ billId: bill.id, orderId, telephone: phone, redeemPoints }); setRedeemPoints(0); }
+    catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
+  };
+
+  return (
+    <div className="rounded-xl border border-border p-3 text-sm">
+      <div className="mb-2 flex items-center gap-1.5 font-semibold"><Gift className="h-4 w-4 text-primary" /> Fidélité</div>
+      <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Téléphone du client"
+        className="h-9 w-full rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus:border-primary" />
+      {phone.trim() && (
+        <div className="mt-1.5 text-xs text-muted-foreground">
+          {account ? <>Solde actuel : <span className="font-semibold text-foreground">{balance} pts</span></> : "Nouveau client fidélité (0 pt)."}
+        </div>
+      )}
+      {canRedeem && (
+        <label className="mt-2 block">
+          <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Points à échanger (max {balance})</div>
+          <input type="number" min={0} max={balance} value={redeemPoints}
+            onChange={(e) => setRedeemPoints(Math.max(0, Math.min(balance, Number(e.target.value))))}
+            className="h-9 w-full rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus:border-primary" />
+          {redeemPoints > 0 && (
+            <div className="mt-1 text-xs text-muted-foreground">≈ {formatMoney(redeemPoints * settings.loyalty_redeem_value_per_point)} de remise</div>
+          )}
+        </label>
+      )}
+      {error && <div className="mt-2 rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{error}</div>}
+      <button onClick={submit} disabled={apply.isPending || !phone.trim()}
+        className="mt-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-primary text-xs font-bold text-primary-foreground disabled:opacity-40">
+        {apply.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Gift className="h-3.5 w-3.5" />}
+        {bill.loyalty_account_id ? "Mettre à jour" : "Appliquer"}
+      </button>
     </div>
   );
 }
