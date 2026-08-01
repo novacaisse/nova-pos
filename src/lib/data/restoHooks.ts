@@ -588,17 +588,28 @@ export function useRestoReservations() {
     },
   });
 }
+// organization_id n'est fourni QUE pour une création (rest.id absent) —
+// jamais réécrit sur une mise à jour, pour ne pas risquer de "voler" une
+// réservation d'un autre établissement vers l'organisation actuellement
+// active quand l'appelant est la vue consolidée multi-restaurant (V2,
+// chantier 6), qui édite des lignes appartenant à divers organization_id
+// tout en gardant une seule organisation "active" au sens de useOrganization().
 export function useUpsertRestoReservation() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (r: Partial<RestoReservation> & { nom_client: string; date_heure: string; nombre_couverts: number }) => {
-      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
-      const { table, ...rest } = r as any;
-      const { data, error } = await supabase.from("resto_reservations")
-        .upsert({ ...rest, organization_id: organizationId }).select().single();
+      const { table, organization, ...rest } = r as any;
+      if (!rest.id) {
+        if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+        rest.organization_id = organizationId;
+      }
+      const { data, error } = await supabase.from("resto_reservations").upsert(rest).select().single();
       if (error) throw error; return data as RestoReservation;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_reservations_consolidated"] });
+    },
   });
 }
 export function useDeleteRestoReservation() {
@@ -608,7 +619,53 @@ export function useDeleteRestoReservation() {
       const { error } = await supabase.from("resto_reservations").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_reservations_consolidated"] });
+    },
+  });
+}
+
+// Vue consolidée multi-restaurant (V2, chantier 6) : un propriétaire de
+// plusieurs établissements ZegResto sous le même account_id (regroupement
+// déjà natif — provision_organization() ajoute l'utilisateur comme
+// organization_members à chaque établissement qu'il crée) peut lister ses
+// autres restaurants et voir leurs réservations sans changer d'organisation
+// active. Aucune policy RLS nouvelle nécessaire : organizations/resto_reservations
+// filtrent déjà par appartenance réelle à organization_members — un
+// utilisateur qui n'est PAS membre d'un des établissements du compte ne le
+// verrait de toute façon pas apparaître ici. La page publique
+// /resto/reserver/$slug reste inchangée (une page par établissement).
+export type RestoLinkedOrganization = { id: string; name: string; slug: string };
+export function useRestoLinkedOrganizations() {
+  const { currentOrganization } = useOrganization();
+  return useQuery({
+    queryKey: ["resto_linked_organizations", currentOrganization?.account_id],
+    enabled: !!currentOrganization?.account_id,
+    queryFn: async (): Promise<RestoLinkedOrganization[]> => {
+      const { data, error } = await supabase.from("organizations")
+        .select("id, name, slug")
+        .eq("account_id", currentOrganization!.account_id)
+        .eq("app_module", "resto")
+        .order("name");
+      if (error) throw error;
+      return data as RestoLinkedOrganization[];
+    },
+  });
+}
+export function useRestoReservationsConsolidated(organizationIds: string[]) {
+  const ids = [...organizationIds].sort().join(",");
+  return useQuery({
+    queryKey: ["resto_reservations_consolidated", ids],
+    enabled: organizationIds.length > 0,
+    queryFn: async (): Promise<(RestoReservation & { organization?: RestoLinkedOrganization | null })[]> => {
+      const { data, error } = await supabase.from("resto_reservations")
+        .select("*, table:resto_tables(*), organization:organizations(id,name,slug)")
+        .in("organization_id", organizationIds)
+        .order("date_heure");
+      if (error) throw error;
+      return data as (RestoReservation & { organization?: RestoLinkedOrganization | null })[];
+    },
   });
 }
 
