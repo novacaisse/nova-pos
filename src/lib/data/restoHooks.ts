@@ -518,3 +518,60 @@ export function useDeleteRestoReservation() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] }),
   });
 }
+
+// ============ RECETTES (Phase 4 — ingrédients = produits ZegCaisse
+// existants, cf. migration 040 pour la justification de ce choix) ============
+export type RestoRecipeIngredient = {
+  id: string; recipe_id: string; ingredient_ref: string; quantite: number; unite: string | null;
+  product?: { id: string; name: string } | null;
+};
+export type RestoRecipe = { id: string; organization_id: string; menu_item_id: string };
+
+export function useRestoRecipe(menuItemId: string | null) {
+  return useQuery({
+    queryKey: ["resto_recipe", menuItemId],
+    enabled: !!menuItemId,
+    queryFn: async (): Promise<{ recipe: RestoRecipe | null; ingredients: RestoRecipeIngredient[] }> => {
+      const { data: recipe, error } = await supabase.from("resto_recipes")
+        .select("*").eq("menu_item_id", menuItemId!).maybeSingle();
+      if (error) throw error;
+      if (!recipe) return { recipe: null, ingredients: [] };
+      const { data: ingredients, error: ingErr } = await supabase.from("resto_recipe_ingredients")
+        .select("*, product:products(id, name)").eq("recipe_id", (recipe as any).id).order("created_at");
+      if (ingErr) throw ingErr;
+      return { recipe: recipe as RestoRecipe, ingredients: (ingredients ?? []) as RestoRecipeIngredient[] };
+    },
+  });
+}
+// Crée la recette au premier ingrédient ajouté (get-or-create implicite) —
+// resto_recipes n'a de sens que comme parent de ses lignes d'ingrédients,
+// jamais créée "vide" depuis l'UI.
+export function useAddRecipeIngredient() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ menuItemId, ingredientRef, quantite, unite }: { menuItemId: string; ingredientRef: string; quantite: number; unite?: string }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      let { data: recipe } = await supabase.from("resto_recipes").select("id").eq("menu_item_id", menuItemId).maybeSingle();
+      if (!recipe) {
+        const { data: created, error: createErr } = await supabase.from("resto_recipes")
+          .insert({ organization_id: organizationId, menu_item_id: menuItemId }).select("id").single();
+        if (createErr) throw createErr;
+        recipe = created;
+      }
+      const { error } = await supabase.from("resto_recipe_ingredients")
+        .insert({ recipe_id: (recipe as any).id, ingredient_ref: ingredientRef, quantite, unite: unite || null });
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_recipe", vars.menuItemId] }),
+  });
+}
+export function useDeleteRecipeIngredient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string; menuItemId: string }) => {
+      const { error } = await supabase.from("resto_recipe_ingredients").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_recipe", vars.menuItemId] }),
+  });
+}
