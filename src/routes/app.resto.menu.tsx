@@ -2,18 +2,21 @@
 // (ex. "Cuisson", "Suppléments") assignables à un article. photo_url est un
 // champ URL texte en V1 (pas d'upload direct — aurait nécessité un nouveau
 // bucket Supabase Storage hors scope de ce chantier SQL ; à revoir si
-// besoin, sur le modèle de product-images).
+// besoin, sur le modèle de product-images). Recette (Phase 4) : ingrédients
+// = produits ZegCaisse existants (catalogue products/stock_levels déjà en
+// place), pas de table "ingrédients" séparée — voir migration 040.
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Plus, X, Save, Trash2, Loader2, UtensilsCrossed, Tag, SlidersHorizontal, EyeOff } from "lucide-react";
+import { Plus, X, Save, Trash2, Loader2, UtensilsCrossed, Tag, SlidersHorizontal, EyeOff, Boxes } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
-import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
+import { useFormatMoney, useMyRole, useProducts } from "@/lib/data/hooks";
 import {
   useRestoMenuCategories, useUpsertRestoMenuCategory, useDeleteRestoMenuCategory,
   useRestoMenuItems, useUpsertRestoMenuItem, useDeleteRestoMenuItem,
   useRestoModifiers, useUpsertRestoModifier, useDeleteRestoModifier,
   useRestoModifierOptions, useUpsertRestoModifierOption, useDeleteRestoModifierOption,
   useRestoMenuItemModifiers, useSetRestoMenuItemModifiers,
+  useRestoRecipe, useAddRecipeIngredient, useDeleteRecipeIngredient,
   type RestoMenuItem, type RestoModifier,
 } from "@/lib/data/restoHooks";
 import { cn, selectOnFocus } from "@/lib/utils";
@@ -196,6 +199,8 @@ function ItemDialog({ initial, categories, onClose, onSave }: {
             </div>
           )}
 
+          {initial.id && <RecipeSection menuItemId={initial.id} />}
+
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
             <button disabled={!form.nom?.trim() || saving} onClick={submit}
@@ -285,6 +290,63 @@ function ModifiersTab({ canManage }: { canManage: boolean }) {
         </div>
       )}
       {openModifier && <ModifierOptionsDialog modifier={openModifier} canManage={canManage} onClose={() => setOpenModifier(null)} />}
+    </div>
+  );
+}
+
+// Recette (Phase 4) : liste d'ingrédients — chacun un produit ZegCaisse
+// existant (recherche par nom, pas de création de produit ici) — avec une
+// quantité consommée par plat servi. Décrémentée automatiquement au
+// moment où le plat est ajouté à une commande (add_resto_order_item()).
+function RecipeSection({ menuItemId }: { menuItemId: string }) {
+  const { data: products = [] } = useProducts();
+  const { data, isLoading } = useRestoRecipe(menuItemId);
+  const addIngredient = useAddRecipeIngredient();
+  const removeIngredient = useDeleteRecipeIngredient();
+  const [productId, setProductId] = useState("");
+  const [quantite, setQuantite] = useState(1);
+  const [unite, setUnite] = useState("");
+
+  const ingredients = data?.ingredients ?? [];
+  const usedIds = new Set(ingredients.map((i) => i.ingredient_ref));
+  const available = products.filter((p) => !usedIds.has(p.id));
+
+  const add = async () => {
+    if (!productId || quantite <= 0) return;
+    await addIngredient.mutateAsync({ menuItemId, ingredientRef: productId, quantite, unite: unite || undefined });
+    setProductId(""); setQuantite(1); setUnite("");
+  };
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground"><Boxes className="h-3.5 w-3.5" /> Recette (décrément de stock automatique)</div>
+      {isLoading ? (
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      ) : (
+        <div className="space-y-1.5">
+          {ingredients.map((i) => (
+            <div key={i.id} className="flex items-center justify-between rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-xs">
+              <span>{i.product?.name ?? "Produit"} — {i.quantite}{i.unite ? ` ${i.unite}` : ""}</span>
+              <button onClick={() => removeIngredient.mutate({ id: i.id, menuItemId })} className="text-destructive hover:opacity-70"><Trash2 className="h-3.5 w-3.5" /></button>
+            </div>
+          ))}
+          {ingredients.length === 0 && <div className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-muted-foreground">Aucun ingrédient — plat sans suivi de stock.</div>}
+        </div>
+      )}
+      {available.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <select value={productId} onChange={(e) => setProductId(e.target.value)}
+            className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary">
+            <option value="">Ajouter un ingrédient…</option>
+            {available.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <input type="number" onFocus={selectOnFocus} value={quantite} onChange={(e) => setQuantite(Number(e.target.value))}
+            className="h-9 w-16 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary" placeholder="Qté" />
+          <input value={unite} onChange={(e) => setUnite(e.target.value)} placeholder="unité"
+            className="h-9 w-16 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary" />
+          <button onClick={add} disabled={!productId || addIngredient.isPending} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-3.5 w-3.5" /></button>
+        </div>
+      )}
     </div>
   );
 }

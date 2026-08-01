@@ -2973,10 +2973,11 @@ end $$;
 
 -- add_resto_order_item() : RPC security definer — server n'a pas de droit
 -- d'écriture direct sur resto_order_items, donc ajouter un article passe
--- forcément par ici (article + synchronisation du ticket cuisine, atomique).
--- Prix unitaire figé à l'insertion (prix article + impacts modificateurs),
--- jamais recalculé après coup. Étendue en Phase 4 (même signature) pour le
--- décrément de stock via resto_recipe_ingredients.
+-- forcément par ici (article + synchronisation du ticket cuisine +
+-- décrément de stock des ingrédients de la recette si elle existe,
+-- atomique). Prix unitaire figé à l'insertion. Corps mis à jour par la
+-- migration 040 (Phase 4, Stock & recettes) — même signature qu'à la
+-- création (038), donc create or replace sûr.
 create or replace function public.add_resto_order_item(
   p_organization_id uuid,
   p_order_id uuid,
@@ -2992,6 +2993,8 @@ declare
   v_unit_price numeric(14,2);
   v_order_item public.resto_order_items;
   v_ticket public.resto_kitchen_tickets;
+  v_recipe_id uuid;
+  v_ingredient record;
 begin
   if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
     raise exception 'Accès refusé.';
@@ -3017,6 +3020,20 @@ begin
   insert into public.resto_order_items (organization_id, order_id, menu_item_id, quantite, modifiers_choisis, statut_ligne, prix_unitaire)
   values (p_organization_id, p_order_id, p_menu_item_id, p_quantite, coalesce(p_modifiers, '[]'::jsonb), 'en_attente', v_unit_price)
   returning * into v_order_item;
+
+  -- Décrément de stock optionnel (Phase 4) : seulement si une recette
+  -- existe pour cet article. Réutilise apply_stock_movement() (trigger
+  -- existant sur stock_movements) pour la mise à jour + le garde-fou
+  -- anti-survente — si un ingrédient manque, toute la transaction annule.
+  select id into v_recipe_id from public.resto_recipes where menu_item_id = p_menu_item_id;
+  if v_recipe_id is not null then
+    for v_ingredient in
+      select ingredient_ref, quantite from public.resto_recipe_ingredients where recipe_id = v_recipe_id
+    loop
+      insert into public.stock_movements (organization_id, product_id, type, quantity, reason, created_by)
+      values (p_organization_id, v_ingredient.ingredient_ref, 'sale', v_ingredient.quantite * p_quantite, 'Recette ZegResto', auth.uid());
+    end loop;
+  end if;
 
   select * into v_ticket from public.resto_kitchen_tickets where order_id = p_order_id;
   if not found then
@@ -3121,6 +3138,61 @@ end;
 $$;
 revoke all on function public.resto_public_create_reservation(text, text, text, timestamptz, integer, text) from public;
 grant execute on function public.resto_public_create_reservation(text, text, text, timestamptz, integer, text) to anon, authenticated;
+
+-- Migration 040 — ZegResto, étape 6/7 : Stock & recettes. Décision produit
+-- documentée : resto_recipe_ingredients.ingredient_ref référence
+-- directement public.products(id) — les ingrédients SONT des produits
+-- ZegCaisse ordinaires, stock suivi par stock_levels/stock_movements
+-- déjà existants (même réutilisation que le POS interne ZegHotel, Phase 7).
+-- Aucune conversion d'unité automatique en V1 (limite assumée). Le corps de
+-- add_resto_order_item() (défini plus haut, migration 038) a été mis à jour
+-- en place par cette migration pour décrémenter le stock des ingrédients —
+-- voir son commentaire.
+
+create table if not exists public.resto_recipes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  menu_item_id uuid not null references public.resto_menu_items(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (menu_item_id)
+);
+create index if not exists idx_resto_recipes_org on public.resto_recipes(organization_id);
+alter table public.resto_recipes enable row level security;
+
+create policy resto_recipes_select on public.resto_recipes for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy resto_recipes_write on public.resto_recipes for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.resto_recipe_ingredients (
+  id uuid primary key default gen_random_uuid(),
+  recipe_id uuid not null references public.resto_recipes(id) on delete cascade,
+  ingredient_ref uuid not null references public.products(id) on delete restrict,
+  quantite numeric(14,3) not null check (quantite > 0),
+  unite text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_recipe_ingredients_recipe on public.resto_recipe_ingredients(recipe_id);
+alter table public.resto_recipe_ingredients enable row level security;
+
+create policy resto_recipe_ingredients_select on public.resto_recipe_ingredients for select to authenticated
+  using (exists (
+    select 1 from public.resto_recipes r
+    where r.id = recipe_id
+      and public.has_any_role_in_organization(r.organization_id, array['owner','manager','accountant']::public.app_role[])
+  ));
+create policy resto_recipe_ingredients_write on public.resto_recipe_ingredients for all to authenticated
+  using (exists (
+    select 1 from public.resto_recipes r
+    where r.id = recipe_id
+      and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
+  ))
+  with check (exists (
+    select 1 from public.resto_recipes r
+    where r.id = recipe_id
+      and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
+  ));
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
