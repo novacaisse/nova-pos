@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { playKdsSound } from "@/lib/kdsSound";
 
 function useOrganizationId() {
   const { currentOrganization } = useOrganization();
@@ -299,11 +300,13 @@ export function useSetRestoMenuItemModifiers() {
   });
 }
 
-// ============ COMMANDES & CUISINE (Phase 2 — flux temps réel) ============
+// ============ COMMANDES & CUISINE (Phase 2 — flux temps réel ; étapes
+// d'envoi cuisine "courses" ajoutées migration 043) ============
 export type OrderType = "salle" | "emporter" | "livraison";
 export type OrderStatut = "ouverte" | "envoyee" | "servie" | "fermee" | "annulee";
-export type OrderLineStatut = "en_attente" | "servie" | "annulee";
+export type OrderLineStatut = "en_attente" | "pret" | "servie" | "annulee";
 export type KitchenTicketStatut = "en_attente" | "en_preparation" | "pret";
+export type CourseStatut = "brouillon" | "envoyee" | "en_preparation" | "pret" | "servie";
 
 export type RestoOrder = {
   id: string; organization_id: string; table_id: string | null; type: OrderType;
@@ -311,16 +314,21 @@ export type RestoOrder = {
   table?: RestoTable | null;
 };
 export type ChosenModifier = { option_id: string; nom: string; impact_prix: number };
+export type RestoOrderCourse = {
+  id: string; organization_id: string; order_id: string; ordre: number; nom: string | null;
+  statut: CourseStatut; sent_at: string | null; created_at: string;
+};
 export type RestoOrderItem = {
-  id: string; organization_id: string; order_id: string; menu_item_id: string | null;
+  id: string; organization_id: string; order_id: string; course_id: string | null; menu_item_id: string | null;
   quantite: number; modifiers_choisis: ChosenModifier[]; statut_ligne: OrderLineStatut;
   prix_unitaire: number; created_at: string;
   menu_item?: RestoMenuItem | null;
 };
 export type RestoKitchenTicket = {
-  id: string; organization_id: string; order_id: string; statut: KitchenTicketStatut;
+  id: string; organization_id: string; order_id: string; course_id: string | null; statut: KitchenTicketStatut;
   created_at: string; ready_at: string | null;
   order?: RestoOrder | null;
+  course?: RestoOrderCourse | null;
 };
 
 // Écrans "temps réel" (Commandes, Cuisine) : la RLS suffit à sécuriser
@@ -397,65 +405,151 @@ export function useRestoOrderItems(orderId: string | null) {
 export function useAddRestoOrderItem() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (i: { orderId: string; menuItemId: string; quantite: number; modifiers?: ChosenModifier[] }) => {
+    mutationFn: async (i: { orderId: string; menuItemId: string; quantite: number; modifiers?: ChosenModifier[]; courseId?: string | null }) => {
       if (!organizationId) throw new Error("Aucune organisation sélectionnée");
       const { data, error } = await supabase.rpc("add_resto_order_item", {
         p_organization_id: organizationId, p_order_id: i.orderId, p_menu_item_id: i.menuItemId,
-        p_quantite: i.quantite, p_modifiers: i.modifiers ?? [],
+        p_quantite: i.quantite, p_modifiers: i.modifiers ?? [], p_course_id: i.courseId ?? null,
       });
       if (error) throw error;
       return data as RestoOrderItem;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] });
       qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
       qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] });
     },
   });
 }
+// Passe par mark_resto_order_item_statut() (RPC security definer, migration
+// 043) — pas d'UPDATE direct : c'est ce qui permet au cook de marquer 'pret'
+// sans lui accorder de policy UPDATE large sur resto_order_items (RLS ne
+// masque que des lignes, jamais des colonnes ; cf. hotel_guest_contact()).
 export function useUpdateRestoOrderItemStatut() {
-  const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, statut_ligne }: { id: string; orderId: string; statut_ligne: OrderLineStatut }) => {
-      const { error } = await supabase.from("resto_order_items").update({ statut_ligne }).eq("id", id);
+    mutationFn: async ({ id, statut_ligne }: { id: string; orderId: string; statut_ligne: "pret" | "servie" }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("mark_resto_order_item_statut", {
+        p_organization_id: organizationId, p_item_id: id, p_statut: statut_ligne,
+      });
       if (error) throw error;
+      return data as RestoOrderItem;
     },
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] });
+    },
   });
 }
 
-export function useRestoKitchenTickets() {
+// ============ ÉTAPES D'ENVOI CUISINE (courses — migration 043) ============
+export function useRestoOrderCourses(orderId: string | null) {
+  return useQuery({
+    queryKey: ["resto_order_courses", orderId],
+    enabled: !!orderId,
+    queryFn: async (): Promise<RestoOrderCourse[]> => {
+      const { data, error } = await supabase.from("resto_order_courses")
+        .select("*").eq("order_id", orderId!).order("ordre").order("created_at");
+      if (error) throw error;
+      return data as RestoOrderCourse[];
+    },
+  });
+}
+// Création manuelle d'une étape nommée (Entrée/Plat/Dessert...) — l'étape
+// par défaut (ordre=1, sans nom) est elle créée implicitement par
+// add_resto_order_item() quand aucune étape n'existe encore.
+export function useCreateRestoOrderCourse() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, nom, ordre }: { orderId: string; nom?: string; ordre: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.from("resto_order_courses")
+        .insert({ organization_id: organizationId, order_id: orderId, nom: nom ?? null, ordre })
+        .select().single();
+      if (error) throw error;
+      return data as RestoOrderCourse;
+    },
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] }),
+  });
+}
+// Marquer une étape "servie" une fois apportée à table — UPDATE direct
+// (pas de RPC nécessaire : resto_order_courses n'a pas de colonne
+// sensible et owner/manager/server ont déjà accès UPDATE par RLS,
+// contrairement à resto_order_items qui contient prix_unitaire/quantite).
+export function useMarkRestoCourseServed() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId }: { courseId: string; orderId: string }) => {
+      const { error } = await supabase.from("resto_order_courses").update({ statut: "servie" }).eq("id", courseId);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+    },
+  });
+}
+// send_resto_course() (RPC security definer) : envoi explicite en cuisine —
+// crée/relance le ticket cuisine de l'étape, remplace l'ancien auto-fire à
+// l'ajout d'article (V1).
+export function useSendRestoCourse() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId }: { courseId: string; orderId: string }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("send_resto_course", {
+        p_organization_id: organizationId, p_course_id: courseId,
+      });
+      if (error) throw error;
+      return data as RestoOrderCourse;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] });
+    },
+  });
+}
+
+// refetchIntervalMs : filet de sécurité si le channel realtime se
+// déconnecte, ET mode affichage "mains libres" (écran KDS laissé ouvert
+// sans interaction) — configurable depuis resto_settings.kds_auto_refresh_seconds
+// (migration 044), 15s par défaut si aucun réglage n'existe encore.
+export function useRestoKitchenTickets(refetchIntervalMs = 15_000) {
   const organizationId = useOrganizationId();
   const qc = useQueryClient();
   useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] }));
   return useQuery({
     queryKey: ["resto_kitchen_tickets", organizationId],
     enabled: !!organizationId,
-    refetchInterval: 15_000, // filet de sécurité si le channel realtime se déconnecte
+    refetchInterval: refetchIntervalMs,
     queryFn: async (): Promise<RestoKitchenTicket[]> => {
       const { data, error } = await supabase.from("resto_kitchen_tickets")
-        .select("*, order:resto_orders(*, table:resto_tables(*))")
+        .select("*, order:resto_orders(*, table:resto_tables(*)), course:resto_order_courses(*)")
         .eq("organization_id", organizationId!).neq("statut", "pret").order("created_at");
       if (error) throw error;
       return data as RestoKitchenTicket[];
     },
   });
 }
-// Ticket d'une commande précise, y compris "pret" (contrairement à
-// useRestoKitchenTickets, dédié au KDS qui n'affiche que ce qui reste à
-// préparer) — utilisé par l'écran Commandes pour savoir si un plat est
-// prêt à servir.
-export function useRestoOrderKitchenTicket(orderId: string | null) {
+// Tickets d'une commande précise (un par étape/course depuis la migration
+// 043 — une commande à plusieurs étapes a plusieurs tickets), y compris
+// "pret" (contrairement à useRestoKitchenTickets, dédié au KDS qui
+// n'affiche que ce qui reste à préparer) — utilisé par l'écran Commandes
+// pour savoir, étape par étape, si un plat est prêt à servir.
+export function useRestoOrderKitchenTickets(orderId: string | null) {
   const qc = useQueryClient();
-  useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_ticket_for_order"] }));
+  useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets_for_order"] }));
   return useQuery({
-    queryKey: ["resto_kitchen_ticket_for_order", orderId],
+    queryKey: ["resto_kitchen_tickets_for_order", orderId],
     enabled: !!orderId,
-    queryFn: async (): Promise<RestoKitchenTicket | null> => {
+    queryFn: async (): Promise<RestoKitchenTicket[]> => {
       const { data, error } = await supabase.from("resto_kitchen_tickets")
-        .select("*").eq("order_id", orderId!).maybeSingle();
+        .select("*").eq("order_id", orderId!).order("created_at");
       if (error) throw error;
-      return data as RestoKitchenTicket | null;
+      return data as RestoKitchenTicket[];
     },
   });
 }
@@ -495,17 +589,28 @@ export function useRestoReservations() {
     },
   });
 }
+// organization_id n'est fourni QUE pour une création (rest.id absent) —
+// jamais réécrit sur une mise à jour, pour ne pas risquer de "voler" une
+// réservation d'un autre établissement vers l'organisation actuellement
+// active quand l'appelant est la vue consolidée multi-restaurant (V2,
+// chantier 6), qui édite des lignes appartenant à divers organization_id
+// tout en gardant une seule organisation "active" au sens de useOrganization().
 export function useUpsertRestoReservation() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (r: Partial<RestoReservation> & { nom_client: string; date_heure: string; nombre_couverts: number }) => {
-      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
-      const { table, ...rest } = r as any;
-      const { data, error } = await supabase.from("resto_reservations")
-        .upsert({ ...rest, organization_id: organizationId }).select().single();
+      const { table, organization, ...rest } = r as any;
+      if (!rest.id) {
+        if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+        rest.organization_id = organizationId;
+      }
+      const { data, error } = await supabase.from("resto_reservations").upsert(rest).select().single();
       if (error) throw error; return data as RestoReservation;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_reservations_consolidated"] });
+    },
   });
 }
 export function useDeleteRestoReservation() {
@@ -515,7 +620,53 @@ export function useDeleteRestoReservation() {
       const { error } = await supabase.from("resto_reservations").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["resto_reservations", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_reservations_consolidated"] });
+    },
+  });
+}
+
+// Vue consolidée multi-restaurant (V2, chantier 6) : un propriétaire de
+// plusieurs établissements ZegResto sous le même account_id (regroupement
+// déjà natif — provision_organization() ajoute l'utilisateur comme
+// organization_members à chaque établissement qu'il crée) peut lister ses
+// autres restaurants et voir leurs réservations sans changer d'organisation
+// active. Aucune policy RLS nouvelle nécessaire : organizations/resto_reservations
+// filtrent déjà par appartenance réelle à organization_members — un
+// utilisateur qui n'est PAS membre d'un des établissements du compte ne le
+// verrait de toute façon pas apparaître ici. La page publique
+// /resto/reserver/$slug reste inchangée (une page par établissement).
+export type RestoLinkedOrganization = { id: string; name: string; slug: string };
+export function useRestoLinkedOrganizations() {
+  const { currentOrganization } = useOrganization();
+  return useQuery({
+    queryKey: ["resto_linked_organizations", currentOrganization?.account_id],
+    enabled: !!currentOrganization?.account_id,
+    queryFn: async (): Promise<RestoLinkedOrganization[]> => {
+      const { data, error } = await supabase.from("organizations")
+        .select("id, name, slug")
+        .eq("account_id", currentOrganization!.account_id)
+        .eq("app_module", "resto")
+        .order("name");
+      if (error) throw error;
+      return data as RestoLinkedOrganization[];
+    },
+  });
+}
+export function useRestoReservationsConsolidated(organizationIds: string[]) {
+  const ids = [...organizationIds].sort().join(",");
+  return useQuery({
+    queryKey: ["resto_reservations_consolidated", ids],
+    enabled: organizationIds.length > 0,
+    queryFn: async (): Promise<(RestoReservation & { organization?: RestoLinkedOrganization | null })[]> => {
+      const { data, error } = await supabase.from("resto_reservations")
+        .select("*, table:resto_tables(*), organization:organizations(id,name,slug)")
+        .in("organization_id", organizationIds)
+        .order("date_heure");
+      if (error) throw error;
+      return data as (RestoReservation & { organization?: RestoLinkedOrganization | null })[];
+    },
   });
 }
 
@@ -583,6 +734,8 @@ export type PaymentMethode = "mobile_money" | "cash" | "carte";
 export type RestoBill = {
   id: string; order_id: string; organization_id: string; total: number;
   statut: BillStatut; split_mode: SplitMode; created_at: string;
+  loyalty_account_id: string | null; loyalty_discount: number;
+  loyalty_points_earned: number; loyalty_points_redeemed: number;
 };
 export type RestoBillSplit = { id: string; organization_id: string; bill_id: string; split_index: number; montant: number };
 export type RestoBillPayment = {
@@ -670,6 +823,56 @@ export function useAddRestoBillPayment() {
   });
 }
 
+// ============ FIDÉLITÉ (migration 045) — identité indépendante de
+// ZegResto, clé = numéro de téléphone (pas de FK vers public.customers,
+// cf. ARCHITECTURE.md). Solde/écriture jamais en direct côté client au-delà
+// de la lecture : tout crédit/débit de points passe par
+// apply_resto_bill_loyalty()/add_resto_bill_payment(). ============
+export type RestoLoyaltyAccount = {
+  id: string; organization_id: string; telephone: string; nom: string | null;
+  points_balance: number; created_at: string; updated_at: string;
+};
+export type RestoLoyaltyTransaction = {
+  id: string; organization_id: string; account_id: string; bill_id: string | null;
+  type: "earn" | "spend"; points: number; montant: number; created_at: string;
+};
+
+// Recherche par téléphone (saisie à la facturation) — null tant qu'aucun
+// compte n'existe pour ce numéro (première visite : apply_resto_bill_loyalty()
+// en créera un avec un solde à 0).
+export function useRestoLoyaltyAccountByPhone(telephone: string | null) {
+  const organizationId = useOrganizationId();
+  const phone = telephone?.trim() || null;
+  return useQuery({
+    queryKey: ["resto_loyalty_account_by_phone", organizationId, phone],
+    enabled: !!organizationId && !!phone,
+    queryFn: async (): Promise<RestoLoyaltyAccount | null> => {
+      const { data, error } = await supabase.from("resto_loyalty_accounts")
+        .select("*").eq("organization_id", organizationId!).eq("telephone", phone!).maybeSingle();
+      if (error) throw error;
+      return data as RestoLoyaltyAccount | null;
+    },
+  });
+}
+export function useApplyRestoBillLoyalty() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ billId, telephone, nom, redeemPoints }: { billId: string; orderId: string; telephone: string; nom?: string; redeemPoints: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("apply_resto_bill_loyalty", {
+        p_organization_id: organizationId, p_bill_id: billId, p_telephone: telephone,
+        p_nom: nom || null, p_redeem_points: redeemPoints,
+      });
+      if (error) throw error;
+      return data as RestoBill;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_bill", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_loyalty_account_by_phone"] });
+    },
+  });
+}
+
 // ============ DASHBOARD & RAPPORTS (Phase 6) ============
 export function useRestoDashboardStats() {
   const organizationId = useOrganizationId();
@@ -705,28 +908,83 @@ export function useRestoDashboardStats() {
   });
 }
 
+export type RestoReportServerRow = { nom: string; orderCount: number; ca: number };
+export type RestoReportCategoryRow = { nom: string; quantite: number; ca: number };
+export type RestoReportPeakHour = { hour: number; orderCount: number };
+export type RestoReportIngredientRow = { nom: string; unite: string | null; consomme: number; stockActuel: number };
+export type RestoReportPreviousPeriod = { revenue: number; orderCount: number; avgTicket: number };
+
+// Rapports enrichis (V2, chantier 7) : au-delà de CA/ticket moyen/temps de
+// service/plats vendus (V1), ajoute la répartition par serveur et par
+// catégorie de menu, la rotation des tables, les heures de pointe, la
+// consommation d'ingrédients (liée aux recettes, comparée au stock actuel
+// via stock_levels), et une comparaison avec la période précédente de même
+// durée. Toutes les requêtes indépendantes (mouvements de stock, période
+// précédente, nombre de tables) partent en parallèle avec la requête des
+// commandes fermées ; celles qui en dépendent (articles, noms de serveurs,
+// détails produits) suivent dans un second Promise.all une fois les ids
+// connus.
 export function useRestoReportData(from: Date, to: Date) {
   const organizationId = useOrganizationId();
   return useQuery({
     queryKey: ["resto_report", organizationId, from.toISOString(), to.toISOString()],
     enabled: !!organizationId,
     queryFn: async () => {
-      const { data: orders, error } = await supabase.from("resto_orders")
-        .select("id, created_at, closed_at, resto_bills(total)")
-        .eq("organization_id", organizationId!).eq("statut", "fermee")
-        .gte("closed_at", from.toISOString()).lte("closed_at", to.toISOString());
-      if (error) throw error;
-      const closedOrders = (orders ?? []) as any[];
-      const orderIds = closedOrders.map((o) => o.id);
+      const orgId = organizationId!;
+      const durationMs = Math.max(0, to.getTime() - from.getTime());
+      const prevTo = new Date(from.getTime() - 1);
+      const prevFrom = new Date(from.getTime() - durationMs);
 
-      let items: any[] = [];
-      if (orderIds.length) {
-        const { data, error: itemsErr } = await supabase.from("resto_order_items")
-          .select("menu_item_id, quantite, prix_unitaire, statut_ligne, menu_item:resto_menu_items(nom)")
-          .in("order_id", orderIds).neq("statut_ligne", "annulee");
-        if (itemsErr) throw itemsErr;
-        items = data ?? [];
+      const [ordersRes, movementsRes, prevOrdersRes, tablesCountRes] = await Promise.all([
+        supabase.from("resto_orders")
+          .select("id, created_at, closed_at, table_id, server_id, resto_bills(total)")
+          .eq("organization_id", orgId).eq("statut", "fermee")
+          .gte("closed_at", from.toISOString()).lte("closed_at", to.toISOString()),
+        supabase.from("stock_movements")
+          .select("product_id, quantity")
+          .eq("organization_id", orgId).eq("reason", "Recette ZegResto")
+          .gte("created_at", from.toISOString()).lte("created_at", to.toISOString()),
+        supabase.from("resto_orders")
+          .select("id, resto_bills(total)")
+          .eq("organization_id", orgId).eq("statut", "fermee")
+          .gte("closed_at", prevFrom.toISOString()).lte("closed_at", prevTo.toISOString()),
+        supabase.from("resto_tables").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+      ]);
+      if (ordersRes.error) throw ordersRes.error;
+      if (movementsRes.error) throw movementsRes.error;
+      if (prevOrdersRes.error) throw prevOrdersRes.error;
+      if (tablesCountRes.error) throw tablesCountRes.error;
+
+      const closedOrders = (ordersRes.data ?? []) as any[];
+      const orderIds = closedOrders.map((o) => o.id);
+      const serverIds = [...new Set(closedOrders.map((o) => o.server_id).filter(Boolean))] as string[];
+      const consumptionByProduct = new Map<string, number>();
+      for (const m of movementsRes.data ?? []) {
+        consumptionByProduct.set(m.product_id, (consumptionByProduct.get(m.product_id) ?? 0) + Number(m.quantity));
       }
+      const productIds = [...consumptionByProduct.keys()];
+
+      const [itemsRes, profilesRes, productsRes, levelsRes] = await Promise.all([
+        orderIds.length
+          ? supabase.from("resto_order_items")
+              .select("menu_item_id, quantite, prix_unitaire, statut_ligne, menu_item:resto_menu_items(nom, category:resto_menu_categories(nom))")
+              .in("order_id", orderIds).neq("statut_ligne", "annulee")
+          : Promise.resolve({ data: [], error: null }),
+        serverIds.length
+          ? supabase.from("profiles").select("id, full_name").in("id", serverIds)
+          : Promise.resolve({ data: [], error: null }),
+        productIds.length
+          ? supabase.from("products").select("id, name, unit").in("id", productIds)
+          : Promise.resolve({ data: [], error: null }),
+        productIds.length
+          ? supabase.from("stock_levels").select("product_id, quantity").eq("organization_id", orgId).in("product_id", productIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (itemsRes.error) throw itemsRes.error;
+      if (profilesRes.error) throw profilesRes.error;
+      if (productsRes.error) throw productsRes.error;
+      if (levelsRes.error) throw levelsRes.error;
+      const items = (itemsRes.data ?? []) as any[];
 
       const revenue = closedOrders.reduce((s, o) => s + Number(o.resto_bills?.[0]?.total ?? 0), 0);
       const orderCount = closedOrders.length;
@@ -737,6 +995,7 @@ export function useRestoReportData(from: Date, to: Date) {
       const avgServiceMin = serviceDurations.length ? serviceDurations.reduce((s, d) => s + d, 0) / serviceDurations.length : 0;
 
       const byItem = new Map<string, { nom: string; quantite: number; ca: number }>();
+      const byCategory = new Map<string, RestoReportCategoryRow>();
       for (const it of items) {
         const key = it.menu_item_id ?? "?";
         const nom = it.menu_item?.nom ?? "Article supprimé";
@@ -744,10 +1003,147 @@ export function useRestoReportData(from: Date, to: Date) {
         entry.quantite += Number(it.quantite);
         entry.ca += Number(it.prix_unitaire) * Number(it.quantite);
         byItem.set(key, entry);
+
+        const catNom = it.menu_item?.category?.nom ?? "Sans catégorie";
+        const catEntry = byCategory.get(catNom) ?? { nom: catNom, quantite: 0, ca: 0 };
+        catEntry.quantite += Number(it.quantite);
+        catEntry.ca += Number(it.prix_unitaire) * Number(it.quantite);
+        byCategory.set(catNom, catEntry);
       }
       const topItems = [...byItem.values()].sort((a, b) => b.quantite - a.quantite).slice(0, 10);
+      const byCategoryRows = [...byCategory.values()].sort((a, b) => b.ca - a.ca);
 
-      return { revenue, orderCount, avgTicket, avgServiceMin, topItems };
+      const profilesMap = new Map<string, string>((profilesRes.data ?? []).map((p: any) => [p.id, p.full_name || "Sans nom"]));
+      const byServerMap = new Map<string, RestoReportServerRow>();
+      for (const o of closedOrders) {
+        if (!o.server_id) continue;
+        const nom = profilesMap.get(o.server_id) ?? "Inconnu";
+        const entry = byServerMap.get(o.server_id) ?? { nom, orderCount: 0, ca: 0 };
+        entry.orderCount += 1;
+        entry.ca += Number(o.resto_bills?.[0]?.total ?? 0);
+        byServerMap.set(o.server_id, entry);
+      }
+      const byServer = [...byServerMap.values()].sort((a, b) => b.ca - a.ca);
+
+      const dineInOrders = closedOrders.filter((o) => o.table_id);
+      const tablesTotal = tablesCountRes.count ?? 0;
+      const tableTurnover = {
+        tablesCount: tablesTotal,
+        turnsTotal: dineInOrders.length,
+        turnsPerTable: tablesTotal > 0 ? dineInOrders.length / tablesTotal : 0,
+      };
+
+      const hourCounts = new Array(24).fill(0);
+      for (const o of closedOrders) hourCounts[new Date(o.created_at).getHours()]++;
+      const peakHours: RestoReportPeakHour[] = hourCounts.map((orderCount, hour) => ({ hour, orderCount }));
+
+      const productsMap = new Map<string, any>((productsRes.data ?? []).map((p: any) => [p.id, p]));
+      const levelsMap = new Map<string, number>((levelsRes.data ?? []).map((l: any) => [l.product_id, Number(l.quantity)]));
+      const ingredientConsumption: RestoReportIngredientRow[] = productIds
+        .map((pid) => {
+          const p = productsMap.get(pid);
+          return { nom: p?.name ?? "Produit supprimé", unite: p?.unit ?? null, consomme: consumptionByProduct.get(pid) ?? 0, stockActuel: levelsMap.get(pid) ?? 0 };
+        })
+        .sort((a, b) => b.consomme - a.consomme);
+
+      const prevOrders = (prevOrdersRes.data ?? []) as any[];
+      const prevRevenue = prevOrders.reduce((s, o) => s + Number(o.resto_bills?.[0]?.total ?? 0), 0);
+      const prevOrderCount = prevOrders.length;
+      const previousPeriod: RestoReportPreviousPeriod = { revenue: prevRevenue, orderCount: prevOrderCount, avgTicket: prevOrderCount > 0 ? prevRevenue / prevOrderCount : 0 };
+
+      return { revenue, orderCount, avgTicket, avgServiceMin, topItems, byServer, byCategory: byCategoryRows, tableTurnover, peakHours, ingredientConsumption, previousPeriod };
     },
   });
+}
+
+// ============ PARAMÈTRES (resto_settings — migrations 044/045) : réglages
+// KDS + fidélité, complétés par le chantier 8 (Ticket & Caisse, Sons &
+// Notifications). Ligne créée à la volée par le premier upsert (comme
+// hotel_settings) — data null tant que personne n'a encore modifié les
+// réglages, valeurs par défaut appliquées côté consommateur. ===
+export type RestoSoundChoice = "chime" | "bell" | "soft";
+export type RestoSettings = {
+  organization_id: string;
+  kds_auto_refresh_seconds: number;
+  kds_urgency_minutes: number;
+  kds_sound_enabled: boolean;
+  kds_sound_choice: RestoSoundChoice;
+  kds_sound_volume: number;
+  loyalty_enabled: boolean;
+  loyalty_earn_amount_per_point: number;
+  loyalty_redeem_value_per_point: number;
+  loyalty_min_points_to_redeem: number;
+  cash_float_default: number;
+  cash_float_required: boolean;
+  reservation_sound_enabled: boolean;
+  updated_at: string;
+};
+export const RESTO_SETTINGS_DEFAULTS: Omit<RestoSettings, "organization_id" | "updated_at"> = {
+  kds_auto_refresh_seconds: 15,
+  kds_urgency_minutes: 10,
+  kds_sound_enabled: true,
+  kds_sound_choice: "chime",
+  kds_sound_volume: 0.6,
+  loyalty_enabled: false,
+  loyalty_earn_amount_per_point: 100,
+  loyalty_redeem_value_per_point: 1,
+  loyalty_min_points_to_redeem: 1,
+  cash_float_default: 0,
+  cash_float_required: false,
+  reservation_sound_enabled: true,
+};
+
+export function useRestoSettings() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["resto_settings", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<RestoSettings | null> => {
+      const { data, error } = await supabase.from("resto_settings")
+        .select("*").eq("organization_id", organizationId!).maybeSingle();
+      if (error) throw error;
+      return data as RestoSettings | null;
+    },
+  });
+}
+export function useUpdateRestoSettings() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (s: Partial<RestoSettings>) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.from("resto_settings")
+        .upsert({ ...s, organization_id: organizationId }).select().single();
+      if (error) throw error; return data as RestoSettings;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_settings", organizationId] }),
+  });
+}
+// Alerte sonore "nouvelle réservation" (migration 046) — écoute directement
+// les événements INSERT (payload disponible, contrairement au pattern
+// invalidate-only de useRestoRealtimeInvalidate) pour ne sonner que sur une
+// réservation source='public' (une réservation saisie par le staff
+// lui-même n'a pas à s'auto-notifier). Réutilise la palette KDS
+// (kds_sound_choice/kds_sound_volume) — à appeler une fois depuis l'écran
+// Réservations.
+export function useRestoNewReservationSoundAlert() {
+  const organizationId = useOrganizationId();
+  const { data: settingsRow } = useRestoSettings();
+  const enabled = settingsRow?.reservation_sound_enabled ?? RESTO_SETTINGS_DEFAULTS.reservation_sound_enabled;
+  const soundChoice = settingsRow?.kds_sound_choice ?? RESTO_SETTINGS_DEFAULTS.kds_sound_choice;
+  const soundVolume = settingsRow?.kds_sound_volume ?? RESTO_SETTINGS_DEFAULTS.kds_sound_volume;
+
+  useEffect(() => {
+    if (!organizationId || !enabled) return;
+    const channel = supabase
+      .channel(`resto_reservations_sound_${organizationId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "resto_reservations", filter: `organization_id=eq.${organizationId}` },
+        (payload: any) => {
+          if (payload.new?.source === "public") playKdsSound(soundChoice, soundVolume);
+        },
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [organizationId, enabled, soundChoice, soundVolume]);
 }

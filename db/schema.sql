@@ -1720,6 +1720,36 @@ drop policy if exists app_branding_delete on storage.objects;
 create policy app_branding_delete on storage.objects for delete to authenticated
   using (bucket_id = 'app-branding' and public.is_super_admin());
 
+-- Bucket pour les photos d'articles du menu ZegResto (migration 042,
+-- V2) : public en lecture, écriture restreinte owner/manager (même rôles
+-- que l'écriture sur resto_menu_items). Convention de chemin obligatoire
+-- côté client : {organization_id}/{menu_item_id}.
+insert into storage.buckets (id, name, public)
+values ('resto-menu-photos', 'resto-menu-photos', true)
+on conflict (id) do nothing;
+
+create policy resto_menu_photos_select on storage.objects for select
+  using (bucket_id = 'resto-menu-photos');
+create policy resto_menu_photos_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+create policy resto_menu_photos_update on storage.objects for update to authenticated
+  using (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  )
+  with check (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+create policy resto_menu_photos_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'resto-menu-photos'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager']::public.app_role[])
+  );
+
 -- =============== ZEGHOTEL (migrations 020f-020j) ===============
 -- Regroupé ici en un seul bloc par module plutôt qu'éclaté dans les
 -- sections ENUMS/TABLES/RLS/TRIGGERS ci-dessus (qui restent, elles,
@@ -2897,28 +2927,67 @@ create policy resto_orders_update on public.resto_orders for update to authentic
 create policy resto_orders_delete on public.resto_orders for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
+-- resto_order_courses (migration 043) : une commande se découpe en étapes
+-- d'envoi cuisine (Entrée/Plat/Dessert, ou un simple numéro pour une
+-- commande sans étapes explicites — voir add_resto_order_item() plus bas
+-- qui crée l'étape par défaut ordre=1 au besoin). Un ticket cuisine
+-- (resto_kitchen_tickets) correspond désormais à une étape, plus à une
+-- commande entière.
+create table if not exists public.resto_order_courses (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  order_id uuid not null references public.resto_orders(id) on delete cascade,
+  ordre integer not null default 1,
+  nom text,
+  statut text not null default 'brouillon' check (statut in ('brouillon', 'envoyee', 'en_preparation', 'pret', 'servie')),
+  sent_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_order_courses_org on public.resto_order_courses(organization_id);
+create index if not exists idx_resto_order_courses_order on public.resto_order_courses(order_id);
+alter table public.resto_order_courses enable row level security;
+
+create policy resto_order_courses_select on public.resto_order_courses for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_order_courses_insert on public.resto_order_courses for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_order_courses_update on public.resto_order_courses for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_order_courses_delete on public.resto_order_courses for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
 -- organization_id ajouté sur order_items/kitchen_tickets (non listées dans
 -- la demande initiale, qui ne l'avait explicitement que sur resto_orders) —
 -- cohérence avec la règle du projet + évite un sous-select vers resto_orders
--- sur chaque lecture RLS (flux KDS lu en continu).
+-- sur chaque lecture RLS (flux KDS lu en continu). course_id (migration
+-- 043) : rattachement à l'étape d'envoi cuisine ; statut_ligne étendu avec
+-- 'pret' (marquage ligne par ligne côté KDS, distinct de 'servie' posé par
+-- le serveur).
 create table if not exists public.resto_order_items (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   order_id uuid not null references public.resto_orders(id) on delete cascade,
+  course_id uuid references public.resto_order_courses(id) on delete set null,
   menu_item_id uuid references public.resto_menu_items(id) on delete set null,
   quantite numeric(10,2) not null check (quantite > 0),
   modifiers_choisis jsonb not null default '[]'::jsonb,
-  statut_ligne text not null default 'en_attente' check (statut_ligne in ('en_attente', 'servie', 'annulee')),
+  statut_ligne text not null default 'en_attente' check (statut_ligne in ('en_attente', 'pret', 'servie', 'annulee')),
   prix_unitaire numeric(14,2) not null,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_resto_order_items_org on public.resto_order_items(organization_id);
 create index if not exists idx_resto_order_items_order on public.resto_order_items(order_id);
+create index if not exists idx_resto_order_items_course on public.resto_order_items(course_id);
 alter table public.resto_order_items enable row level security;
 
 -- INSERT restreint à owner/manager en direct : server passe par
--- add_resto_order_item() (security definer, plus bas), qui synchronise
--- aussi le ticket cuisine dans la même transaction.
+-- add_resto_order_item() (security definer, plus bas). UPDATE direct
+-- laissé à owner/manager/server pour l'édition libre (quantité,
+-- modificateurs...) ; le marquage de statut par le cuisinier passe
+-- exclusivement par mark_resto_order_item_statut() (migration 043, RPC
+-- security definer étroite — cook n'a aucun accès UPDATE direct à cette
+-- table, pour ne pas exposer prix_unitaire/quantite/etc. à sa policy).
 create policy resto_order_items_select on public.resto_order_items for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_order_items_insert on public.resto_order_items for insert to authenticated
@@ -2929,18 +2998,21 @@ create policy resto_order_items_update on public.resto_order_items for update to
 create policy resto_order_items_delete on public.resto_order_items for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
--- Un ticket par commande (flux unique — pas de resto_kitchen_stations en
--- V1). ready_at posé au passage à 'pret', effacé si remis en attente.
+-- Un ticket par étape d'envoi cuisine (course_id, migration 043 — avant
+-- cela un ticket par commande entière). order_id conservé pour les
+-- jointures directes existantes. ready_at posé au passage à 'pret', effacé
+-- si remis en attente.
 create table if not exists public.resto_kitchen_tickets (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   order_id uuid not null references public.resto_orders(id) on delete cascade,
+  course_id uuid references public.resto_order_courses(id) on delete cascade,
   statut text not null default 'en_attente' check (statut in ('en_attente', 'en_preparation', 'pret')),
   created_at timestamptz not null default now(),
-  ready_at timestamptz,
-  unique (order_id)
+  ready_at timestamptz
 );
 create index if not exists idx_resto_kitchen_tickets_org on public.resto_kitchen_tickets(organization_id);
+create unique index if not exists idx_resto_kitchen_tickets_course_unique on public.resto_kitchen_tickets(course_id) where course_id is not null;
 alter table public.resto_kitchen_tickets enable row level security;
 
 create policy resto_kitchen_tickets_select on public.resto_kitchen_tickets for select to authenticated
@@ -2973,17 +3045,23 @@ end $$;
 
 -- add_resto_order_item() : RPC security definer — server n'a pas de droit
 -- d'écriture direct sur resto_order_items, donc ajouter un article passe
--- forcément par ici (article + synchronisation du ticket cuisine +
--- décrément de stock des ingrédients de la recette si elle existe,
--- atomique). Prix unitaire figé à l'insertion. Corps mis à jour par la
--- migration 040 (Phase 4, Stock & recettes) — même signature qu'à la
--- création (038), donc create or replace sûr.
+-- forcément par ici (article + décrément de stock des ingrédients de la
+-- recette si elle existe, atomique). Prix unitaire figé à l'insertion.
+-- Signature étendue par la migration 043 (p_course_id, 6e argument) —
+-- create or replace sûr uniquement de 038 vers 040 (même signature) ; le
+-- passage à 6 arguments par la 043 a nécessité un drop function préalable
+-- de l'ancienne signature 5-arguments (piège documenté dans CLAUDE.md), ici
+-- schema.sql ne montre que le create final. Ne touche plus
+-- resto_kitchen_tickets directement depuis la 043 — l'envoi en cuisine est
+-- un acte explicite (send_resto_course(), plus bas). p_course_id = null :
+-- réutilise ou crée l'étape par défaut (ordre=1) de la commande.
 create or replace function public.add_resto_order_item(
   p_organization_id uuid,
   p_order_id uuid,
   p_menu_item_id uuid,
   p_quantite numeric,
-  p_modifiers jsonb default '[]'::jsonb
+  p_modifiers jsonb default '[]'::jsonb,
+  p_course_id uuid default null
 ) returns public.resto_order_items
 language plpgsql security definer set search_path = public as $$
 declare
@@ -2992,7 +3070,8 @@ declare
   v_modifier_total numeric(14,2) := 0;
   v_unit_price numeric(14,2);
   v_order_item public.resto_order_items;
-  v_ticket public.resto_kitchen_tickets;
+  v_course_id uuid;
+  v_course public.resto_order_courses;
   v_recipe_id uuid;
   v_ingredient record;
 begin
@@ -3013,18 +3092,35 @@ begin
   if not found then raise exception 'Article introuvable.'; end if;
   if not v_item.disponible then raise exception 'Cet article n''est plus disponible.'; end if;
 
+  if p_course_id is not null then
+    select * into v_course from public.resto_order_courses where id = p_course_id and order_id = p_order_id;
+    if not found then raise exception 'Étape introuvable.'; end if;
+    v_course_id := p_course_id;
+  else
+    select * into v_course from public.resto_order_courses
+      where order_id = p_order_id and ordre = 1
+      order by created_at limit 1;
+    if not found then
+      insert into public.resto_order_courses (organization_id, order_id, ordre, statut)
+      values (p_organization_id, p_order_id, 1, 'brouillon')
+      returning * into v_course;
+    end if;
+    v_course_id := v_course.id;
+  end if;
+
   select coalesce(sum((opt->>'impact_prix')::numeric), 0) into v_modifier_total
   from jsonb_array_elements(coalesce(p_modifiers, '[]'::jsonb)) opt;
   v_unit_price := v_item.prix + v_modifier_total;
 
-  insert into public.resto_order_items (organization_id, order_id, menu_item_id, quantite, modifiers_choisis, statut_ligne, prix_unitaire)
-  values (p_organization_id, p_order_id, p_menu_item_id, p_quantite, coalesce(p_modifiers, '[]'::jsonb), 'en_attente', v_unit_price)
+  insert into public.resto_order_items (organization_id, order_id, course_id, menu_item_id, quantite, modifiers_choisis, statut_ligne, prix_unitaire)
+  values (p_organization_id, p_order_id, v_course_id, p_menu_item_id, p_quantite, coalesce(p_modifiers, '[]'::jsonb), 'en_attente', v_unit_price)
   returning * into v_order_item;
 
   -- Décrément de stock optionnel (Phase 4) : seulement si une recette
   -- existe pour cet article. Réutilise apply_stock_movement() (trigger
   -- existant sur stock_movements) pour la mise à jour + le garde-fou
   -- anti-survente — si un ingrédient manque, toute la transaction annule.
+  -- Toujours au moment de l'ajout au panier, pas repoussé à l'envoi cuisine.
   select id into v_recipe_id from public.resto_recipes where menu_item_id = p_menu_item_id;
   if v_recipe_id is not null then
     for v_ingredient in
@@ -3035,22 +3131,105 @@ begin
     end loop;
   end if;
 
-  select * into v_ticket from public.resto_kitchen_tickets where order_id = p_order_id;
-  if not found then
-    insert into public.resto_kitchen_tickets (organization_id, order_id, statut) values (p_organization_id, p_order_id, 'en_attente');
-  elsif v_ticket.statut = 'pret' then
-    update public.resto_kitchen_tickets set statut = 'en_attente', ready_at = null where id = v_ticket.id;
-  end if;
-
-  if v_order.statut = 'ouverte' then
-    update public.resto_orders set statut = 'envoyee' where id = p_order_id;
+  -- Si l'étape est déjà envoyée (article ajouté après coup) et que son
+  -- ticket était déjà "pret", le repasser en attente.
+  if v_course.statut in ('envoyee', 'en_preparation', 'pret') then
+    update public.resto_kitchen_tickets set statut = 'en_attente', ready_at = null
+      where course_id = v_course_id and statut = 'pret';
+    if v_course.statut = 'pret' then
+      update public.resto_order_courses set statut = 'en_preparation' where id = v_course_id;
+    end if;
   end if;
 
   return v_order_item;
 end;
 $$;
-revoke all on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb) from public;
-grant execute on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb) to authenticated;
+revoke all on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb, uuid) from public;
+grant execute on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb, uuid) to authenticated;
+
+-- send_resto_course() (migration 043) : déclenchement explicite d'un envoi
+-- en cuisine par le serveur — security definer (écrit
+-- resto_kitchen_tickets, comme add_resto_order_item()).
+create or replace function public.send_resto_course(
+  p_organization_id uuid,
+  p_course_id uuid
+) returns public.resto_order_courses
+language plpgsql security definer set search_path = public as $$
+declare
+  v_course public.resto_order_courses;
+  v_item_count integer;
+  v_existing_ticket public.resto_kitchen_tickets;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_course from public.resto_order_courses where id = p_course_id and organization_id = p_organization_id;
+  if not found then raise exception 'Étape introuvable.'; end if;
+
+  select count(*) into v_item_count from public.resto_order_items
+    where course_id = p_course_id and statut_ligne <> 'annulee';
+  if v_item_count = 0 then
+    raise exception 'Aucun article à envoyer pour cette étape.';
+  end if;
+
+  select * into v_existing_ticket from public.resto_kitchen_tickets where course_id = p_course_id;
+  if not found then
+    insert into public.resto_kitchen_tickets (organization_id, order_id, course_id, statut)
+    values (p_organization_id, v_course.order_id, p_course_id, 'en_attente');
+  elsif v_existing_ticket.statut = 'pret' then
+    update public.resto_kitchen_tickets set statut = 'en_attente', ready_at = null where id = v_existing_ticket.id;
+  end if;
+
+  update public.resto_order_courses set statut = 'envoyee', sent_at = now() where id = p_course_id
+  returning * into v_course;
+
+  update public.resto_orders set statut = 'envoyee' where id = v_course.order_id and statut = 'ouverte';
+
+  return v_course;
+end;
+$$;
+revoke all on function public.send_resto_course(uuid, uuid) from public;
+grant execute on function public.send_resto_course(uuid, uuid) to authenticated;
+
+-- mark_resto_order_item_statut() (migration 043) : narrow — le cuisinier
+-- n'a aucun accès RLS direct en écriture à resto_order_items (une policy
+-- update large l'exposerait à modifier n'importe quelle autre colonne de
+-- la ligne, ex. prix_unitaire/quantite — RLS ne restreint que les lignes,
+-- jamais les colonnes, cf. pattern hotel_guest_contact()). p_statut =
+-- 'pret' pour cook comme pour le personnel de salle ; 'servie' reste
+-- réservé à owner/manager/server (le cuisinier ne "sert" jamais un plat).
+create or replace function public.mark_resto_order_item_statut(
+  p_organization_id uuid,
+  p_item_id uuid,
+  p_statut text
+) returns public.resto_order_items
+language plpgsql security definer set search_path = public as $$
+declare
+  v_roles public.app_role[];
+  v_item public.resto_order_items;
+begin
+  if p_statut not in ('pret', 'servie') then
+    raise exception 'Statut invalide.';
+  end if;
+  v_roles := case when p_statut = 'pret'
+    then array['owner','manager','server','cook']::public.app_role[]
+    else array['owner','manager','server']::public.app_role[]
+  end;
+  if not public.has_any_role_in_organization(p_organization_id, v_roles) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  update public.resto_order_items set statut_ligne = p_statut
+    where id = p_item_id and organization_id = p_organization_id and statut_ligne <> 'annulee'
+    returning * into v_item;
+  if not found then raise exception 'Article de commande introuvable.'; end if;
+
+  return v_item;
+end;
+$$;
+revoke all on function public.mark_resto_order_item_statut(uuid, uuid, text) from public;
+grant execute on function public.mark_resto_order_item_statut(uuid, uuid, text) to authenticated;
 
 -- Migration 039 — ZegResto, étape 5/7 : Réservations (staff + formulaire
 -- public /resto/reserver/$slug). Le formulaire public n'écrit jamais
@@ -3194,11 +3373,98 @@ create policy resto_recipe_ingredients_write on public.resto_recipe_ingredients 
       and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
   ));
 
+-- resto_settings (migration 044) : une ligne par organisation, créée à la
+-- volée par le premier upsert depuis /app/resto/parametres (pas de ligne
+-- par défaut via provision_organization(), même pattern que
+-- hotel_settings). KDS (migration 044) + fidélité (migration 045, colonnes
+-- loyalty_*) — d'autres réglages ZegResto viendront s'ajouter par ALTER
+-- TABLE ADD COLUMN sans toucher à ce qui existe déjà ici.
+create table if not exists public.resto_settings (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  kds_auto_refresh_seconds integer not null default 15 check (kds_auto_refresh_seconds in (10, 15, 30)),
+  kds_urgency_minutes integer not null default 10 check (kds_urgency_minutes > 0),
+  kds_sound_enabled boolean not null default true,
+  kds_sound_choice text not null default 'chime' check (kds_sound_choice in ('chime', 'bell', 'soft')),
+  kds_sound_volume numeric(3,2) not null default 0.6 check (kds_sound_volume >= 0 and kds_sound_volume <= 1),
+  loyalty_enabled boolean not null default false,
+  loyalty_earn_amount_per_point numeric(14,2) not null default 100 check (loyalty_earn_amount_per_point > 0),
+  loyalty_redeem_value_per_point numeric(14,4) not null default 1 check (loyalty_redeem_value_per_point >= 0),
+  loyalty_min_points_to_redeem integer not null default 1 check (loyalty_min_points_to_redeem >= 0),
+  -- Fond de caisse (migration 046) : réglage de configuration uniquement
+  -- (montant par défaut + bascule "ouverture obligatoire"), pas un suivi de
+  -- session de caisse complet (aucune fonctionnalité de ce type n'existe
+  -- ailleurs dans ZegOS, ZegCaisse compris — écart volontaire, non demandé
+  -- comme livrable séparé).
+  cash_float_default numeric(14,2) not null default 0 check (cash_float_default >= 0),
+  cash_float_required boolean not null default false,
+  -- Alerte sonore nouvelle réservation (migration 046) : réutilise la même
+  -- palette que le KDS (kds_sound_choice/kds_sound_volume) plutôt que
+  -- dupliquer choix+volume par type d'alerte.
+  reservation_sound_enabled boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.resto_settings enable row level security;
+
+-- Lecture étendue (cook a besoin des réglages KDS pour son propre écran,
+-- server a besoin du taux de conversion fidélité en salle) ; écriture
+-- strictement owner/manager (page Paramètres), même pattern que
+-- hotel_settings.
+create policy resto_settings_select on public.resto_settings for select to authenticated
+  using (public.has_organization_access(organization_id));
+create policy resto_settings_write on public.resto_settings for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- resto_loyalty_accounts (migration 045) : identité indépendante de
+-- ZegResto, clé = numéro de téléphone — PAS de FK vers public.customers
+-- (ZegCaisse), pour préserver l'isolation entre applications (même
+-- principe que hotel_guests). Voir ARCHITECTURE.md : fonctionnalité
+-- ZegResto uniquement, pas une primitive de plateforme partagée.
+create table if not exists public.resto_loyalty_accounts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  telephone text not null,
+  nom text,
+  points_balance integer not null default 0 check (points_balance >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, telephone)
+);
+create index if not exists idx_resto_loyalty_accounts_org on public.resto_loyalty_accounts(organization_id);
+alter table public.resto_loyalty_accounts enable row level security;
+
+create policy resto_loyalty_accounts_select on public.resto_loyalty_accounts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+-- INSERT limité à points_balance = 0 : tout crédit de points passe
+-- exclusivement par les RPC security definer (apply_resto_bill_loyalty(),
+-- add_resto_bill_payment()), jamais par une écriture directe.
+create policy resto_loyalty_accounts_insert on public.resto_loyalty_accounts for insert to authenticated
+  with check (
+    points_balance = 0
+    and public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[])
+  );
+-- UPDATE direct réservé à owner/manager (correction nom/téléphone) —
+-- server n'a aucun accès UPDATE direct : RLS ne masque que des lignes,
+-- jamais des colonnes (cf. hotel_guest_contact()), donc lui laisser un
+-- accès UPDATE, même pour "juste le nom", l'exposerait aussi à modifier
+-- points_balance directement.
+create policy resto_loyalty_accounts_update on public.resto_loyalty_accounts for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+create policy resto_loyalty_accounts_delete on public.resto_loyalty_accounts for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
 -- Migration 041 — ZegResto : Facturation (notes, partage, paiements).
 -- Comme pour resto_order_items/resto_kitchen_tickets, organization_id est
 -- ajouté sur resto_bill_splits/resto_bill_split_items/resto_bill_payments
 -- (non listées dans le schéma de la demande initiale).
 
+-- loyalty_account_id/loyalty_discount/loyalty_points_* (migration 045) :
+-- rattachement optionnel à un compte fidélité et remise appliquée,
+-- calculés exclusivement par apply_resto_bill_loyalty()/add_resto_bill_payment()
+-- (jamais saisis librement) — voir le résumé de fin de chantier pour la
+-- réserve de sécurité qu'implique la policy resto_bills_update existante
+-- (owner/manager/server, déjà large avant la fidélité — cf. colonne total).
 create table if not exists public.resto_bills (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references public.resto_orders(id) on delete cascade,
@@ -3206,6 +3472,10 @@ create table if not exists public.resto_bills (
   total numeric(14,2) not null default 0,
   statut text not null default 'ouverte' check (statut in ('ouverte', 'payee', 'annulee')),
   split_mode text not null default 'aucun' check (split_mode in ('aucun', 'egal', 'detaille')),
+  loyalty_account_id uuid references public.resto_loyalty_accounts(id) on delete set null,
+  loyalty_discount numeric(14,2) not null default 0 check (loyalty_discount >= 0),
+  loyalty_points_earned integer not null default 0,
+  loyalty_points_redeemed integer not null default 0,
   created_at timestamptz not null default now(),
   unique (order_id)
 );
@@ -3221,6 +3491,28 @@ create policy resto_bills_update on public.resto_bills for update to authenticat
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
 create policy resto_bills_delete on public.resto_bills for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- resto_loyalty_transactions (migration 045) : historique earn/spend —
+-- écriture exclusivement via apply_resto_bill_loyalty()/add_resto_bill_payment()
+-- (aucune policy insert/update/delete accordée à quiconque directement) :
+-- lecture seule pour le staff, même owner/manager.
+create table if not exists public.resto_loyalty_transactions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  account_id uuid not null references public.resto_loyalty_accounts(id) on delete cascade,
+  bill_id uuid references public.resto_bills(id) on delete set null,
+  type text not null check (type in ('earn', 'spend')),
+  points integer not null check (points > 0),
+  montant numeric(14,2) not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_loyalty_transactions_org on public.resto_loyalty_transactions(organization_id);
+create index if not exists idx_resto_loyalty_transactions_account on public.resto_loyalty_transactions(account_id);
+create index if not exists idx_resto_loyalty_transactions_bill on public.resto_loyalty_transactions(bill_id);
+alter table public.resto_loyalty_transactions enable row level security;
+
+create policy resto_loyalty_transactions_select on public.resto_loyalty_transactions for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
 
 -- Un split par "convive" (mode égal : montant réparti par create_resto_bill() ;
 -- mode détaillé : montant recalculé depuis resto_bill_split_items par
@@ -3374,6 +3666,10 @@ declare
   v_bill public.resto_bills;
   v_total_paid numeric(14,2);
   v_table_id uuid;
+  v_net_total numeric(14,2);
+  v_loyalty_enabled boolean;
+  v_earn_amount_per_point numeric(14,2);
+  v_points_earned integer;
 begin
   if p_montant is null or p_montant <= 0 then
     raise exception 'Montant invalide.';
@@ -3393,12 +3689,32 @@ begin
   select coalesce(sum(montant), 0) into v_total_paid
   from public.resto_bill_payments where bill_id = p_bill_id and statut = 'validee';
 
-  if v_total_paid >= v_bill.total then
+  v_net_total := greatest(v_bill.total - v_bill.loyalty_discount, 0);
+
+  if v_total_paid >= v_net_total then
     update public.resto_bills set statut = 'payee' where id = p_bill_id returning * into v_bill;
     update public.resto_orders set statut = 'fermee', closed_at = now() where id = v_bill.order_id
     returning table_id into v_table_id;
     if v_table_id is not null then
       update public.resto_tables set statut = 'libre' where id = v_table_id and statut <> 'libre';
+    end if;
+
+    -- Accrual fidélité (migration 045) : sur le montant net réellement
+    -- payé, uniquement si un compte est rattaché et le programme activé.
+    if v_bill.loyalty_account_id is not null then
+      select coalesce(rs.loyalty_enabled, false), coalesce(rs.loyalty_earn_amount_per_point, 100)
+        into v_loyalty_enabled, v_earn_amount_per_point
+        from (select 1) x left join public.resto_settings rs on rs.organization_id = v_bill.organization_id;
+      if v_loyalty_enabled then
+        v_points_earned := floor(v_net_total / v_earn_amount_per_point)::integer;
+        if v_points_earned > 0 then
+          update public.resto_loyalty_accounts set points_balance = points_balance + v_points_earned, updated_at = now()
+            where id = v_bill.loyalty_account_id;
+          insert into public.resto_loyalty_transactions (organization_id, account_id, bill_id, type, points, montant)
+          values (v_bill.organization_id, v_bill.loyalty_account_id, p_bill_id, 'earn', v_points_earned, v_net_total);
+          update public.resto_bills set loyalty_points_earned = v_points_earned where id = p_bill_id returning * into v_bill;
+        end if;
+      end if;
     end if;
   end if;
 
@@ -3407,6 +3723,86 @@ end;
 $$;
 revoke all on function public.add_resto_bill_payment(uuid, numeric, text, uuid) from public;
 grant execute on function public.add_resto_bill_payment(uuid, numeric, text, uuid) to authenticated;
+
+-- apply_resto_bill_loyalty() (migration 045) : rattache (ou crée) un
+-- compte fidélité à une note encore ouverte, et échange éventuellement des
+-- points contre une remise. Ré-appelable (le serveur change d'avis sur le
+-- nombre de points) : rembourse d'abord tout échange précédent sur cette
+-- note avant d'appliquer le nouveau. Ne touche jamais resto_bills.total (le
+-- brut reste inchangé, seule loyalty_discount varie) — add_resto_bill_payment()
+-- compare le montant réglé à (total - loyalty_discount).
+create or replace function public.apply_resto_bill_loyalty(
+  p_organization_id uuid,
+  p_bill_id uuid,
+  p_telephone text,
+  p_nom text default null,
+  p_redeem_points integer default 0
+) returns public.resto_bills
+language plpgsql security definer set search_path = public as $$
+declare
+  v_bill public.resto_bills;
+  v_account public.resto_loyalty_accounts;
+  v_loyalty_enabled boolean;
+  v_redeem_value_per_point numeric(14,4);
+  v_min_redeem integer;
+  v_discount numeric(14,2) := 0;
+  v_phone text;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+  v_phone := nullif(trim(p_telephone), '');
+  if v_phone is null then raise exception 'Numéro de téléphone requis.'; end if;
+  if p_redeem_points is null or p_redeem_points < 0 then raise exception 'Points invalides.'; end if;
+
+  select * into v_bill from public.resto_bills where id = p_bill_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Note introuvable.'; end if;
+  if v_bill.statut <> 'ouverte' then raise exception 'Cette note ne peut plus être modifiée.'; end if;
+
+  select coalesce(rs.loyalty_enabled, false), coalesce(rs.loyalty_redeem_value_per_point, 1), coalesce(rs.loyalty_min_points_to_redeem, 1)
+    into v_loyalty_enabled, v_redeem_value_per_point, v_min_redeem
+    from (select 1) x left join public.resto_settings rs on rs.organization_id = p_organization_id;
+  if not v_loyalty_enabled then
+    raise exception 'Le programme de fidélité n''est pas activé pour cet établissement.';
+  end if;
+
+  if v_bill.loyalty_points_redeemed > 0 and v_bill.loyalty_account_id is not null then
+    update public.resto_loyalty_accounts set points_balance = points_balance + v_bill.loyalty_points_redeemed, updated_at = now()
+      where id = v_bill.loyalty_account_id;
+    delete from public.resto_loyalty_transactions where bill_id = p_bill_id and type = 'spend';
+  end if;
+
+  select * into v_account from public.resto_loyalty_accounts where organization_id = p_organization_id and telephone = v_phone;
+  if not found then
+    insert into public.resto_loyalty_accounts (organization_id, telephone, nom, points_balance)
+    values (p_organization_id, v_phone, p_nom, 0)
+    returning * into v_account;
+  elsif p_nom is not null and coalesce(v_account.nom, '') = '' then
+    update public.resto_loyalty_accounts set nom = p_nom, updated_at = now() where id = v_account.id returning * into v_account;
+  end if;
+
+  if p_redeem_points > 0 then
+    if p_redeem_points < v_min_redeem then
+      raise exception 'Minimum % points requis pour un échange.', v_min_redeem;
+    end if;
+    if v_account.points_balance < p_redeem_points then
+      raise exception 'Solde de points insuffisant.';
+    end if;
+    v_discount := round(least(p_redeem_points * v_redeem_value_per_point, v_bill.total), 2);
+    update public.resto_loyalty_accounts set points_balance = points_balance - p_redeem_points, updated_at = now() where id = v_account.id;
+    insert into public.resto_loyalty_transactions (organization_id, account_id, bill_id, type, points, montant)
+    values (p_organization_id, v_account.id, p_bill_id, 'spend', p_redeem_points, v_discount);
+  end if;
+
+  update public.resto_bills set loyalty_account_id = v_account.id, loyalty_discount = v_discount, loyalty_points_redeemed = p_redeem_points
+    where id = p_bill_id
+    returning * into v_bill;
+
+  return v_bill;
+end;
+$$;
+revoke all on function public.apply_resto_bill_loyalty(uuid, uuid, text, text, integer) from public;
+grant execute on function public.apply_resto_bill_loyalty(uuid, uuid, text, text, integer) to authenticated;
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
