@@ -327,6 +327,7 @@ export type RestoKitchenTicket = {
   id: string; organization_id: string; order_id: string; course_id: string | null; statut: KitchenTicketStatut;
   created_at: string; ready_at: string | null;
   order?: RestoOrder | null;
+  course?: RestoOrderCourse | null;
 };
 
 // Écrans "temps réel" (Commandes, Cuisine) : la RLS suffit à sécuriser
@@ -511,17 +512,21 @@ export function useSendRestoCourse() {
   });
 }
 
-export function useRestoKitchenTickets() {
+// refetchIntervalMs : filet de sécurité si le channel realtime se
+// déconnecte, ET mode affichage "mains libres" (écran KDS laissé ouvert
+// sans interaction) — configurable depuis resto_settings.kds_auto_refresh_seconds
+// (migration 044), 15s par défaut si aucun réglage n'existe encore.
+export function useRestoKitchenTickets(refetchIntervalMs = 15_000) {
   const organizationId = useOrganizationId();
   const qc = useQueryClient();
   useRestoRealtimeInvalidate("resto_kitchen_tickets", () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] }));
   return useQuery({
     queryKey: ["resto_kitchen_tickets", organizationId],
     enabled: !!organizationId,
-    refetchInterval: 15_000, // filet de sécurité si le channel realtime se déconnecte
+    refetchInterval: refetchIntervalMs,
     queryFn: async (): Promise<RestoKitchenTicket[]> => {
       const { data, error } = await supabase.from("resto_kitchen_tickets")
-        .select("*, order:resto_orders(*, table:resto_tables(*))")
+        .select("*, order:resto_orders(*, table:resto_tables(*)), course:resto_order_courses(*)")
         .eq("organization_id", organizationId!).neq("statut", "pret").order("created_at");
       if (error) throw error;
       return data as RestoKitchenTicket[];
@@ -837,5 +842,54 @@ export function useRestoReportData(from: Date, to: Date) {
 
       return { revenue, orderCount, avgTicket, avgServiceMin, topItems };
     },
+  });
+}
+
+// ============ PARAMÈTRES (resto_settings — migration 044) : réglages KDS
+// pour l'instant, complétés par les chantiers suivants (Ticket & Caisse,
+// Sons & Notifications, fidélité). Ligne créée à la volée par le premier
+// upsert (comme hotel_settings) — data null tant que personne n'a encore
+// modifié les réglages, valeurs par défaut appliquées côté consommateur. ===
+export type RestoSoundChoice = "chime" | "bell" | "soft";
+export type RestoSettings = {
+  organization_id: string;
+  kds_auto_refresh_seconds: number;
+  kds_urgency_minutes: number;
+  kds_sound_enabled: boolean;
+  kds_sound_choice: RestoSoundChoice;
+  kds_sound_volume: number;
+  updated_at: string;
+};
+export const RESTO_SETTINGS_DEFAULTS: Omit<RestoSettings, "organization_id" | "updated_at"> = {
+  kds_auto_refresh_seconds: 15,
+  kds_urgency_minutes: 10,
+  kds_sound_enabled: true,
+  kds_sound_choice: "chime",
+  kds_sound_volume: 0.6,
+};
+
+export function useRestoSettings() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["resto_settings", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<RestoSettings | null> => {
+      const { data, error } = await supabase.from("resto_settings")
+        .select("*").eq("organization_id", organizationId!).maybeSingle();
+      if (error) throw error;
+      return data as RestoSettings | null;
+    },
+  });
+}
+export function useUpdateRestoSettings() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (s: Partial<RestoSettings>) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.from("resto_settings")
+        .upsert({ ...s, organization_id: organizationId }).select().single();
+      if (error) throw error; return data as RestoSettings;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_settings", organizationId] }),
   });
 }

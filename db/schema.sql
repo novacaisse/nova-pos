@@ -3587,6 +3587,33 @@ $$;
 revoke all on function public.add_resto_bill_payment(uuid, numeric, text, uuid) from public;
 grant execute on function public.add_resto_bill_payment(uuid, numeric, text, uuid) to authenticated;
 
+-- resto_settings (migration 044) : une ligne par organisation, créée à la
+-- volée par le premier upsert depuis /app/resto/parametres (pas de ligne
+-- par défaut via provision_organization(), même pattern que
+-- hotel_settings). Ne porte pour l'instant que les réglages du KDS —
+-- d'autres réglages ZegResto viendront s'ajouter par ALTER TABLE ADD
+-- COLUMN sans toucher à ce qui existe déjà ici.
+create table if not exists public.resto_settings (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  kds_auto_refresh_seconds integer not null default 15 check (kds_auto_refresh_seconds in (10, 15, 30)),
+  kds_urgency_minutes integer not null default 10 check (kds_urgency_minutes > 0),
+  kds_sound_enabled boolean not null default true,
+  kds_sound_choice text not null default 'chime' check (kds_sound_choice in ('chime', 'bell', 'soft')),
+  kds_sound_volume numeric(3,2) not null default 0.6 check (kds_sound_volume >= 0 and kds_sound_volume <= 1),
+  updated_at timestamptz not null default now()
+);
+alter table public.resto_settings enable row level security;
+
+-- Lecture étendue (cook a besoin de connaître l'intervalle de refresh, le
+-- seuil d'urgence et le son configuré pour son propre écran KDS) ; écriture
+-- strictement owner/manager (page Paramètres), même pattern que
+-- hotel_settings.
+create policy resto_settings_select on public.resto_settings for select to authenticated
+  using (public.has_organization_access(organization_id));
+create policy resto_settings_write on public.resto_settings for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages) + les 15 tables
