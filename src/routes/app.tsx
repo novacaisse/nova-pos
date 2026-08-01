@@ -1,12 +1,13 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Loader2, Store, RotateCw, Mail, LogOut, ShoppingCart, CalendarPlus } from "lucide-react";
+import { Loader2, Store, RotateCw, Mail, LogOut, ShoppingCart, CalendarPlus, UtensilsCrossed } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ShopSelector } from "@/components/app/ShopSelector";
 import { GlobalSearch } from "@/components/app/GlobalSearch";
 import { HotelGlobalSearch } from "@/components/app/HotelGlobalSearch";
+import { RestoGlobalSearch } from "@/components/app/RestoGlobalSearch";
 import { AiBubble } from "@/components/app/AiBubble";
 import { ThemeToggle } from "@/components/app/ThemeToggle";
 import { NotificationsBell } from "@/components/app/NotificationsBell";
@@ -47,15 +48,18 @@ function AppLayout() {
   // d'organisation et à la déconnexion. Voir src/lib/auth/useReadOnlyMode.ts.
 
   // Le tableau de bord racine (/app) est celui de ZegCaisse — inutile (ou
-  // vide côté RLS) pour une organisation hotel-only ou un rôle
-  // front_desk/housekeeping (aucun accès ZegCaisse). On les envoie
-  // directement sur leur propre tableau de bord ZegHôtel.
+  // vide côté RLS) pour une organisation hotel-only/resto-only ou un rôle
+  // front_desk/housekeeping/server/cook (aucun accès ZegCaisse). On les
+  // envoie directement sur leur propre tableau de bord.
   useEffect(() => {
     if (shopLoading || pathname !== "/app" || !currentOrganization) return;
     const activeApps = currentOrganization.active_apps ?? [];
     const hotelOnlyOrg = activeApps.includes("hotel") && !activeApps.includes("pos");
     const hotelOnlyRole = myRole === "front_desk" || myRole === "housekeeping";
-    if (hotelOnlyOrg || hotelOnlyRole) navigate({ to: "/app/hotel" });
+    if (hotelOnlyOrg || hotelOnlyRole) { navigate({ to: "/app/hotel" }); return; }
+    const restoOnlyOrg = activeApps.includes("resto") && !activeApps.includes("pos");
+    const restoOnlyRole = myRole === "server" || myRole === "cook";
+    if (restoOnlyOrg || restoOnlyRole) navigate({ to: "/app/resto" });
   }, [pathname, currentOrganization, shopLoading, myRole, navigate]);
 
   if (loading || !user) {
@@ -85,11 +89,13 @@ function AppLayout() {
     return <SuspendedScreen onSignOut={signOut} />;
   }
 
-  // ZegCaisse et ZegHôtel sont deux applications 100% autonomes (audit
-  // isolation ZegOS, Partie A) — la recherche globale et le raccourci
-  // d'action rapide du header ne doivent jamais montrer du contenu ou des
-  // routes de l'autre application selon le contexte courant.
+  // ZegCaisse, ZegHôtel et ZegResto sont trois applications 100% autonomes
+  // (audit isolation ZegOS, Partie A ; étendu à ZegResto) — la recherche
+  // globale et le raccourci d'action rapide du header ne doivent jamais
+  // montrer du contenu ou des routes d'une autre application selon le
+  // contexte courant.
   const inHotelContext = pathname.startsWith("/app/hotel");
+  const inRestoContext = pathname.startsWith("/app/resto");
 
   return (
     <SidebarProvider defaultOpen>
@@ -106,7 +112,7 @@ function AppLayout() {
               <SidebarTrigger className="hidden h-10 w-10 rounded-xl md:inline-flex" />
               <div className="hidden sm:block"><ShopSelector /></div>
               <div className="ml-2 hidden max-w-md flex-1 md:block">
-                {inHotelContext ? <HotelGlobalSearch /> : <GlobalSearch />}
+                {inHotelContext ? <HotelGlobalSearch /> : inRestoContext ? <RestoGlobalSearch /> : <GlobalSearch />}
               </div>
               <div className="ml-auto flex items-center gap-2">
                 {inHotelContext ? (
@@ -114,6 +120,12 @@ function AppLayout() {
                     className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
                     aria-label="Nouvelle réservation">
                     <CalendarPlus className="h-4 w-4" /> Nouvelle réservation
+                  </Link>
+                ) : inRestoContext ? (
+                  <Link to="/app/resto/commandes"
+                    className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
+                    aria-label="Nouvelle commande">
+                    <UtensilsCrossed className="h-4 w-4" /> Nouvelle commande
                   </Link>
                 ) : (
                   <Link to="/app/caisse"

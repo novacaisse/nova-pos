@@ -51,7 +51,8 @@ create index if not exists idx_accounts_owner on public.accounts(owner_id);
 create table if not exists public.account_subscriptions (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.accounts(id) on delete cascade,
-  app_module text not null check (app_module in ('pos', 'hotel')),
+  -- Migration 036 (ZegResto) : 'resto' ajouté aux deux valeurs d'origine.
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto')),
   -- Pas de FK vers plans(id) : comme subscriptions.plan existant, cette
   -- colonne vaut aussi 'trial' pendant la période d'essai, une valeur qui
   -- n'existe pas comme ligne dans plans (seules les formules payantes
@@ -89,7 +90,8 @@ create table if not exists public.organizations (
   -- account_id regroupe les établissements d'un même compte, éventuellement
   -- sur des applications différentes (un compte peut avoir des boutiques
   -- ZegCaisse ET un établissement ZegHotel).
-  app_module text not null check (app_module in ('pos', 'hotel'))
+  -- Migration 036 (ZegResto) : 'resto' ajouté aux deux valeurs d'origine.
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto'))
 );
 create index if not exists idx_organizations_account on public.organizations(account_id);
 
@@ -784,7 +786,7 @@ create table if not exists public.plans (
   max_users integer
 );
 do $$ begin
-  alter table public.plans add constraint plans_app_module_check check (app_module is null or app_module in ('pos', 'hotel'));
+  alter table public.plans add constraint plans_app_module_check check (app_module is null or app_module in ('pos', 'hotel', 'resto'));
 exception when duplicate_object then null;
 end $$;
 
@@ -2692,6 +2694,719 @@ create policy hotel_maintenance_update on public.hotel_maintenance_tickets for u
 drop policy if exists hotel_maintenance_delete on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_delete on public.hotel_maintenance_tickets for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- =============== ZegResto (migrations 035+) ===============
+-- Troisième application ZegOS, même socle que ZegCaisse/ZegHotel
+-- (organizations/organization_members/app_role), même pattern (tables
+-- préfixées resto_, RLS strict par organization_id + rôle).
+
+-- Migration 035 — ZegResto, étape 1/7 : rôles Serveur et Cuisinier.
+-- IMPORTANT — comme 020f (ZegHotel) : à exécuter seule, dans sa propre
+-- transaction, avant toute policy qui référence ces valeurs.
+alter type public.app_role add value if not exists 'server';
+alter type public.app_role add value if not exists 'cook';
+
+-- Migration 037 — ZegResto, étape 3/7 : Salle (zones/tables) + Menu
+-- (catégories/articles/modificateurs).
+
+create table if not exists public.resto_zones (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  nom text not null,
+  ordre integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_zones_org on public.resto_zones(organization_id);
+alter table public.resto_zones enable row level security;
+
+create policy resto_zones_select on public.resto_zones for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_zones_write on public.resto_zones for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.resto_tables (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  zone_id uuid references public.resto_zones(id) on delete set null,
+  numero text not null,
+  capacite integer not null default 2 check (capacite > 0),
+  statut text not null default 'libre' check (statut in ('libre', 'occupee', 'reservee', 'nettoyage')),
+  position_x numeric(6,2) not null default 0,
+  position_y numeric(6,2) not null default 0,
+  created_at timestamptz not null default now(),
+  unique (organization_id, numero)
+);
+create index if not exists idx_resto_tables_org on public.resto_tables(organization_id);
+create index if not exists idx_resto_tables_zone on public.resto_tables(zone_id);
+alter table public.resto_tables enable row level security;
+
+-- Le statut de table change en continu (occupée/libérée/nettoyage) au fil
+-- du service — server/cook peuvent le lire (plan de salle, KDS) mais seul
+-- server (avec owner/manager) peut l'écrire ; cook n'a pas besoin d'écrire
+-- sur les tables (son écran est le KDS, pas le plan de salle).
+create policy resto_tables_select on public.resto_tables for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_tables_insert on public.resto_tables for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+create policy resto_tables_update on public.resto_tables for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_tables_delete on public.resto_tables for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.resto_menu_categories (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  nom text not null,
+  ordre integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_menu_categories_org on public.resto_menu_categories(organization_id);
+alter table public.resto_menu_categories enable row level security;
+
+create policy resto_menu_categories_select on public.resto_menu_categories for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_menu_categories_write on public.resto_menu_categories for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- station : préparé pour un futur routage KDS multi-poste (grill/froid/
+-- pâtisserie...), non exploité en V1 — le KDS (Phase 2) reste un flux
+-- unique par commande, ce champ ne sert à rien tant qu'aucun écran ne le
+-- filtre. Gardé nullable, jamais lu côté RLS ni logique métier V1.
+create table if not exists public.resto_menu_items (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  category_id uuid references public.resto_menu_categories(id) on delete set null,
+  nom text not null,
+  description text,
+  prix numeric(14,2) not null check (prix >= 0),
+  photo_url text,
+  disponible boolean not null default true,
+  temps_preparation_min integer,
+  station text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_menu_items_org on public.resto_menu_items(organization_id);
+create index if not exists idx_resto_menu_items_category on public.resto_menu_items(category_id);
+alter table public.resto_menu_items enable row level security;
+
+create policy resto_menu_items_select on public.resto_menu_items for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_menu_items_write on public.resto_menu_items for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.resto_modifiers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  nom text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_modifiers_org on public.resto_modifiers(organization_id);
+alter table public.resto_modifiers enable row level security;
+
+create policy resto_modifiers_select on public.resto_modifiers for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_modifiers_write on public.resto_modifiers for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.resto_modifier_options (
+  id uuid primary key default gen_random_uuid(),
+  modifier_id uuid not null references public.resto_modifiers(id) on delete cascade,
+  nom text not null,
+  impact_prix numeric(14,2) not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_modifier_options_modifier on public.resto_modifier_options(modifier_id);
+alter table public.resto_modifier_options enable row level security;
+
+-- resto_modifier_options n'a pas sa propre organization_id (elle appartient
+-- à un modifier, qui en a une) — la RLS remonte via un sous-select sur
+-- resto_modifiers. Pas de dépendance circulaire : has_any_role_in_organization()
+-- ne référence jamais resto_modifier_options ni resto_menu_item_modifiers.
+create policy resto_modifier_options_select on public.resto_modifier_options for select to authenticated
+  using (exists (
+    select 1 from public.resto_modifiers m
+    where m.id = modifier_id
+      and public.has_any_role_in_organization(m.organization_id, array['owner','manager','accountant','server','cook']::public.app_role[])
+  ));
+create policy resto_modifier_options_write on public.resto_modifier_options for all to authenticated
+  using (exists (
+    select 1 from public.resto_modifiers m
+    where m.id = modifier_id
+      and public.has_any_role_in_organization(m.organization_id, array['owner','manager']::public.app_role[])
+  ))
+  with check (exists (
+    select 1 from public.resto_modifiers m
+    where m.id = modifier_id
+      and public.has_any_role_in_organization(m.organization_id, array['owner','manager']::public.app_role[])
+  ));
+
+create table if not exists public.resto_menu_item_modifiers (
+  menu_item_id uuid not null references public.resto_menu_items(id) on delete cascade,
+  modifier_id uuid not null references public.resto_modifiers(id) on delete cascade,
+  primary key (menu_item_id, modifier_id)
+);
+alter table public.resto_menu_item_modifiers enable row level security;
+
+create policy resto_menu_item_modifiers_select on public.resto_menu_item_modifiers for select to authenticated
+  using (exists (
+    select 1 from public.resto_menu_items i
+    where i.id = menu_item_id
+      and public.has_any_role_in_organization(i.organization_id, array['owner','manager','accountant','server','cook']::public.app_role[])
+  ));
+create policy resto_menu_item_modifiers_write on public.resto_menu_item_modifiers for all to authenticated
+  using (exists (
+    select 1 from public.resto_menu_items i
+    where i.id = menu_item_id
+      and public.has_any_role_in_organization(i.organization_id, array['owner','manager']::public.app_role[])
+  ))
+  with check (exists (
+    select 1 from public.resto_menu_items i
+    where i.id = menu_item_id
+      and public.has_any_role_in_organization(i.organization_id, array['owner','manager']::public.app_role[])
+  ));
+
+-- Migration 038 — ZegResto, étape 4/7 : Commandes + KDS (cuisine), flux
+-- temps réel (première utilisation de Supabase Realtime dans ce projet).
+
+create table if not exists public.resto_orders (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  table_id uuid references public.resto_tables(id) on delete set null,
+  type text not null default 'salle' check (type in ('salle', 'emporter', 'livraison')),
+  statut text not null default 'ouverte' check (statut in ('ouverte', 'envoyee', 'servie', 'fermee', 'annulee')),
+  server_id uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  closed_at timestamptz
+);
+create index if not exists idx_resto_orders_org on public.resto_orders(organization_id);
+create index if not exists idx_resto_orders_table on public.resto_orders(table_id);
+alter table public.resto_orders enable row level security;
+
+create policy resto_orders_select on public.resto_orders for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_orders_insert on public.resto_orders for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_orders_update on public.resto_orders for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_orders_delete on public.resto_orders for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- organization_id ajouté sur order_items/kitchen_tickets (non listées dans
+-- la demande initiale, qui ne l'avait explicitement que sur resto_orders) —
+-- cohérence avec la règle du projet + évite un sous-select vers resto_orders
+-- sur chaque lecture RLS (flux KDS lu en continu).
+create table if not exists public.resto_order_items (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  order_id uuid not null references public.resto_orders(id) on delete cascade,
+  menu_item_id uuid references public.resto_menu_items(id) on delete set null,
+  quantite numeric(10,2) not null check (quantite > 0),
+  modifiers_choisis jsonb not null default '[]'::jsonb,
+  statut_ligne text not null default 'en_attente' check (statut_ligne in ('en_attente', 'servie', 'annulee')),
+  prix_unitaire numeric(14,2) not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_order_items_org on public.resto_order_items(organization_id);
+create index if not exists idx_resto_order_items_order on public.resto_order_items(order_id);
+alter table public.resto_order_items enable row level security;
+
+-- INSERT restreint à owner/manager en direct : server passe par
+-- add_resto_order_item() (security definer, plus bas), qui synchronise
+-- aussi le ticket cuisine dans la même transaction.
+create policy resto_order_items_select on public.resto_order_items for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_order_items_insert on public.resto_order_items for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+create policy resto_order_items_update on public.resto_order_items for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_order_items_delete on public.resto_order_items for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Un ticket par commande (flux unique — pas de resto_kitchen_stations en
+-- V1). ready_at posé au passage à 'pret', effacé si remis en attente.
+create table if not exists public.resto_kitchen_tickets (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  order_id uuid not null references public.resto_orders(id) on delete cascade,
+  statut text not null default 'en_attente' check (statut in ('en_attente', 'en_preparation', 'pret')),
+  created_at timestamptz not null default now(),
+  ready_at timestamptz,
+  unique (order_id)
+);
+create index if not exists idx_resto_kitchen_tickets_org on public.resto_kitchen_tickets(organization_id);
+alter table public.resto_kitchen_tickets enable row level security;
+
+create policy resto_kitchen_tickets_select on public.resto_kitchen_tickets for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_kitchen_tickets_insert on public.resto_kitchen_tickets for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+-- update inclut cook : c'est lui qui fait avancer le ticket depuis le KDS.
+create policy resto_kitchen_tickets_update on public.resto_kitchen_tickets for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cook']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cook']::public.app_role[]));
+create policy resto_kitchen_tickets_delete on public.resto_kitchen_tickets for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+alter table public.resto_kitchen_tickets replica identity full;
+alter table public.resto_order_items replica identity full;
+alter table public.resto_orders replica identity full;
+
+do $$ begin
+  alter publication supabase_realtime add table public.resto_kitchen_tickets;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.resto_order_items;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.resto_orders;
+exception when duplicate_object then null;
+end $$;
+
+-- add_resto_order_item() : RPC security definer — server n'a pas de droit
+-- d'écriture direct sur resto_order_items, donc ajouter un article passe
+-- forcément par ici (article + synchronisation du ticket cuisine +
+-- décrément de stock des ingrédients de la recette si elle existe,
+-- atomique). Prix unitaire figé à l'insertion. Corps mis à jour par la
+-- migration 040 (Phase 4, Stock & recettes) — même signature qu'à la
+-- création (038), donc create or replace sûr.
+create or replace function public.add_resto_order_item(
+  p_organization_id uuid,
+  p_order_id uuid,
+  p_menu_item_id uuid,
+  p_quantite numeric,
+  p_modifiers jsonb default '[]'::jsonb
+) returns public.resto_order_items
+language plpgsql security definer set search_path = public as $$
+declare
+  v_order public.resto_orders;
+  v_item public.resto_menu_items;
+  v_modifier_total numeric(14,2) := 0;
+  v_unit_price numeric(14,2);
+  v_order_item public.resto_order_items;
+  v_ticket public.resto_kitchen_tickets;
+  v_recipe_id uuid;
+  v_ingredient record;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+  if p_quantite is null or p_quantite <= 0 then
+    raise exception 'Quantité invalide.';
+  end if;
+
+  select * into v_order from public.resto_orders where id = p_order_id and organization_id = p_organization_id;
+  if not found then raise exception 'Commande introuvable.'; end if;
+  if v_order.statut in ('fermee', 'annulee') then
+    raise exception 'Impossible d''ajouter un article à une commande fermée ou annulée.';
+  end if;
+
+  select * into v_item from public.resto_menu_items where id = p_menu_item_id and organization_id = p_organization_id;
+  if not found then raise exception 'Article introuvable.'; end if;
+  if not v_item.disponible then raise exception 'Cet article n''est plus disponible.'; end if;
+
+  select coalesce(sum((opt->>'impact_prix')::numeric), 0) into v_modifier_total
+  from jsonb_array_elements(coalesce(p_modifiers, '[]'::jsonb)) opt;
+  v_unit_price := v_item.prix + v_modifier_total;
+
+  insert into public.resto_order_items (organization_id, order_id, menu_item_id, quantite, modifiers_choisis, statut_ligne, prix_unitaire)
+  values (p_organization_id, p_order_id, p_menu_item_id, p_quantite, coalesce(p_modifiers, '[]'::jsonb), 'en_attente', v_unit_price)
+  returning * into v_order_item;
+
+  -- Décrément de stock optionnel (Phase 4) : seulement si une recette
+  -- existe pour cet article. Réutilise apply_stock_movement() (trigger
+  -- existant sur stock_movements) pour la mise à jour + le garde-fou
+  -- anti-survente — si un ingrédient manque, toute la transaction annule.
+  select id into v_recipe_id from public.resto_recipes where menu_item_id = p_menu_item_id;
+  if v_recipe_id is not null then
+    for v_ingredient in
+      select ingredient_ref, quantite from public.resto_recipe_ingredients where recipe_id = v_recipe_id
+    loop
+      insert into public.stock_movements (organization_id, product_id, type, quantity, reason, created_by)
+      values (p_organization_id, v_ingredient.ingredient_ref, 'sale', v_ingredient.quantite * p_quantite, 'Recette ZegResto', auth.uid());
+    end loop;
+  end if;
+
+  select * into v_ticket from public.resto_kitchen_tickets where order_id = p_order_id;
+  if not found then
+    insert into public.resto_kitchen_tickets (organization_id, order_id, statut) values (p_organization_id, p_order_id, 'en_attente');
+  elsif v_ticket.statut = 'pret' then
+    update public.resto_kitchen_tickets set statut = 'en_attente', ready_at = null where id = v_ticket.id;
+  end if;
+
+  if v_order.statut = 'ouverte' then
+    update public.resto_orders set statut = 'envoyee' where id = p_order_id;
+  end if;
+
+  return v_order_item;
+end;
+$$;
+revoke all on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb) from public;
+grant execute on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb) to authenticated;
+
+-- Migration 039 — ZegResto, étape 5/7 : Réservations (staff + formulaire
+-- public /resto/reserver/$slug). Le formulaire public n'écrit jamais
+-- directement dans resto_reservations (aucune policy insert to anon) —
+-- il passe par resto_public_create_reservation() (security definer),
+-- seule porte d'écriture anonyme de tout ZegResto.
+
+create table if not exists public.resto_reservations (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  table_id uuid references public.resto_tables(id) on delete set null,
+  nom_client text not null,
+  telephone_client text,
+  date_heure timestamptz not null,
+  nombre_couverts integer not null check (nombre_couverts > 0),
+  statut text not null default 'pending' check (statut in ('pending', 'confirmee', 'annulee', 'honoree')),
+  source text not null default 'staff' check (source in ('staff', 'public')),
+  notes text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_reservations_org on public.resto_reservations(organization_id);
+create index if not exists idx_resto_reservations_date on public.resto_reservations(date_heure);
+alter table public.resto_reservations enable row level security;
+
+create policy resto_reservations_select on public.resto_reservations for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+create policy resto_reservations_insert on public.resto_reservations for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_reservations_update on public.resto_reservations for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_reservations_delete on public.resto_reservations for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Identité minimale d'un restaurant à partir de son slug public — filtre
+-- app_module = 'resto' pour qu'un slug ZegCaisse/ZegHotel ne fuite jamais
+-- par cette route.
+create or replace function public.resto_public_organization_info(p_slug text)
+returns table(id uuid, name text)
+language sql stable security definer set search_path = public as $$
+  select o.id, o.name from public.organizations o
+  where o.slug = p_slug and o.app_module = 'resto' and not o.suspended;
+$$;
+revoke all on function public.resto_public_organization_info(text) from public;
+grant execute on function public.resto_public_organization_info(text) to anon, authenticated;
+
+-- Aucune limite de débit/anti-spam en V1 (assumé, documenté dans
+-- ARCHITECTURE.md).
+create or replace function public.resto_public_create_reservation(
+  p_slug text,
+  p_nom_client text,
+  p_telephone_client text,
+  p_date_heure timestamptz,
+  p_nombre_couverts integer,
+  p_notes text default null
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_organization_id uuid;
+  v_id uuid;
+begin
+  select id into v_organization_id from public.organizations
+  where slug = p_slug and app_module = 'resto' and not suspended;
+  if v_organization_id is null then
+    raise exception 'Restaurant introuvable.';
+  end if;
+  if p_nom_client is null or trim(p_nom_client) = '' then
+    raise exception 'Nom requis.';
+  end if;
+  if p_nombre_couverts is null or p_nombre_couverts <= 0 then
+    raise exception 'Nombre de couverts invalide.';
+  end if;
+  if p_date_heure is null or p_date_heure <= now() then
+    raise exception 'La date et l''heure doivent être dans le futur.';
+  end if;
+
+  insert into public.resto_reservations
+    (organization_id, nom_client, telephone_client, date_heure, nombre_couverts, statut, source, notes)
+  values
+    (v_organization_id, trim(p_nom_client), nullif(trim(coalesce(p_telephone_client, '')), ''), p_date_heure, p_nombre_couverts, 'pending', 'public', p_notes)
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+revoke all on function public.resto_public_create_reservation(text, text, text, timestamptz, integer, text) from public;
+grant execute on function public.resto_public_create_reservation(text, text, text, timestamptz, integer, text) to anon, authenticated;
+
+-- Migration 040 — ZegResto, étape 6/7 : Stock & recettes. Décision produit
+-- documentée : resto_recipe_ingredients.ingredient_ref référence
+-- directement public.products(id) — les ingrédients SONT des produits
+-- ZegCaisse ordinaires, stock suivi par stock_levels/stock_movements
+-- déjà existants (même réutilisation que le POS interne ZegHotel, Phase 7).
+-- Aucune conversion d'unité automatique en V1 (limite assumée). Le corps de
+-- add_resto_order_item() (défini plus haut, migration 038) a été mis à jour
+-- en place par cette migration pour décrémenter le stock des ingrédients —
+-- voir son commentaire.
+
+create table if not exists public.resto_recipes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  menu_item_id uuid not null references public.resto_menu_items(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (menu_item_id)
+);
+create index if not exists idx_resto_recipes_org on public.resto_recipes(organization_id);
+alter table public.resto_recipes enable row level security;
+
+create policy resto_recipes_select on public.resto_recipes for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy resto_recipes_write on public.resto_recipes for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.resto_recipe_ingredients (
+  id uuid primary key default gen_random_uuid(),
+  recipe_id uuid not null references public.resto_recipes(id) on delete cascade,
+  ingredient_ref uuid not null references public.products(id) on delete restrict,
+  quantite numeric(14,3) not null check (quantite > 0),
+  unite text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_recipe_ingredients_recipe on public.resto_recipe_ingredients(recipe_id);
+alter table public.resto_recipe_ingredients enable row level security;
+
+create policy resto_recipe_ingredients_select on public.resto_recipe_ingredients for select to authenticated
+  using (exists (
+    select 1 from public.resto_recipes r
+    where r.id = recipe_id
+      and public.has_any_role_in_organization(r.organization_id, array['owner','manager','accountant']::public.app_role[])
+  ));
+create policy resto_recipe_ingredients_write on public.resto_recipe_ingredients for all to authenticated
+  using (exists (
+    select 1 from public.resto_recipes r
+    where r.id = recipe_id
+      and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
+  ))
+  with check (exists (
+    select 1 from public.resto_recipes r
+    where r.id = recipe_id
+      and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
+  ));
+
+-- Migration 041 — ZegResto : Facturation (notes, partage, paiements).
+-- Comme pour resto_order_items/resto_kitchen_tickets, organization_id est
+-- ajouté sur resto_bill_splits/resto_bill_split_items/resto_bill_payments
+-- (non listées dans le schéma de la demande initiale).
+
+create table if not exists public.resto_bills (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.resto_orders(id) on delete cascade,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  total numeric(14,2) not null default 0,
+  statut text not null default 'ouverte' check (statut in ('ouverte', 'payee', 'annulee')),
+  split_mode text not null default 'aucun' check (split_mode in ('aucun', 'egal', 'detaille')),
+  created_at timestamptz not null default now(),
+  unique (order_id)
+);
+create index if not exists idx_resto_bills_org on public.resto_bills(organization_id);
+alter table public.resto_bills enable row level security;
+
+create policy resto_bills_select on public.resto_bills for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+create policy resto_bills_insert on public.resto_bills for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_bills_update on public.resto_bills for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_bills_delete on public.resto_bills for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Un split par "convive" (mode égal : montant réparti par create_resto_bill() ;
+-- mode détaillé : montant recalculé depuis resto_bill_split_items par
+-- set_resto_bill_split_items() — jamais les deux mécanismes en même temps).
+create table if not exists public.resto_bill_splits (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  bill_id uuid not null references public.resto_bills(id) on delete cascade,
+  split_index integer not null,
+  montant numeric(14,2) not null default 0,
+  created_at timestamptz not null default now(),
+  unique (bill_id, split_index)
+);
+create index if not exists idx_resto_bill_splits_org on public.resto_bill_splits(organization_id);
+create index if not exists idx_resto_bill_splits_bill on public.resto_bill_splits(bill_id);
+alter table public.resto_bill_splits enable row level security;
+
+create policy resto_bill_splits_select on public.resto_bill_splits for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+create policy resto_bill_splits_write on public.resto_bill_splits for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+
+-- Mode détaillé uniquement — peuplée uniquement par set_resto_bill_split_items()
+-- (aucune policy insert/update/delete to authenticated : jamais d'écriture
+-- directe côté client, la cohérence avec resto_bill_splits.montant doit
+-- rester atomique).
+create table if not exists public.resto_bill_split_items (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  bill_id uuid not null references public.resto_bills(id) on delete cascade,
+  split_index integer not null,
+  order_item_id uuid not null references public.resto_order_items(id) on delete cascade,
+  unique (bill_id, order_item_id)
+);
+create index if not exists idx_resto_bill_split_items_org on public.resto_bill_split_items(organization_id);
+create index if not exists idx_resto_bill_split_items_bill on public.resto_bill_split_items(bill_id);
+alter table public.resto_bill_split_items enable row level security;
+
+create policy resto_bill_split_items_select on public.resto_bill_split_items for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+
+create table if not exists public.resto_bill_payments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  bill_id uuid not null references public.resto_bills(id) on delete cascade,
+  split_id uuid references public.resto_bill_splits(id) on delete set null,
+  methode text not null check (methode in ('mobile_money', 'cash', 'carte')),
+  montant numeric(14,2) not null check (montant > 0),
+  statut text not null default 'validee' check (statut in ('validee', 'annulee')),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_bill_payments_org on public.resto_bill_payments(organization_id);
+create index if not exists idx_resto_bill_payments_bill on public.resto_bill_payments(bill_id);
+alter table public.resto_bill_payments enable row level security;
+
+create policy resto_bill_payments_select on public.resto_bill_payments for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+-- Pas de policy insert : les paiements ne sont enregistrés que via
+-- add_resto_bill_payment() (security definer plus bas).
+create policy resto_bill_payments_update on public.resto_bill_payments for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create or replace function public.create_resto_bill(
+  p_organization_id uuid,
+  p_order_id uuid,
+  p_split_mode text default 'aucun',
+  p_split_count integer default null
+) returns public.resto_bills
+language plpgsql security invoker set search_path = public as $$
+declare
+  v_total numeric(14,2);
+  v_bill public.resto_bills;
+  v_part numeric(14,2);
+  i integer;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+  select coalesce(sum(prix_unitaire * quantite), 0) into v_total
+  from public.resto_order_items where order_id = p_order_id and statut_ligne <> 'annulee';
+
+  insert into public.resto_bills (order_id, organization_id, total, split_mode)
+  values (p_order_id, p_organization_id, v_total, coalesce(p_split_mode, 'aucun'))
+  returning * into v_bill;
+
+  if p_split_mode = 'egal' and p_split_count is not null and p_split_count > 1 then
+    v_part := trunc(v_total / p_split_count, 2);
+    for i in 1..p_split_count loop
+      insert into public.resto_bill_splits (organization_id, bill_id, split_index, montant)
+      values (p_organization_id, v_bill.id, i, case when i = p_split_count then v_total - v_part * (p_split_count - 1) else v_part end);
+    end loop;
+  end if;
+
+  return v_bill;
+end;
+$$;
+revoke all on function public.create_resto_bill(uuid, uuid, text, integer) from public;
+grant execute on function public.create_resto_bill(uuid, uuid, text, integer) to authenticated;
+
+create or replace function public.set_resto_bill_split_items(
+  p_bill_id uuid,
+  p_assignments jsonb
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_bill public.resto_bills;
+  v_assignment jsonb;
+  v_split_index integer;
+begin
+  select * into v_bill from public.resto_bills where id = p_bill_id;
+  if not found then raise exception 'Note introuvable.'; end if;
+  if not public.has_any_role_in_organization(v_bill.organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  delete from public.resto_bill_split_items where bill_id = p_bill_id;
+  delete from public.resto_bill_splits where bill_id = p_bill_id;
+
+  for v_assignment in select * from jsonb_array_elements(coalesce(p_assignments, '[]'::jsonb)) loop
+    insert into public.resto_bill_split_items (organization_id, bill_id, split_index, order_item_id)
+    values (v_bill.organization_id, p_bill_id, (v_assignment->>'split_index')::integer, (v_assignment->>'order_item_id')::uuid);
+  end loop;
+
+  for v_split_index in
+    select distinct (a->>'split_index')::integer from jsonb_array_elements(coalesce(p_assignments, '[]'::jsonb)) a
+  loop
+    insert into public.resto_bill_splits (organization_id, bill_id, split_index, montant)
+    select v_bill.organization_id, p_bill_id, v_split_index,
+      coalesce(sum(oi.prix_unitaire * oi.quantite), 0)
+    from public.resto_bill_split_items bsi
+    join public.resto_order_items oi on oi.id = bsi.order_item_id
+    where bsi.bill_id = p_bill_id and bsi.split_index = v_split_index;
+  end loop;
+end;
+$$;
+revoke all on function public.set_resto_bill_split_items(uuid, jsonb) from public;
+grant execute on function public.set_resto_bill_split_items(uuid, jsonb) to authenticated;
+
+-- security definer (contrairement à add_sale_payment) car resto_bill_payments
+-- n'a aucune policy insert directe — voir plus haut.
+create or replace function public.add_resto_bill_payment(
+  p_bill_id uuid,
+  p_montant numeric,
+  p_methode text,
+  p_split_id uuid default null
+) returns public.resto_bills
+language plpgsql security definer set search_path = public as $$
+declare
+  v_bill public.resto_bills;
+  v_total_paid numeric(14,2);
+  v_table_id uuid;
+begin
+  if p_montant is null or p_montant <= 0 then
+    raise exception 'Montant invalide.';
+  end if;
+
+  select * into v_bill from public.resto_bills where id = p_bill_id for update;
+  if not found then raise exception 'Note introuvable.'; end if;
+  if not public.has_any_role_in_organization(v_bill.organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+  if v_bill.statut = 'payee' then raise exception 'Cette note est déjà réglée.'; end if;
+  if v_bill.statut = 'annulee' then raise exception 'Cette note a été annulée.'; end if;
+
+  insert into public.resto_bill_payments (organization_id, bill_id, split_id, methode, montant, statut)
+  values (v_bill.organization_id, p_bill_id, p_split_id, p_methode, p_montant, 'validee');
+
+  select coalesce(sum(montant), 0) into v_total_paid
+  from public.resto_bill_payments where bill_id = p_bill_id and statut = 'validee';
+
+  if v_total_paid >= v_bill.total then
+    update public.resto_bills set statut = 'payee' where id = p_bill_id returning * into v_bill;
+    update public.resto_orders set statut = 'fermee', closed_at = now() where id = v_bill.order_id
+    returning table_id into v_table_id;
+    if v_table_id is not null then
+      update public.resto_tables set statut = 'libre' where id = v_table_id and statut <> 'libre';
+    end if;
+  end if;
+
+  return v_bill;
+end;
+$$;
+revoke all on function public.add_resto_bill_payment(uuid, numeric, text, uuid) from public;
+grant execute on function public.add_resto_bill_payment(uuid, numeric, text, uuid) to authenticated;
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,

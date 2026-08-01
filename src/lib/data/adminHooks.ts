@@ -42,7 +42,7 @@ export type Plan = {
   // distingue une formule ZegCaisse d'une formule ZegHotel ; max_establishments
   // et max_users bornent le compte (account_subscriptions) pour cette app.
   // null = illimité / non assignée.
-  app_module: "pos" | "hotel" | null;
+  app_module: "pos" | "hotel" | "resto" | null;
   max_establishments: number | null;
   max_users: number | null;
 };
@@ -76,14 +76,26 @@ export const HOTEL_MODULES: { url: string; label: string }[] = [
   { url: "/app/hotel/canaux", label: "Canaux de distribution" },
 ];
 
+export const RESTO_MODULES: { url: string; label: string }[] = [
+  { url: "/app/resto/salle", label: "Salle" },
+  { url: "/app/resto/commandes", label: "Commandes" },
+  { url: "/app/resto/cuisine", label: "Cuisine (KDS)" },
+  { url: "/app/resto/menu", label: "Menu" },
+  { url: "/app/resto/reservations", label: "Réservations" },
+  { url: "/app/resto/rapports", label: "Rapports" },
+];
+
 // Point d'entrée unique pour récupérer le catalogue de modules bridables
-// d'une application — jamais d'import direct de POS_MODULES/HOTEL_MODULES
-// en dehors de ce fichier et du formulaire d'édition (admin.formules.tsx),
-// pour éviter qu'un des deux catalogues reste câblé en dur ailleurs (c'est
-// exactement le bug corrigé en Phase 4 : AppSidebar/BottomNav ne
-// vérifiaient jusqu'ici que POS_MODULES, y compris côté ZegHotel).
-export function getModulesForApp(appModule: "pos" | "hotel" | null | undefined): { url: string; label: string }[] {
-  return appModule === "hotel" ? HOTEL_MODULES : POS_MODULES;
+// d'une application — jamais d'import direct de POS_MODULES/HOTEL_MODULES/
+// RESTO_MODULES en dehors de ce fichier et du formulaire d'édition
+// (admin.formules.tsx), pour éviter qu'un des catalogues reste câblé en dur
+// ailleurs (c'est exactement le bug corrigé en Phase 4 : AppSidebar/
+// BottomNav ne vérifiaient jusqu'ici que POS_MODULES, y compris côté
+// ZegHotel).
+export function getModulesForApp(appModule: "pos" | "hotel" | "resto" | null | undefined): { url: string; label: string }[] {
+  if (appModule === "hotel") return HOTEL_MODULES;
+  if (appModule === "resto") return RESTO_MODULES;
+  return POS_MODULES;
 }
 
 export function usePlans() {
@@ -218,7 +230,7 @@ export function useAdminOrganizations() {
 // Phase 1 (accounts_select_admin/account_subscriptions_select_admin,
 // is_super_admin()) — aucune nouvelle policy nécessaire pour cet écran.
 export type AdminAccountSubscription = {
-  app_module: "pos" | "hotel"; plan_id: string; status: string;
+  app_module: "pos" | "hotel" | "resto"; plan_id: string; status: string;
   trial_ends_at: string | null; current_period_end: string | null;
 };
 export type AdminAccount = {
@@ -226,7 +238,7 @@ export type AdminAccount = {
   owner_profile: { full_name: string | null; phone: string | null } | null;
   owner_email: string | null;
   subscriptions: AdminAccountSubscription[];
-  establishment_counts: Partial<Record<"pos" | "hotel", number>>;
+  establishment_counts: Partial<Record<"pos" | "hotel" | "resto", number>>;
 };
 
 export function useAdminAccounts() {
@@ -249,7 +261,7 @@ export function useAdminAccounts() {
       }
 
       const subsByAccount: Record<string, AdminAccountSubscription[]> = {};
-      const countsByAccount: Record<string, Partial<Record<"pos" | "hotel", number>>> = {};
+      const countsByAccount: Record<string, Partial<Record<"pos" | "hotel" | "resto", number>>> = {};
       if (accountIds.length) {
         const { data: subs } = await supabase.from("account_subscriptions")
           .select("account_id, app_module, plan_id, status, trial_ends_at, current_period_end").in("account_id", accountIds);
@@ -259,7 +271,7 @@ export function useAdminAccounts() {
         const { data: orgs } = await supabase.from("organizations").select("account_id, app_module").in("account_id", accountIds);
         for (const o of (orgs ?? []) as any[]) {
           const byApp = (countsByAccount[o.account_id] ??= {});
-          byApp[o.app_module as "pos" | "hotel"] = (byApp[o.app_module as "pos" | "hotel"] ?? 0) + 1;
+          byApp[o.app_module as "pos" | "hotel" | "resto"] = (byApp[o.app_module as "pos" | "hotel" | "resto"] ?? 0) + 1;
         }
       }
 

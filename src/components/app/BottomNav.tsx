@@ -22,6 +22,10 @@ import {
   Building2,
   Coffee,
   Radio,
+  UtensilsCrossed,
+  LayoutGrid,
+  BookOpen,
+  ChefHat,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -78,6 +82,28 @@ const HOUSEKEEPING_PRIMARY: Item[] = [
   { label: "Ménage", to: "/app/hotel/housekeeping", icon: Sparkle },
 ];
 
+// server/cook n'ont RLS-wise aucun accès aux tables ZegCaisse/ZegHotel —
+// même logique que front_desk/housekeeping ci-dessus, pour ZegResto.
+const RESTO_PRIMARY: Item[] = [
+  { label: "Bord", to: "/app/resto", icon: UtensilsCrossed },
+  { label: "Salle", to: "/app/resto/salle", icon: LayoutGrid },
+  { label: "Commandes", to: "/app/resto/commandes", icon: Receipt },
+  { label: "Résa.", to: "/app/resto/reservations", icon: CalendarRange },
+];
+const RESTO_MORE: Item[] = [
+  { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
+  { label: "Menu", to: "/app/resto/menu", icon: BookOpen },
+  { label: "Rapports", to: "/app/resto/rapports", icon: BarChart3 },
+  { label: "Équipe", to: "/app/resto/equipe", icon: UsersRound },
+  { label: "Paramètres", to: "/app/resto/parametres", icon: Settings },
+];
+// cook n'a qu'un seul écran opérationnel (le KDS) — même traitement que
+// HOUSEKEEPING_PRIMARY côté ZegHotel : jamais filtré par formule, toujours
+// affiché tel quel pour ce rôle.
+const COOK_PRIMARY: Item[] = [
+  { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
+];
+
 export function BottomNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -98,10 +124,13 @@ export function BottomNav() {
   // AppSidebar. front_desk/housekeeping n'ont de toute façon accès qu'à
   // ZegHôtel (RLS), donc toujours ce menu pour eux.
   const isHotelOnlyRole = myRole === "housekeeping" || myRole === "front_desk";
+  const isRestoOnlyRole = myRole === "server" || myRole === "cook";
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
-  const useHotelNav = isHotelOnlyRole
-    || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext)));
+  const inRestoContext = pathname.startsWith("/app/resto");
+  const useHotelNav = !isRestoOnlyRole && (isHotelOnlyRole
+    || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext))));
+  const useRestoNav = isRestoOnlyRole || (!useHotelNav && (activeApps.includes("resto") || inRestoContext));
 
   // HOUSEKEEPING_PRIMARY reste toujours affiché tel quel pour ce rôle (ses
   // deux seuls écrans opérationnels, pas des modules "métier" bridables par
@@ -110,7 +139,9 @@ export function BottomNav() {
   // n'étaient jusqu'ici jamais filtrés, donc jamais bridés par une formule).
   const primary = useHotelNav
     ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
-    : PRIMARY.filter(included);
+    : useRestoNav
+      ? (myRole === "cook" ? COOK_PRIMARY : RESTO_PRIMARY.filter(included))
+      : PRIMARY.filter(included);
   const more = useHotelNav
     ? (myRole === "housekeeping"
         ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
@@ -125,11 +156,18 @@ export function BottomNav() {
           : myRole === "front_desk"
             ? HOTEL_MORE.filter(included).filter((m) => m.to !== "/app/hotel/canaux")
             : HOTEL_MORE.filter(included))
-    : MORE.filter(included);
-  // Le switcher n'a de sens que pour un rôle qui a accès aux deux mondes
-  // (owner/manager/accountant) — front_desk/housekeeping n'ont RLS-wise
-  // aucun accès à ZegCaisse, inutile de leur proposer de "basculer".
-  const showSwitcher = bothAppsActive && !isHotelOnlyRole;
+    : useRestoNav
+      // server : pas d'accès cuisine/menu/paramètres (décision produit
+      // ZegResto — le statut du ticket reste visible depuis Commandes).
+      // cook : COOK_PRIMARY couvre déjà son seul écran (Cuisine), rien de
+      // plus dans "Plus".
+      ? (myRole === "server" || myRole === "cook" ? [] : RESTO_MORE.filter(included))
+      : MORE.filter(included);
+  // Le switcher n'a de sens que pour un rôle qui a accès à plusieurs mondes
+  // (owner/manager/accountant) — front_desk/housekeeping/server/cook n'ont
+  // RLS-wise aucun accès aux autres applications, inutile de leur proposer
+  // de "basculer".
+  const showSwitcher = bothAppsActive && !isHotelOnlyRole && !isRestoOnlyRole;
 
   return (
     <>
