@@ -299,11 +299,13 @@ export function useSetRestoMenuItemModifiers() {
   });
 }
 
-// ============ COMMANDES & CUISINE (Phase 2 — flux temps réel) ============
+// ============ COMMANDES & CUISINE (Phase 2 — flux temps réel ; étapes
+// d'envoi cuisine "courses" ajoutées migration 043) ============
 export type OrderType = "salle" | "emporter" | "livraison";
 export type OrderStatut = "ouverte" | "envoyee" | "servie" | "fermee" | "annulee";
-export type OrderLineStatut = "en_attente" | "servie" | "annulee";
+export type OrderLineStatut = "en_attente" | "pret" | "servie" | "annulee";
 export type KitchenTicketStatut = "en_attente" | "en_preparation" | "pret";
+export type CourseStatut = "brouillon" | "envoyee" | "en_preparation" | "pret" | "servie";
 
 export type RestoOrder = {
   id: string; organization_id: string; table_id: string | null; type: OrderType;
@@ -311,14 +313,18 @@ export type RestoOrder = {
   table?: RestoTable | null;
 };
 export type ChosenModifier = { option_id: string; nom: string; impact_prix: number };
+export type RestoOrderCourse = {
+  id: string; organization_id: string; order_id: string; ordre: number; nom: string | null;
+  statut: CourseStatut; sent_at: string | null; created_at: string;
+};
 export type RestoOrderItem = {
-  id: string; organization_id: string; order_id: string; menu_item_id: string | null;
+  id: string; organization_id: string; order_id: string; course_id: string | null; menu_item_id: string | null;
   quantite: number; modifiers_choisis: ChosenModifier[]; statut_ligne: OrderLineStatut;
   prix_unitaire: number; created_at: string;
   menu_item?: RestoMenuItem | null;
 };
 export type RestoKitchenTicket = {
-  id: string; organization_id: string; order_id: string; statut: KitchenTicketStatut;
+  id: string; organization_id: string; order_id: string; course_id: string | null; statut: KitchenTicketStatut;
   created_at: string; ready_at: string | null;
   order?: RestoOrder | null;
 };
@@ -397,30 +403,94 @@ export function useRestoOrderItems(orderId: string | null) {
 export function useAddRestoOrderItem() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (i: { orderId: string; menuItemId: string; quantite: number; modifiers?: ChosenModifier[] }) => {
+    mutationFn: async (i: { orderId: string; menuItemId: string; quantite: number; modifiers?: ChosenModifier[]; courseId?: string | null }) => {
       if (!organizationId) throw new Error("Aucune organisation sélectionnée");
       const { data, error } = await supabase.rpc("add_resto_order_item", {
         p_organization_id: organizationId, p_order_id: i.orderId, p_menu_item_id: i.menuItemId,
-        p_quantite: i.quantite, p_modifiers: i.modifiers ?? [],
+        p_quantite: i.quantite, p_modifiers: i.modifiers ?? [], p_course_id: i.courseId ?? null,
       });
       if (error) throw error;
       return data as RestoOrderItem;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] });
       qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
       qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] });
     },
   });
 }
+// Passe par mark_resto_order_item_statut() (RPC security definer, migration
+// 043) — pas d'UPDATE direct : c'est ce qui permet au cook de marquer 'pret'
+// sans lui accorder de policy UPDATE large sur resto_order_items (RLS ne
+// masque que des lignes, jamais des colonnes ; cf. hotel_guest_contact()).
 export function useUpdateRestoOrderItemStatut() {
-  const qc = useQueryClient();
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, statut_ligne }: { id: string; orderId: string; statut_ligne: OrderLineStatut }) => {
-      const { error } = await supabase.from("resto_order_items").update({ statut_ligne }).eq("id", id);
+    mutationFn: async ({ id, statut_ligne }: { id: string; orderId: string; statut_ligne: "pret" | "servie" }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("mark_resto_order_item_statut", {
+        p_organization_id: organizationId, p_item_id: id, p_statut: statut_ligne,
+      });
       if (error) throw error;
+      return data as RestoOrderItem;
     },
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] });
+    },
+  });
+}
+
+// ============ ÉTAPES D'ENVOI CUISINE (courses — migration 043) ============
+export function useRestoOrderCourses(orderId: string | null) {
+  return useQuery({
+    queryKey: ["resto_order_courses", orderId],
+    enabled: !!orderId,
+    queryFn: async (): Promise<RestoOrderCourse[]> => {
+      const { data, error } = await supabase.from("resto_order_courses")
+        .select("*").eq("order_id", orderId!).order("ordre").order("created_at");
+      if (error) throw error;
+      return data as RestoOrderCourse[];
+    },
+  });
+}
+// Création manuelle d'une étape nommée (Entrée/Plat/Dessert...) — l'étape
+// par défaut (ordre=1, sans nom) est elle créée implicitement par
+// add_resto_order_item() quand aucune étape n'existe encore.
+export function useCreateRestoOrderCourse() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, nom, ordre }: { orderId: string; nom?: string; ordre: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.from("resto_order_courses")
+        .insert({ organization_id: organizationId, order_id: orderId, nom: nom ?? null, ordre })
+        .select().single();
+      if (error) throw error;
+      return data as RestoOrderCourse;
+    },
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] }),
+  });
+}
+// send_resto_course() (RPC security definer) : envoi explicite en cuisine —
+// crée/relance le ticket cuisine de l'étape, remplace l'ancien auto-fire à
+// l'ajout d'article (V1).
+export function useSendRestoCourse() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId }: { courseId: string; orderId: string }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("send_resto_course", {
+        p_organization_id: organizationId, p_course_id: courseId,
+      });
+      if (error) throw error;
+      return data as RestoOrderCourse;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_courses", vars.orderId] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+      qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] });
+    },
   });
 }
 

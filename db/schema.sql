@@ -2927,28 +2927,67 @@ create policy resto_orders_update on public.resto_orders for update to authentic
 create policy resto_orders_delete on public.resto_orders for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
+-- resto_order_courses (migration 043) : une commande se découpe en étapes
+-- d'envoi cuisine (Entrée/Plat/Dessert, ou un simple numéro pour une
+-- commande sans étapes explicites — voir add_resto_order_item() plus bas
+-- qui crée l'étape par défaut ordre=1 au besoin). Un ticket cuisine
+-- (resto_kitchen_tickets) correspond désormais à une étape, plus à une
+-- commande entière.
+create table if not exists public.resto_order_courses (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  order_id uuid not null references public.resto_orders(id) on delete cascade,
+  ordre integer not null default 1,
+  nom text,
+  statut text not null default 'brouillon' check (statut in ('brouillon', 'envoyee', 'en_preparation', 'pret', 'servie')),
+  sent_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resto_order_courses_org on public.resto_order_courses(organization_id);
+create index if not exists idx_resto_order_courses_order on public.resto_order_courses(order_id);
+alter table public.resto_order_courses enable row level security;
+
+create policy resto_order_courses_select on public.resto_order_courses for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+create policy resto_order_courses_insert on public.resto_order_courses for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_order_courses_update on public.resto_order_courses for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+create policy resto_order_courses_delete on public.resto_order_courses for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
 -- organization_id ajouté sur order_items/kitchen_tickets (non listées dans
 -- la demande initiale, qui ne l'avait explicitement que sur resto_orders) —
 -- cohérence avec la règle du projet + évite un sous-select vers resto_orders
--- sur chaque lecture RLS (flux KDS lu en continu).
+-- sur chaque lecture RLS (flux KDS lu en continu). course_id (migration
+-- 043) : rattachement à l'étape d'envoi cuisine ; statut_ligne étendu avec
+-- 'pret' (marquage ligne par ligne côté KDS, distinct de 'servie' posé par
+-- le serveur).
 create table if not exists public.resto_order_items (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   order_id uuid not null references public.resto_orders(id) on delete cascade,
+  course_id uuid references public.resto_order_courses(id) on delete set null,
   menu_item_id uuid references public.resto_menu_items(id) on delete set null,
   quantite numeric(10,2) not null check (quantite > 0),
   modifiers_choisis jsonb not null default '[]'::jsonb,
-  statut_ligne text not null default 'en_attente' check (statut_ligne in ('en_attente', 'servie', 'annulee')),
+  statut_ligne text not null default 'en_attente' check (statut_ligne in ('en_attente', 'pret', 'servie', 'annulee')),
   prix_unitaire numeric(14,2) not null,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_resto_order_items_org on public.resto_order_items(organization_id);
 create index if not exists idx_resto_order_items_order on public.resto_order_items(order_id);
+create index if not exists idx_resto_order_items_course on public.resto_order_items(course_id);
 alter table public.resto_order_items enable row level security;
 
 -- INSERT restreint à owner/manager en direct : server passe par
--- add_resto_order_item() (security definer, plus bas), qui synchronise
--- aussi le ticket cuisine dans la même transaction.
+-- add_resto_order_item() (security definer, plus bas). UPDATE direct
+-- laissé à owner/manager/server pour l'édition libre (quantité,
+-- modificateurs...) ; le marquage de statut par le cuisinier passe
+-- exclusivement par mark_resto_order_item_statut() (migration 043, RPC
+-- security definer étroite — cook n'a aucun accès UPDATE direct à cette
+-- table, pour ne pas exposer prix_unitaire/quantite/etc. à sa policy).
 create policy resto_order_items_select on public.resto_order_items for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_order_items_insert on public.resto_order_items for insert to authenticated
@@ -2959,18 +2998,21 @@ create policy resto_order_items_update on public.resto_order_items for update to
 create policy resto_order_items_delete on public.resto_order_items for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
--- Un ticket par commande (flux unique — pas de resto_kitchen_stations en
--- V1). ready_at posé au passage à 'pret', effacé si remis en attente.
+-- Un ticket par étape d'envoi cuisine (course_id, migration 043 — avant
+-- cela un ticket par commande entière). order_id conservé pour les
+-- jointures directes existantes. ready_at posé au passage à 'pret', effacé
+-- si remis en attente.
 create table if not exists public.resto_kitchen_tickets (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   order_id uuid not null references public.resto_orders(id) on delete cascade,
+  course_id uuid references public.resto_order_courses(id) on delete cascade,
   statut text not null default 'en_attente' check (statut in ('en_attente', 'en_preparation', 'pret')),
   created_at timestamptz not null default now(),
-  ready_at timestamptz,
-  unique (order_id)
+  ready_at timestamptz
 );
 create index if not exists idx_resto_kitchen_tickets_org on public.resto_kitchen_tickets(organization_id);
+create unique index if not exists idx_resto_kitchen_tickets_course_unique on public.resto_kitchen_tickets(course_id) where course_id is not null;
 alter table public.resto_kitchen_tickets enable row level security;
 
 create policy resto_kitchen_tickets_select on public.resto_kitchen_tickets for select to authenticated
@@ -3003,17 +3045,23 @@ end $$;
 
 -- add_resto_order_item() : RPC security definer — server n'a pas de droit
 -- d'écriture direct sur resto_order_items, donc ajouter un article passe
--- forcément par ici (article + synchronisation du ticket cuisine +
--- décrément de stock des ingrédients de la recette si elle existe,
--- atomique). Prix unitaire figé à l'insertion. Corps mis à jour par la
--- migration 040 (Phase 4, Stock & recettes) — même signature qu'à la
--- création (038), donc create or replace sûr.
+-- forcément par ici (article + décrément de stock des ingrédients de la
+-- recette si elle existe, atomique). Prix unitaire figé à l'insertion.
+-- Signature étendue par la migration 043 (p_course_id, 6e argument) —
+-- create or replace sûr uniquement de 038 vers 040 (même signature) ; le
+-- passage à 6 arguments par la 043 a nécessité un drop function préalable
+-- de l'ancienne signature 5-arguments (piège documenté dans CLAUDE.md), ici
+-- schema.sql ne montre que le create final. Ne touche plus
+-- resto_kitchen_tickets directement depuis la 043 — l'envoi en cuisine est
+-- un acte explicite (send_resto_course(), plus bas). p_course_id = null :
+-- réutilise ou crée l'étape par défaut (ordre=1) de la commande.
 create or replace function public.add_resto_order_item(
   p_organization_id uuid,
   p_order_id uuid,
   p_menu_item_id uuid,
   p_quantite numeric,
-  p_modifiers jsonb default '[]'::jsonb
+  p_modifiers jsonb default '[]'::jsonb,
+  p_course_id uuid default null
 ) returns public.resto_order_items
 language plpgsql security definer set search_path = public as $$
 declare
@@ -3022,7 +3070,8 @@ declare
   v_modifier_total numeric(14,2) := 0;
   v_unit_price numeric(14,2);
   v_order_item public.resto_order_items;
-  v_ticket public.resto_kitchen_tickets;
+  v_course_id uuid;
+  v_course public.resto_order_courses;
   v_recipe_id uuid;
   v_ingredient record;
 begin
@@ -3043,18 +3092,35 @@ begin
   if not found then raise exception 'Article introuvable.'; end if;
   if not v_item.disponible then raise exception 'Cet article n''est plus disponible.'; end if;
 
+  if p_course_id is not null then
+    select * into v_course from public.resto_order_courses where id = p_course_id and order_id = p_order_id;
+    if not found then raise exception 'Étape introuvable.'; end if;
+    v_course_id := p_course_id;
+  else
+    select * into v_course from public.resto_order_courses
+      where order_id = p_order_id and ordre = 1
+      order by created_at limit 1;
+    if not found then
+      insert into public.resto_order_courses (organization_id, order_id, ordre, statut)
+      values (p_organization_id, p_order_id, 1, 'brouillon')
+      returning * into v_course;
+    end if;
+    v_course_id := v_course.id;
+  end if;
+
   select coalesce(sum((opt->>'impact_prix')::numeric), 0) into v_modifier_total
   from jsonb_array_elements(coalesce(p_modifiers, '[]'::jsonb)) opt;
   v_unit_price := v_item.prix + v_modifier_total;
 
-  insert into public.resto_order_items (organization_id, order_id, menu_item_id, quantite, modifiers_choisis, statut_ligne, prix_unitaire)
-  values (p_organization_id, p_order_id, p_menu_item_id, p_quantite, coalesce(p_modifiers, '[]'::jsonb), 'en_attente', v_unit_price)
+  insert into public.resto_order_items (organization_id, order_id, course_id, menu_item_id, quantite, modifiers_choisis, statut_ligne, prix_unitaire)
+  values (p_organization_id, p_order_id, v_course_id, p_menu_item_id, p_quantite, coalesce(p_modifiers, '[]'::jsonb), 'en_attente', v_unit_price)
   returning * into v_order_item;
 
   -- Décrément de stock optionnel (Phase 4) : seulement si une recette
   -- existe pour cet article. Réutilise apply_stock_movement() (trigger
   -- existant sur stock_movements) pour la mise à jour + le garde-fou
   -- anti-survente — si un ingrédient manque, toute la transaction annule.
+  -- Toujours au moment de l'ajout au panier, pas repoussé à l'envoi cuisine.
   select id into v_recipe_id from public.resto_recipes where menu_item_id = p_menu_item_id;
   if v_recipe_id is not null then
     for v_ingredient in
@@ -3065,22 +3131,105 @@ begin
     end loop;
   end if;
 
-  select * into v_ticket from public.resto_kitchen_tickets where order_id = p_order_id;
-  if not found then
-    insert into public.resto_kitchen_tickets (organization_id, order_id, statut) values (p_organization_id, p_order_id, 'en_attente');
-  elsif v_ticket.statut = 'pret' then
-    update public.resto_kitchen_tickets set statut = 'en_attente', ready_at = null where id = v_ticket.id;
-  end if;
-
-  if v_order.statut = 'ouverte' then
-    update public.resto_orders set statut = 'envoyee' where id = p_order_id;
+  -- Si l'étape est déjà envoyée (article ajouté après coup) et que son
+  -- ticket était déjà "pret", le repasser en attente.
+  if v_course.statut in ('envoyee', 'en_preparation', 'pret') then
+    update public.resto_kitchen_tickets set statut = 'en_attente', ready_at = null
+      where course_id = v_course_id and statut = 'pret';
+    if v_course.statut = 'pret' then
+      update public.resto_order_courses set statut = 'en_preparation' where id = v_course_id;
+    end if;
   end if;
 
   return v_order_item;
 end;
 $$;
-revoke all on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb) from public;
-grant execute on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb) to authenticated;
+revoke all on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb, uuid) from public;
+grant execute on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb, uuid) to authenticated;
+
+-- send_resto_course() (migration 043) : déclenchement explicite d'un envoi
+-- en cuisine par le serveur — security definer (écrit
+-- resto_kitchen_tickets, comme add_resto_order_item()).
+create or replace function public.send_resto_course(
+  p_organization_id uuid,
+  p_course_id uuid
+) returns public.resto_order_courses
+language plpgsql security definer set search_path = public as $$
+declare
+  v_course public.resto_order_courses;
+  v_item_count integer;
+  v_existing_ticket public.resto_kitchen_tickets;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_course from public.resto_order_courses where id = p_course_id and organization_id = p_organization_id;
+  if not found then raise exception 'Étape introuvable.'; end if;
+
+  select count(*) into v_item_count from public.resto_order_items
+    where course_id = p_course_id and statut_ligne <> 'annulee';
+  if v_item_count = 0 then
+    raise exception 'Aucun article à envoyer pour cette étape.';
+  end if;
+
+  select * into v_existing_ticket from public.resto_kitchen_tickets where course_id = p_course_id;
+  if not found then
+    insert into public.resto_kitchen_tickets (organization_id, order_id, course_id, statut)
+    values (p_organization_id, v_course.order_id, p_course_id, 'en_attente');
+  elsif v_existing_ticket.statut = 'pret' then
+    update public.resto_kitchen_tickets set statut = 'en_attente', ready_at = null where id = v_existing_ticket.id;
+  end if;
+
+  update public.resto_order_courses set statut = 'envoyee', sent_at = now() where id = p_course_id
+  returning * into v_course;
+
+  update public.resto_orders set statut = 'envoyee' where id = v_course.order_id and statut = 'ouverte';
+
+  return v_course;
+end;
+$$;
+revoke all on function public.send_resto_course(uuid, uuid) from public;
+grant execute on function public.send_resto_course(uuid, uuid) to authenticated;
+
+-- mark_resto_order_item_statut() (migration 043) : narrow — le cuisinier
+-- n'a aucun accès RLS direct en écriture à resto_order_items (une policy
+-- update large l'exposerait à modifier n'importe quelle autre colonne de
+-- la ligne, ex. prix_unitaire/quantite — RLS ne restreint que les lignes,
+-- jamais les colonnes, cf. pattern hotel_guest_contact()). p_statut =
+-- 'pret' pour cook comme pour le personnel de salle ; 'servie' reste
+-- réservé à owner/manager/server (le cuisinier ne "sert" jamais un plat).
+create or replace function public.mark_resto_order_item_statut(
+  p_organization_id uuid,
+  p_item_id uuid,
+  p_statut text
+) returns public.resto_order_items
+language plpgsql security definer set search_path = public as $$
+declare
+  v_roles public.app_role[];
+  v_item public.resto_order_items;
+begin
+  if p_statut not in ('pret', 'servie') then
+    raise exception 'Statut invalide.';
+  end if;
+  v_roles := case when p_statut = 'pret'
+    then array['owner','manager','server','cook']::public.app_role[]
+    else array['owner','manager','server']::public.app_role[]
+  end;
+  if not public.has_any_role_in_organization(p_organization_id, v_roles) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  update public.resto_order_items set statut_ligne = p_statut
+    where id = p_item_id and organization_id = p_organization_id and statut_ligne <> 'annulee'
+    returning * into v_item;
+  if not found then raise exception 'Article de commande introuvable.'; end if;
+
+  return v_item;
+end;
+$$;
+revoke all on function public.mark_resto_order_item_statut(uuid, uuid, text) from public;
+grant execute on function public.mark_resto_order_item_statut(uuid, uuid, text) to authenticated;
 
 -- Migration 039 — ZegResto, étape 5/7 : Réservations (staff + formulaire
 -- public /resto/reserver/$slug). Le formulaire public n'écrit jamais
