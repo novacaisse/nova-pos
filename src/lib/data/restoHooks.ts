@@ -907,28 +907,83 @@ export function useRestoDashboardStats() {
   });
 }
 
+export type RestoReportServerRow = { nom: string; orderCount: number; ca: number };
+export type RestoReportCategoryRow = { nom: string; quantite: number; ca: number };
+export type RestoReportPeakHour = { hour: number; orderCount: number };
+export type RestoReportIngredientRow = { nom: string; unite: string | null; consomme: number; stockActuel: number };
+export type RestoReportPreviousPeriod = { revenue: number; orderCount: number; avgTicket: number };
+
+// Rapports enrichis (V2, chantier 7) : au-delà de CA/ticket moyen/temps de
+// service/plats vendus (V1), ajoute la répartition par serveur et par
+// catégorie de menu, la rotation des tables, les heures de pointe, la
+// consommation d'ingrédients (liée aux recettes, comparée au stock actuel
+// via stock_levels), et une comparaison avec la période précédente de même
+// durée. Toutes les requêtes indépendantes (mouvements de stock, période
+// précédente, nombre de tables) partent en parallèle avec la requête des
+// commandes fermées ; celles qui en dépendent (articles, noms de serveurs,
+// détails produits) suivent dans un second Promise.all une fois les ids
+// connus.
 export function useRestoReportData(from: Date, to: Date) {
   const organizationId = useOrganizationId();
   return useQuery({
     queryKey: ["resto_report", organizationId, from.toISOString(), to.toISOString()],
     enabled: !!organizationId,
     queryFn: async () => {
-      const { data: orders, error } = await supabase.from("resto_orders")
-        .select("id, created_at, closed_at, resto_bills(total)")
-        .eq("organization_id", organizationId!).eq("statut", "fermee")
-        .gte("closed_at", from.toISOString()).lte("closed_at", to.toISOString());
-      if (error) throw error;
-      const closedOrders = (orders ?? []) as any[];
-      const orderIds = closedOrders.map((o) => o.id);
+      const orgId = organizationId!;
+      const durationMs = Math.max(0, to.getTime() - from.getTime());
+      const prevTo = new Date(from.getTime() - 1);
+      const prevFrom = new Date(from.getTime() - durationMs);
 
-      let items: any[] = [];
-      if (orderIds.length) {
-        const { data, error: itemsErr } = await supabase.from("resto_order_items")
-          .select("menu_item_id, quantite, prix_unitaire, statut_ligne, menu_item:resto_menu_items(nom)")
-          .in("order_id", orderIds).neq("statut_ligne", "annulee");
-        if (itemsErr) throw itemsErr;
-        items = data ?? [];
+      const [ordersRes, movementsRes, prevOrdersRes, tablesCountRes] = await Promise.all([
+        supabase.from("resto_orders")
+          .select("id, created_at, closed_at, table_id, server_id, resto_bills(total)")
+          .eq("organization_id", orgId).eq("statut", "fermee")
+          .gte("closed_at", from.toISOString()).lte("closed_at", to.toISOString()),
+        supabase.from("stock_movements")
+          .select("product_id, quantity")
+          .eq("organization_id", orgId).eq("reason", "Recette ZegResto")
+          .gte("created_at", from.toISOString()).lte("created_at", to.toISOString()),
+        supabase.from("resto_orders")
+          .select("id, resto_bills(total)")
+          .eq("organization_id", orgId).eq("statut", "fermee")
+          .gte("closed_at", prevFrom.toISOString()).lte("closed_at", prevTo.toISOString()),
+        supabase.from("resto_tables").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+      ]);
+      if (ordersRes.error) throw ordersRes.error;
+      if (movementsRes.error) throw movementsRes.error;
+      if (prevOrdersRes.error) throw prevOrdersRes.error;
+      if (tablesCountRes.error) throw tablesCountRes.error;
+
+      const closedOrders = (ordersRes.data ?? []) as any[];
+      const orderIds = closedOrders.map((o) => o.id);
+      const serverIds = [...new Set(closedOrders.map((o) => o.server_id).filter(Boolean))] as string[];
+      const consumptionByProduct = new Map<string, number>();
+      for (const m of movementsRes.data ?? []) {
+        consumptionByProduct.set(m.product_id, (consumptionByProduct.get(m.product_id) ?? 0) + Number(m.quantity));
       }
+      const productIds = [...consumptionByProduct.keys()];
+
+      const [itemsRes, profilesRes, productsRes, levelsRes] = await Promise.all([
+        orderIds.length
+          ? supabase.from("resto_order_items")
+              .select("menu_item_id, quantite, prix_unitaire, statut_ligne, menu_item:resto_menu_items(nom, category:resto_menu_categories(nom))")
+              .in("order_id", orderIds).neq("statut_ligne", "annulee")
+          : Promise.resolve({ data: [], error: null }),
+        serverIds.length
+          ? supabase.from("profiles").select("id, full_name").in("id", serverIds)
+          : Promise.resolve({ data: [], error: null }),
+        productIds.length
+          ? supabase.from("products").select("id, name, unit").in("id", productIds)
+          : Promise.resolve({ data: [], error: null }),
+        productIds.length
+          ? supabase.from("stock_levels").select("product_id, quantity").eq("organization_id", orgId).in("product_id", productIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (itemsRes.error) throw itemsRes.error;
+      if (profilesRes.error) throw profilesRes.error;
+      if (productsRes.error) throw productsRes.error;
+      if (levelsRes.error) throw levelsRes.error;
+      const items = (itemsRes.data ?? []) as any[];
 
       const revenue = closedOrders.reduce((s, o) => s + Number(o.resto_bills?.[0]?.total ?? 0), 0);
       const orderCount = closedOrders.length;
@@ -939,6 +994,7 @@ export function useRestoReportData(from: Date, to: Date) {
       const avgServiceMin = serviceDurations.length ? serviceDurations.reduce((s, d) => s + d, 0) / serviceDurations.length : 0;
 
       const byItem = new Map<string, { nom: string; quantite: number; ca: number }>();
+      const byCategory = new Map<string, RestoReportCategoryRow>();
       for (const it of items) {
         const key = it.menu_item_id ?? "?";
         const nom = it.menu_item?.nom ?? "Article supprimé";
@@ -946,10 +1002,55 @@ export function useRestoReportData(from: Date, to: Date) {
         entry.quantite += Number(it.quantite);
         entry.ca += Number(it.prix_unitaire) * Number(it.quantite);
         byItem.set(key, entry);
+
+        const catNom = it.menu_item?.category?.nom ?? "Sans catégorie";
+        const catEntry = byCategory.get(catNom) ?? { nom: catNom, quantite: 0, ca: 0 };
+        catEntry.quantite += Number(it.quantite);
+        catEntry.ca += Number(it.prix_unitaire) * Number(it.quantite);
+        byCategory.set(catNom, catEntry);
       }
       const topItems = [...byItem.values()].sort((a, b) => b.quantite - a.quantite).slice(0, 10);
+      const byCategoryRows = [...byCategory.values()].sort((a, b) => b.ca - a.ca);
 
-      return { revenue, orderCount, avgTicket, avgServiceMin, topItems };
+      const profilesMap = new Map<string, string>((profilesRes.data ?? []).map((p: any) => [p.id, p.full_name || "Sans nom"]));
+      const byServerMap = new Map<string, RestoReportServerRow>();
+      for (const o of closedOrders) {
+        if (!o.server_id) continue;
+        const nom = profilesMap.get(o.server_id) ?? "Inconnu";
+        const entry = byServerMap.get(o.server_id) ?? { nom, orderCount: 0, ca: 0 };
+        entry.orderCount += 1;
+        entry.ca += Number(o.resto_bills?.[0]?.total ?? 0);
+        byServerMap.set(o.server_id, entry);
+      }
+      const byServer = [...byServerMap.values()].sort((a, b) => b.ca - a.ca);
+
+      const dineInOrders = closedOrders.filter((o) => o.table_id);
+      const tablesTotal = tablesCountRes.count ?? 0;
+      const tableTurnover = {
+        tablesCount: tablesTotal,
+        turnsTotal: dineInOrders.length,
+        turnsPerTable: tablesTotal > 0 ? dineInOrders.length / tablesTotal : 0,
+      };
+
+      const hourCounts = new Array(24).fill(0);
+      for (const o of closedOrders) hourCounts[new Date(o.created_at).getHours()]++;
+      const peakHours: RestoReportPeakHour[] = hourCounts.map((orderCount, hour) => ({ hour, orderCount }));
+
+      const productsMap = new Map<string, any>((productsRes.data ?? []).map((p: any) => [p.id, p]));
+      const levelsMap = new Map<string, number>((levelsRes.data ?? []).map((l: any) => [l.product_id, Number(l.quantity)]));
+      const ingredientConsumption: RestoReportIngredientRow[] = productIds
+        .map((pid) => {
+          const p = productsMap.get(pid);
+          return { nom: p?.name ?? "Produit supprimé", unite: p?.unit ?? null, consomme: consumptionByProduct.get(pid) ?? 0, stockActuel: levelsMap.get(pid) ?? 0 };
+        })
+        .sort((a, b) => b.consomme - a.consomme);
+
+      const prevOrders = (prevOrdersRes.data ?? []) as any[];
+      const prevRevenue = prevOrders.reduce((s, o) => s + Number(o.resto_bills?.[0]?.total ?? 0), 0);
+      const prevOrderCount = prevOrders.length;
+      const previousPeriod: RestoReportPreviousPeriod = { revenue: prevRevenue, orderCount: prevOrderCount, avgTicket: prevOrderCount > 0 ? prevRevenue / prevOrderCount : 0 };
+
+      return { revenue, orderCount, avgTicket, avgServiceMin, topItems, byServer, byCategory: byCategoryRows, tableTurnover, peakHours, ingredientConsumption, previousPeriod };
     },
   });
 }
