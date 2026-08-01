@@ -127,6 +127,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Commandes", url: "/app/resto/commandes", icon: "Receipt" },
     { title: "Cuisine", url: "/app/resto/cuisine", icon: "ChefHat" },
     { title: "Menu", url: "/app/resto/menu", icon: "BookOpen" },
+    { title: "Réservations", url: "/app/resto/reservations", icon: "CalendarRange" },
   ],
   // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
   // de commun dans la nav entre les deux applications (le paramètre
@@ -197,6 +198,7 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/resto/cuisine": ["server"],
   "/app/resto/menu": ["server", "cook"],
   "/app/resto/parametres": ["server", "cook"],
+  "/app/resto/reservations": ["cook"],
 };
 
 export function AppSidebar() {

@@ -88,6 +88,7 @@ const RESTO_PRIMARY: Item[] = [
   { label: "Bord", to: "/app/resto", icon: UtensilsCrossed },
   { label: "Salle", to: "/app/resto/salle", icon: LayoutGrid },
   { label: "Commandes", to: "/app/resto/commandes", icon: Receipt },
+  { label: "Résa.", to: "/app/resto/reservations", icon: CalendarRange },
 ];
 const RESTO_MORE: Item[] = [
   { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
