@@ -111,6 +111,7 @@ const ERP_PRIMARY: Item[] = [
   { label: "Bord", to: "/app/erp", icon: LayoutDashboard },
   { label: "Produits", to: "/app/erp/produits", icon: Package },
   { label: "Stock", to: "/app/erp/stock", icon: Warehouse },
+  { label: "Achats", to: "/app/erp/achats", icon: Truck },
 ];
 const ERP_MORE: Item[] = [
   { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },

@@ -138,6 +138,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Tableau de bord", url: "/app/erp", icon: "LayoutDashboard" },
     { title: "Produits", url: "/app/erp/produits", icon: "Package" },
     { title: "Stock", url: "/app/erp/stock", icon: "Warehouse" },
+    { title: "Achats", url: "/app/erp/achats", icon: "Truck" },
   ],
   // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
   // Paramètres — rien de commun dans la nav entre applications (le
@@ -217,6 +218,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // produit du prompt ZegResto) ; cook reste cantonné au KDS partout.
   "/app/resto/rapports": ["server", "cook"],
   "/app/resto/equipe": ["cook"],
+  // ZegERP : Achats n'accorde RLS-wise aucun accès à salesperson/hr_manager/
+  // cashier (aucune de leurs policies select ne couvre erp_suppliers/
+  // erp_purchase_orders/..., migration 050) — masqué ici en cohérence.
+  "/app/erp/achats": ["salesperson", "hr_manager", "cashier"],
 };
 
 export function AppSidebar() {

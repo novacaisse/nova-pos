@@ -91,6 +91,7 @@ export const RESTO_MODULES: { url: string; label: string }[] = [
 export const ERP_MODULES: { url: string; label: string }[] = [
   { url: "/app/erp/produits", label: "Produits" },
   { url: "/app/erp/stock", label: "Stock" },
+  { url: "/app/erp/achats", label: "Achats" },
 ];
 
 // Point d'entrée unique pour récupérer le catalogue de modules bridables
