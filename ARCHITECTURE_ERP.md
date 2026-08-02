@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phase 1 (Stock/Produits) seulement.** Les sections 2 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phase 1 (Stock/Produits) + Phase 2 (Achats & Fournisseurs).** Les sections 3 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -47,7 +47,7 @@ Modules sans rôle dédié :
 - **Rapports & BI** (module 9) → lecture large `owner`/`manager`/`accountant` sur les vues agrégées (`erp_v_*`) ; chaque rôle métier garde par ailleurs l'accès aux données brutes de son propre périmètre (pas un accès BI élargi). `erp_custom_reports` scopé par utilisateur (`created_by = auth.uid()`), pas seulement par organisation — un rapport sauvegardé reste privé à son auteur, comme demandé.
 - **Administration ERP** (module 10) → `owner`/`manager` uniquement, même principe que `organization_members`/`shop_settings` côté socle (gestion d'équipe et de rôles toujours réservée aux deux rôles d'administration).
 
-**Pourquoi les 3 rôles validés ne sont pas encore ajoutés à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils seront migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin (`buyer` avec le module 2, `salesperson` avec le module 3, `hr_manager` avec le module 7) — jamais en avance de phase, même une fois le nom validé.
+**Pourquoi les 3 rôles validés ne sont pas encore tous ajoutés à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils sont migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin — jamais en avance de phase, même une fois le nom validé. `buyer` est fait (migration 049, avec le module 2) ; `salesperson` (module 3) et `hr_manager` (module 7) restent à venir.
 
 ## Schéma par sous-module
 
@@ -69,9 +69,20 @@ Alertes de stock bas : seuil sur `erp_products.low_stock_threshold`, comparé au
 
 Volontairement **hors scope V1** (non demandé, à ajouter si besoin confirmé) : conversion d'unité automatique (ex. carton ↔ unité), valorisation de stock par méthode (FIFO/CMP) autre que coût moyen implicite, code-barres multiples par produit, upload de photo produit (texte `image_url` pour l'instant, comme ZegCaisse V1 — un vrai composant d'upload type `ImageUploadField.tsx`, déjà générique et réutilisable, viendra quand l'écran Produits sera construit).
 
-### 2. Achats & Fournisseurs — schéma prévu, non migré
+### 2. Achats & Fournisseurs — livré (migrations 049+050)
 
-`erp_suppliers`, `erp_purchase_requests`, `erp_purchase_orders` + `erp_purchase_order_lines`, `erp_goods_receipts` + `erp_goods_receipt_lines` (la réception crée des `erp_stock_movements` de type à ajouter à l'enum, ex. `purchase_receipt`, plutôt que de réutiliser `in` — traçabilité de l'origine du mouvement), `erp_supplier_invoices`, `erp_supplier_returns`. Dépend du module 1 (les lignes de commande/réception référencent `erp_products`).
+| Table | Rôle |
+|---|---|
+| `erp_suppliers` | Fiche fournisseur. Select : owner/manager/accountant/buyer/stock. Écriture : owner/manager/buyer. |
+| `erp_purchase_requests` + `erp_purchase_request_lines` | Demande interne, étape optionnelle avant commande (`request_id` nullable sur `erp_purchase_orders`). Statuts `draft` → `submitted` → `approved`/`rejected`. Créée par owner/manager/buyer/**stock** (un magasinier peut signaler un besoin de réappro) ; l'approbation (`submitted` → `approved`/`rejected`) est réservée à owner/manager, même si l'auteur a le rôle buyer/stock — pas d'auto-approbation. |
+| `erp_purchase_orders` + `erp_purchase_order_lines` | Commande fournisseur. Statuts `draft` → `confirmed` → `partially_received`/`received` (ou `cancelled`). `received_quantity` (ligne) jamais modifiée directement — incrémentée exclusivement par `confirm_erp_goods_receipt()`. **Masquage de colonne** : `erp_purchase_order_lines` porte `unit_cost` (donnée sensible) ; le rôle `stock` n'a **aucune** policy SELECT dessus — il consulte quantités commandées/reçues via `erp_purchase_order_lines_for_receiving()` (RPC `security definer`, ne retourne jamais `unit_cost`), pattern `hotel_guest_contact()` imposé par `CLAUDE.md`. |
+| `erp_goods_receipts` + `erp_goods_receipt_lines` | Réception physique — rôle **stock** exclusivement (`buyer` n'y a aucun accès direct), cohérent avec "réceptionner est un geste d'entrepôt, pas d'achat". `confirm_erp_goods_receipt()` (RPC) crée les mouvements `purchase_receipt` (coût repris de la ligne de commande, jamais saisi par `stock`), incrémente `received_quantity`, recalcule le statut de la commande. Réception partielle supportée nativement. |
+| `erp_supplier_invoices` | Facture fournisseur / suivi paiement (`unpaid`/`partially_paid`/`paid`/`disputed`). Écriture élargie à `accountant` (périmètre financier), pas seulement `buyer`. Aucun mouvement de stock associé, pas de RPC nécessaire. |
+| `erp_supplier_returns` + `erp_supplier_return_lines` | Retour marchandise au fournisseur. Porté par **buyer** en V1 (pas `stock`) — simplification assumée, à revisiter si un geste physique distinct par le magasinier se confirme nécessaire. `confirm_erp_supplier_return()` (RPC) crée les mouvements `supplier_return` (sortie, bloquée si stock insuffisant). |
+
+`erp_stock_movement_type` étendu (migration 049, valeurs ajoutées seules avant tout usage) : `purchase_receipt` (+) et `supplier_return` (−, garde anti-survente incluse) — `apply_erp_stock_movement()` mis à jour en conséquence (`CREATE OR REPLACE`, signature inchangée, sûr). Rôle `buyer` ajouté à `app_role` par la même migration.
+
+Volontairement **hors scope V1** : conversion automatique demande → commande (copie des lignes), variance de coût à la réception (prix facturé vs prix commandé), réception contre plusieurs commandes en une seule fois.
 
 ### 3. Ventes & CRM — schéma prévu, non migré
 
