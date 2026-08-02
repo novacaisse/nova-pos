@@ -84,6 +84,7 @@ import { Route as AppErpRhRouteImport } from './routes/app.erp.rh'
 import { Route as AppErpRapportsRouteImport } from './routes/app.erp.rapports'
 import { Route as AppErpProduitsRouteImport } from './routes/app.erp.produits'
 import { Route as AppErpPosRouteImport } from './routes/app.erp.pos'
+import { Route as AppErpParametresRouteImport } from './routes/app.erp.parametres'
 import { Route as AppErpFinanceRouteImport } from './routes/app.erp.finance'
 import { Route as AppErpEquipeRouteImport } from './routes/app.erp.equipe'
 import { Route as AppErpDocumentsRouteImport } from './routes/app.erp.documents'
@@ -466,6 +467,11 @@ const AppErpPosRoute = AppErpPosRouteImport.update({
   path: '/pos',
   getParentRoute: () => AppErpRoute,
 } as any)
+const AppErpParametresRoute = AppErpParametresRouteImport.update({
+  id: '/parametres',
+  path: '/parametres',
+  getParentRoute: () => AppErpRoute,
+} as any)
 const AppErpFinanceRoute = AppErpFinanceRouteImport.update({
   id: '/finance',
   path: '/finance',
@@ -539,6 +545,7 @@ export interface FileRoutesByFullPath {
   '/app/erp/documents': typeof AppErpDocumentsRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
+  '/app/erp/parametres': typeof AppErpParametresRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
   '/app/erp/rapports': typeof AppErpRapportsRoute
@@ -613,6 +620,7 @@ export interface FileRoutesByTo {
   '/app/erp/documents': typeof AppErpDocumentsRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
+  '/app/erp/parametres': typeof AppErpParametresRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
   '/app/erp/rapports': typeof AppErpRapportsRoute
@@ -696,6 +704,7 @@ export interface FileRoutesById {
   '/app/erp/documents': typeof AppErpDocumentsRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
+  '/app/erp/parametres': typeof AppErpParametresRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
   '/app/erp/rapports': typeof AppErpRapportsRoute
@@ -780,6 +789,7 @@ export interface FileRouteTypes {
     | '/app/erp/documents'
     | '/app/erp/equipe'
     | '/app/erp/finance'
+    | '/app/erp/parametres'
     | '/app/erp/pos'
     | '/app/erp/produits'
     | '/app/erp/rapports'
@@ -854,6 +864,7 @@ export interface FileRouteTypes {
     | '/app/erp/documents'
     | '/app/erp/equipe'
     | '/app/erp/finance'
+    | '/app/erp/parametres'
     | '/app/erp/pos'
     | '/app/erp/produits'
     | '/app/erp/rapports'
@@ -936,6 +947,7 @@ export interface FileRouteTypes {
     | '/app/erp/documents'
     | '/app/erp/equipe'
     | '/app/erp/finance'
+    | '/app/erp/parametres'
     | '/app/erp/pos'
     | '/app/erp/produits'
     | '/app/erp/rapports'
@@ -1511,6 +1523,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppErpPosRouteImport
       parentRoute: typeof AppErpRoute
     }
+    '/app/erp/parametres': {
+      id: '/app/erp/parametres'
+      path: '/parametres'
+      fullPath: '/app/erp/parametres'
+      preLoaderRoute: typeof AppErpParametresRouteImport
+      parentRoute: typeof AppErpRoute
+    }
     '/app/erp/finance': {
       id: '/app/erp/finance'
       path: '/finance'
@@ -1585,6 +1604,7 @@ interface AppErpRouteChildren {
   AppErpDocumentsRoute: typeof AppErpDocumentsRoute
   AppErpEquipeRoute: typeof AppErpEquipeRoute
   AppErpFinanceRoute: typeof AppErpFinanceRoute
+  AppErpParametresRoute: typeof AppErpParametresRoute
   AppErpPosRoute: typeof AppErpPosRoute
   AppErpProduitsRoute: typeof AppErpProduitsRoute
   AppErpRapportsRoute: typeof AppErpRapportsRoute
@@ -1600,6 +1620,7 @@ const AppErpRouteChildren: AppErpRouteChildren = {
   AppErpDocumentsRoute: AppErpDocumentsRoute,
   AppErpEquipeRoute: AppErpEquipeRoute,
   AppErpFinanceRoute: AppErpFinanceRoute,
+  AppErpParametresRoute: AppErpParametresRoute,
   AppErpPosRoute: AppErpPosRoute,
   AppErpProduitsRoute: AppErpProduitsRoute,
   AppErpRapportsRoute: AppErpRapportsRoute,

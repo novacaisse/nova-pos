@@ -223,6 +223,19 @@ Même méthode que ZegHotel/ZegResto en leur temps : un socle transverse d'abord
 
 **Frontend Phase 9 — Rapports & BI livré** (`src/lib/data/erpReportsHooks.ts`, `src/routes/app.erp.rapports.tsx`) : quatre onglets lisant chacun une vue SQL agrégée (`erp_v_stock_valuation`, `erp_v_purchase_orders_summary`, `erp_v_sales_summary`, `erp_v_cash_position`) — aucune RLS propre à écrire côté hooks, une vue Postgres standard hérite automatiquement de la RLS des tables sous-jacentes qu'elle interroge, donc chaque rôle y voit exactement ce que sa RLS habituelle lui laisse déjà voir (stock → onglet Stock, buyer → Achats, salesperson/cashier → Ventes, owner/manager/accountant → tout). Cinquième onglet "Mes rapports" (`erp_custom_reports`) : favoris strictement privés à leur auteur (`organization_id` ET `created_by = auth.uid()`), un simple raccourci nommé pointant vers un des 4 domaines, jamais partagé entre collègues même dans la même organisation. `hr_manager` masqué de la nav (`/app/erp/rapports`) : aucune des 4 vues ne couvre un domaine RH, les 4 onglets lui seraient vides.
 
+**Frontend Phase 10 — Administration livré** (`src/lib/data/erpSettingsHooks.ts`, `src/routes/app.erp.parametres.tsx`) : dépôt par défaut (pré-sélection POS/réceptions), préfixes de numérotation facture/devis, mois de début d'exercice fiscal. `erp_settings` est une table à une ligne par organisation sans trigger de création automatique — même pattern que `organization_settings`/`useShopSettings` (`hooks.ts`) : le frontend fait un `upsert` au premier enregistrement (`maybeSingle()` + objet par défaut en mémoire tant qu'aucune ligne n'existe). Lecture élargie à `accountant` (numérotation + clôture fiscale), écriture réservée owner/manager côté RLS et côté UI (formulaire en lecture seule pour les autres rôles) — `HIDDEN_FOR["/app/erp/parametres"]` masque buyer/salesperson/hr_manager/stock/cashier, qui n'ont RLS-wise aucun accès en lecture. `NAV.adminErp` porte désormais Équipe + Paramètres, comme les trois autres applications.
+
+---
+
+## Frontend ZegERP — chantier terminé
+
+Les 10 modules de base sont livrés côté frontend (`/app/erp/*`), sur le même socle RLS/rôles que ZegCaisse/ZegHotel/ZegResto : `src/lib/data/erp*Hooks.ts` (un fichier par module, CRUD + RPC pour les invariants métier), `src/routes/app.erp.*.tsx` (routes plates, TanStack Router), navigation conditionnelle par rôle (`AppSidebar.HIDDEN_FOR`, `BottomNav.ERP_PRIMARY`/`ERP_MORE`) reflétant explicitement chaque restriction RLS documentée migration par migration. `npx tsc --noEmit` est resté à la baseline pré-existante (38 erreurs, packages absents du sandbox) sur l'intégralité du chantier — aucune régression introduite dans ZegCaisse/ZegHotel/ZegResto/Admin.
+
+**Volontairement hors scope de ce chantier** (périphérique au cycle central commande→livraison→facture, différé pour avancer plus vite sur les 10 modules cœur — non planifié à ce jour) :
+- Ventes & CRM Phase 3b : pipeline prospects (`erp_prospects`/`erp_sales_pipeline_stages`), avoirs (`erp_credit_notes`), encaissements (`erp_customer_payments`), activités CRM (`erp_crm_activities`).
+- RH (Phase 7) : documents employé encore en note simple, pas branchés sur le mécanisme d'attachement réel du module 8 (Gestion documentaire) — ajout naturel mais jamais explicitement demandé.
+- Upload de photo produit (module 1, Stock/Produits) : `image_url` reste un champ texte simple, pas de bucket dédié.
+
 **Reste à construire, dans l'ordre de dépendance du schéma** : Ventes & CRM Phase 3b, Administration (`erp_settings`) — chaque module rejoint `ERP_MODULES`/`NAV.erp` au moment où son écran existe réellement, jamais en avance (même discipline que la navigation ZegResto en son temps : pas de lien vers une page qui n'existe pas).
 
 ## Conventions transverses (héritées de ZegHotel/ZegResto, appliquées sans dérogation)

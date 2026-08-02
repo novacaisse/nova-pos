@@ -169,10 +169,9 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Équipe", url: "/app/resto/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/resto/parametres", icon: "Settings" },
   ],
-  // Paramètres ZegERP (erp_settings) rejoint ce groupe à la phase
-  // Administration — pas encore d'écran, pas de lien mort ici.
   adminErp: [
     { title: "Équipe", url: "/app/erp/equipe", icon: "UsersRound" },
+    { title: "Paramètres", url: "/app/erp/parametres", icon: "Settings" },
   ],
 };
 
@@ -267,6 +266,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // tables sources (aucun de ces domaines n'est RH), donc les 4 onglets lui
   // seraient vides : masqué en cohérence avec le reste de HIDDEN_FOR.
   "/app/erp/rapports": ["hr_manager"],
+  // Paramètres (erp_settings, migration 060) : select policy limitée à
+  // owner/manager/accountant — masqué pour buyer/salesperson/hr_manager/
+  // stock/cashier, qui n'ont RLS-wise aucun accès en lecture.
+  "/app/erp/parametres": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
 };
 
 export function AppSidebar() {

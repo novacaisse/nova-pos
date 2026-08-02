@@ -108,8 +108,7 @@ const COOK_PRIMARY: Item[] = [
 ];
 
 // Même logique incrémentale que RESTO_PRIMARY/RESTO_MORE en son temps —
-// ERP_MORE ne porte qu'Équipe pour l'instant (Paramètres rejoint ce groupe
-// à la phase Administration, pas de lien mort ici).
+// construit module par module au fil des phases du chantier frontend ZegERP.
 const ERP_PRIMARY: Item[] = [
   { label: "Bord", to: "/app/erp", icon: LayoutDashboard },
   { label: "POS", to: "/app/erp/pos", icon: ScanBarcode },
@@ -125,6 +124,7 @@ const ERP_MORE: Item[] = [
   { label: "Documents", to: "/app/erp/documents", icon: FolderOpen },
   { label: "Rapports", to: "/app/erp/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },
+  { label: "Paramètres", to: "/app/erp/parametres", icon: Settings },
 ];
 
 export function BottomNav() {
