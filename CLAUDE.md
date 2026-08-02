@@ -1,6 +1,6 @@
 # Instructions pour Claude Code — ZegOS (nova-pos)
 
-Voir **`ARCHITECTURE.md`** pour la documentation complète du socle ZegOS et des trois modules (ZegCaisse, ZegHotel, ZegResto) : tables, rôles, RLS, routes, décisions produit. Ce fichier ne duplique pas ce contenu — il capture les conventions de travail à suivre dans ce dépôt.
+Voir **`ARCHITECTURE.md`** pour la documentation complète du socle ZegOS et des trois modules ZegCaisse, ZegHotel, ZegResto : tables, rôles, RLS, routes, décisions produit. **`ARCHITECTURE_ERP.md`** documente ZegERP séparément (module volumineux, 13 sous-modules) — même socle partagé, mêmes conventions. Ce fichier ne duplique aucun des deux — il capture les conventions de travail à suivre dans ce dépôt.
 
 ## Règles impératives
 

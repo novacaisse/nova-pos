@@ -52,7 +52,8 @@ create table if not exists public.account_subscriptions (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.accounts(id) on delete cascade,
   -- Migration 036 (ZegResto) : 'resto' ajouté aux deux valeurs d'origine.
-  app_module text not null check (app_module in ('pos', 'hotel', 'resto')),
+  -- Migration 047 (ZegERP) : 'erp' ajouté.
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto', 'erp')),
   -- Pas de FK vers plans(id) : comme subscriptions.plan existant, cette
   -- colonne vaut aussi 'trial' pendant la période d'essai, une valeur qui
   -- n'existe pas comme ligne dans plans (seules les formules payantes
@@ -91,7 +92,8 @@ create table if not exists public.organizations (
   -- sur des applications différentes (un compte peut avoir des boutiques
   -- ZegCaisse ET un établissement ZegHotel).
   -- Migration 036 (ZegResto) : 'resto' ajouté aux deux valeurs d'origine.
-  app_module text not null check (app_module in ('pos', 'hotel', 'resto'))
+  -- Migration 047 (ZegERP) : 'erp' ajouté.
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto', 'erp'))
 );
 create index if not exists idx_organizations_account on public.organizations(account_id);
 
@@ -786,7 +788,8 @@ create table if not exists public.plans (
   max_users integer
 );
 do $$ begin
-  alter table public.plans add constraint plans_app_module_check check (app_module is null or app_module in ('pos', 'hotel', 'resto'));
+  -- Migration 047 (ZegERP) : 'erp' ajouté.
+  alter table public.plans add constraint plans_app_module_check check (app_module is null or app_module in ('pos', 'hotel', 'resto', 'erp'));
 exception when duplicate_object then null;
 end $$;
 
