@@ -5,17 +5,18 @@
 // reste) pour savoir quel menu afficher. Ne s'affiche que si l'organisation
 // a au moins deux applications actives — inutile sinon.
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Store, BedDouble, UtensilsCrossed, type LucideIcon } from "lucide-react";
+import { Store, BedDouble, UtensilsCrossed, Boxes, type LucideIcon } from "lucide-react";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { cn } from "@/lib/utils";
 
-type AppKey = "pos" | "hotel" | "resto";
+type AppKey = "pos" | "hotel" | "resto" | "erp";
 const APP_META: Record<AppKey, { label: string; icon: LucideIcon; homeUrl: string }> = {
   pos: { label: "ZegCaisse", icon: Store, homeUrl: "/app" },
   hotel: { label: "ZegHôtel", icon: BedDouble, homeUrl: "/app/hotel" },
   resto: { label: "ZegResto", icon: UtensilsCrossed, homeUrl: "/app/resto" },
+  erp: { label: "ZegERP", icon: Boxes, homeUrl: "/app/erp" },
 };
-const ORDER: AppKey[] = ["pos", "hotel", "resto"];
+const ORDER: AppKey[] = ["pos", "hotel", "resto", "erp"];
 
 export function AppSwitcher({ variant = "surface", compact = false }: { variant?: "sidebar" | "surface"; compact?: boolean }) {
   const { currentOrganization } = useOrganization();
@@ -24,7 +25,7 @@ export function AppSwitcher({ variant = "surface", compact = false }: { variant?
   const relevant = ORDER.filter((k) => activeApps.includes(k));
   if (relevant.length < 2) return null;
 
-  const current: AppKey = pathname.startsWith("/app/hotel") ? "hotel" : pathname.startsWith("/app/resto") ? "resto" : "pos";
+  const current: AppKey = pathname.startsWith("/app/hotel") ? "hotel" : pathname.startsWith("/app/resto") ? "resto" : pathname.startsWith("/app/erp") ? "erp" : "pos";
 
   if (compact) {
     return (

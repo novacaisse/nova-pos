@@ -32,6 +32,9 @@ import {
   LayoutGrid,
   BookOpen,
   ChefHat,
+  Calculator,
+  Briefcase,
+  FolderOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -77,6 +80,9 @@ const ICONS = {
   LayoutGrid,
   BookOpen,
   ChefHat,
+  Calculator,
+  Briefcase,
+  FolderOpen,
 } as const;
 
 type NavItem = {
@@ -130,10 +136,27 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Réservations", url: "/app/resto/reservations", icon: "CalendarRange" },
     { title: "Rapports", url: "/app/resto/rapports", icon: "BarChart3" },
   ],
-  // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
-  // de commun dans la nav entre les deux applications (le paramètre
-  // "Applications" pour activer/désactiver/basculer vit maintenant comme
-  // onglet DANS chacune de ces deux pages Paramètres, plus de nav item dédié).
+  // Même logique incrémentale que resto ci-dessus (Frontend Phase 1 :
+  // Produits + Stock, module DB "Stock/Produits" déjà livré) — les autres
+  // modules ZegERP (Achats, Ventes, POS, Finance, Comptabilité, RH,
+  // Documents, Rapports) rejoignent ce groupe au fil des phases suivantes.
+  erp: [
+    { title: "Tableau de bord", url: "/app/erp", icon: "LayoutDashboard" },
+    { title: "Produits", url: "/app/erp/produits", icon: "Package" },
+    { title: "Stock", url: "/app/erp/stock", icon: "Warehouse" },
+    { title: "Achats", url: "/app/erp/achats", icon: "Truck" },
+    { title: "Ventes", url: "/app/erp/ventes", icon: "Receipt" },
+    { title: "POS", url: "/app/erp/pos", icon: "ScanBarcode" },
+    { title: "Finance", url: "/app/erp/finance", icon: "Wallet" },
+    { title: "Comptabilité", url: "/app/erp/comptabilite", icon: "Calculator" },
+    { title: "RH", url: "/app/erp/rh", icon: "Briefcase" },
+    { title: "Documents", url: "/app/erp/documents", icon: "FolderOpen" },
+    { title: "Rapports", url: "/app/erp/rapports", icon: "BarChart3" },
+  ],
+  // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
+  // Paramètres — rien de commun dans la nav entre applications (le
+  // paramètre "Applications" pour activer/désactiver/basculer vit comme
+  // onglet DANS chacune de ces pages Paramètres, plus de nav item dédié).
   adminPos: [
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
@@ -145,6 +168,10 @@ const NAV: Record<string, NavItem[]> = {
   adminResto: [
     { title: "Équipe", url: "/app/resto/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/resto/parametres", icon: "Settings" },
+  ],
+  adminErp: [
+    { title: "Équipe", url: "/app/erp/equipe", icon: "UsersRound" },
+    { title: "Paramètres", url: "/app/erp/parametres", icon: "Settings" },
   ],
 };
 
@@ -203,6 +230,46 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // produit du prompt ZegResto) ; cook reste cantonné au KDS partout.
   "/app/resto/rapports": ["server", "cook"],
   "/app/resto/equipe": ["cook"],
+  // ZegERP : Achats n'accorde RLS-wise aucun accès à salesperson/hr_manager/
+  // cashier (aucune de leurs policies select ne couvre erp_suppliers/
+  // erp_purchase_orders/..., migration 050) — masqué ici en cohérence.
+  "/app/erp/achats": ["salesperson", "hr_manager", "cashier"],
+  // Ventes : aucune policy select ne couvre buyer/hr_manager/cashier sur
+  // erp_customers/erp_quotes/erp_sales_orders/... (migration 052) — stock
+  // reste visible (accès légitime au seul onglet Retours client).
+  "/app/erp/ventes": ["buyer", "hr_manager", "cashier"],
+  // POS ERP : select policy limitée à owner/manager/accountant/cashier
+  // (migration 053) — masqué pour buyer/salesperson/hr_manager/stock.
+  "/app/erp/pos": ["buyer", "salesperson", "hr_manager", "stock"],
+  // Finance : owner/manager/accountant uniquement (validé, pas de
+  // trésorier séparé) — masqué pour tous les autres rôles ERP.
+  "/app/erp/finance": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
+  // Comptabilité : même périmètre que Finance (owner/manager/accountant).
+  "/app/erp/comptabilite": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
+  // RH : périmètre strictement resserré owner/manager/hr_manager (données
+  // personnelles sensibles) — ni accountant, ni aucun autre rôle métier.
+  "/app/erp/rh": ["buyer", "salesperson", "stock", "cashier", "accountant"],
+  // Documents : RLS entité-scopée (migration 058, pas une liste de rôles à
+  // plat) — stock et cashier n'ont RLS-wise accès à aucun type d'entité
+  // (fournisseur/client/employé/contrat) ni en lecture ni en écriture sur
+  // erp_document_attachments/erp_documents/erp_contracts — masqués ici en
+  // cohérence ; tous les autres rôles ont au moins un périmètre (buyer →
+  // fournisseurs, salesperson → clients, hr_manager → employés,
+  // accountant → contrats, owner/manager → tout).
+  "/app/erp/documents": ["stock", "cashier"],
+  // Rapports : les 4 vues (migration 059 — stock/achats/ventes/trésorerie)
+  // héritent chacune de la RLS de leurs tables sous-jacentes plutôt que
+  // d'imposer un rôle uniforme. buyer/salesperson/stock/cashier gardent un
+  // accès partiel cohérent avec leur périmètre habituel (stock → onglet
+  // Stock, buyer → Achats, salesperson → Ventes, cashier → onglet Ventes
+  // via le canal POS) — mais hr_manager n'a RLS-wise accès à aucune des 4
+  // tables sources (aucun de ces domaines n'est RH), donc les 4 onglets lui
+  // seraient vides : masqué en cohérence avec le reste de HIDDEN_FOR.
+  "/app/erp/rapports": ["hr_manager"],
+  // Paramètres (erp_settings, migration 060) : select policy limitée à
+  // owner/manager/accountant — masqué pour buyer/salesperson/hr_manager/
+  // stock/cashier, qui n'ont RLS-wise aucun accès en lecture.
+  "/app/erp/parametres": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
 };
 
 export function AppSidebar() {
@@ -220,9 +287,11 @@ export function AppSidebar() {
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
   const inRestoContext = pathname.startsWith("/app/resto");
-  const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext) && !inRestoContext;
-  const showHotel = activeApps.includes("hotel") && (!bothAppsActive || inHotelContext) && !inRestoContext;
-  const showResto = activeApps.includes("resto") || inRestoContext;
+  const inErpContext = pathname.startsWith("/app/erp");
+  const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext) && !inRestoContext && !inErpContext;
+  const showHotel = activeApps.includes("hotel") && (!bothAppsActive || inHotelContext) && !inRestoContext && !inErpContext;
+  const showResto = (activeApps.includes("resto") || inRestoContext) && !inErpContext;
+  const showErp = activeApps.includes("erp") || inErpContext;
 
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
@@ -321,9 +390,11 @@ export function AppSidebar() {
         {showPos && renderGroup("Catalogue", NAV.catalogue)}
         {showHotel && renderGroup("Hôtel", NAV.hotel)}
         {showResto && renderGroup("Restaurant", NAV.resto)}
+        {showErp && renderGroup("ERP", NAV.erp)}
         {showPos && renderGroup("Administration", NAV.adminPos)}
         {showHotel && renderGroup("Administration", NAV.adminHotel)}
         {showResto && renderGroup("Administration", NAV.adminResto)}
+        {showErp && renderGroup("Administration", NAV.adminErp)}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-3">

@@ -26,6 +26,9 @@ import {
   LayoutGrid,
   BookOpen,
   ChefHat,
+  Calculator,
+  Briefcase,
+  FolderOpen,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -104,6 +107,26 @@ const COOK_PRIMARY: Item[] = [
   { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
 ];
 
+// Même logique incrémentale que RESTO_PRIMARY/RESTO_MORE en son temps —
+// construit module par module au fil des phases du chantier frontend ZegERP.
+const ERP_PRIMARY: Item[] = [
+  { label: "Bord", to: "/app/erp", icon: LayoutDashboard },
+  { label: "POS", to: "/app/erp/pos", icon: ScanBarcode },
+  { label: "Ventes", to: "/app/erp/ventes", icon: Receipt },
+  { label: "Stock", to: "/app/erp/stock", icon: Warehouse },
+];
+const ERP_MORE: Item[] = [
+  { label: "Produits", to: "/app/erp/produits", icon: Package },
+  { label: "Achats", to: "/app/erp/achats", icon: Truck },
+  { label: "Finance", to: "/app/erp/finance", icon: Wallet },
+  { label: "Comptabilité", to: "/app/erp/comptabilite", icon: Calculator },
+  { label: "RH", to: "/app/erp/rh", icon: Briefcase },
+  { label: "Documents", to: "/app/erp/documents", icon: FolderOpen },
+  { label: "Rapports", to: "/app/erp/rapports", icon: BarChart3 },
+  { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },
+  { label: "Paramètres", to: "/app/erp/parametres", icon: Settings },
+];
+
 export function BottomNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -128,21 +151,27 @@ export function BottomNav() {
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
   const inRestoContext = pathname.startsWith("/app/resto");
-  const useHotelNav = !isRestoOnlyRole && (isHotelOnlyRole
+  const inErpContext = pathname.startsWith("/app/erp");
+  const useHotelNav = !isRestoOnlyRole && !inErpContext && (isHotelOnlyRole
     || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext))));
-  const useRestoNav = isRestoOnlyRole || (!useHotelNav && (activeApps.includes("resto") || inRestoContext));
+  const useRestoNav = !inErpContext && (isRestoOnlyRole || (!useHotelNav && (activeApps.includes("resto") || inRestoContext)));
+  const useErpNav = activeApps.includes("erp") || inErpContext;
 
   // HOUSEKEEPING_PRIMARY reste toujours affiché tel quel pour ce rôle (ses
   // deux seuls écrans opérationnels, pas des modules "métier" bridables par
   // formule) — HOTEL_PRIMARY/HOTEL_MORE, eux, passent par `included` comme
   // PRIMARY/MORE côté ZegCaisse (oubli corrigé en Phase 4 : ces deux tableaux
   // n'étaient jusqu'ici jamais filtrés, donc jamais bridés par une formule).
-  const primary = useHotelNav
-    ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
-    : useRestoNav
-      ? (myRole === "cook" ? COOK_PRIMARY : RESTO_PRIMARY.filter(included))
-      : PRIMARY.filter(included);
-  const more = useHotelNav
+  const primary = useErpNav
+    ? ERP_PRIMARY.filter(included)
+    : useHotelNav
+      ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
+      : useRestoNav
+        ? (myRole === "cook" ? COOK_PRIMARY : RESTO_PRIMARY.filter(included))
+        : PRIMARY.filter(included);
+  const more = useErpNav
+    ? ERP_MORE.filter(included)
+    : useHotelNav
     ? (myRole === "housekeeping"
         ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
         // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de

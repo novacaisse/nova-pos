@@ -20,15 +20,16 @@ const slugify = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "formule";
 
-const APP_TABS: { k: "pos" | "hotel" | "resto"; label: string }[] = [
+const APP_TABS: { k: "pos" | "hotel" | "resto" | "erp"; label: string }[] = [
   { k: "pos", label: "ZegCaisse" },
   { k: "hotel", label: "ZegHotel" },
   { k: "resto", label: "ZegResto" },
+  { k: "erp", label: "ZegERP" },
 ];
-const APP_LABEL: Record<"pos" | "hotel" | "resto", string> = { pos: "ZegCaisse", hotel: "ZegHotel", resto: "ZegResto" };
+const APP_LABEL: Record<"pos" | "hotel" | "resto" | "erp", string> = { pos: "ZegCaisse", hotel: "ZegHotel", resto: "ZegResto", erp: "ZegERP" };
 
 function AdminFormules() {
-  const [appTab, setAppTab] = useState<"pos" | "hotel" | "resto">("pos");
+  const [appTab, setAppTab] = useState<"pos" | "hotel" | "resto" | "erp">("pos");
   const { data: plans = [], isLoading } = usePlans();
   const [creating, setCreating] = useState(false);
 
@@ -90,9 +91,9 @@ function AdminFormules() {
 
 function UnassignedPlanRow({ plan }: { plan: Plan }) {
   const upsert = useUpsertPlan();
-  const [saving, setSaving] = useState<"pos" | "hotel" | "resto" | null>(null);
+  const [saving, setSaving] = useState<"pos" | "hotel" | "resto" | "erp" | null>(null);
 
-  const assign = async (app_module: "pos" | "hotel" | "resto") => {
+  const assign = async (app_module: "pos" | "hotel" | "resto" | "erp") => {
     setSaving(app_module);
     try {
       await upsert.mutateAsync({ id: plan.id, name: plan.name, app_module });
@@ -117,7 +118,7 @@ function UnassignedPlanRow({ plan }: { plan: Plan }) {
 }
 
 function PlanCard({ plan, appModule, onDoneCreating }: {
-  plan: Plan | null; appModule: "pos" | "hotel" | "resto"; onDoneCreating?: () => void;
+  plan: Plan | null; appModule: "pos" | "hotel" | "resto" | "erp"; onDoneCreating?: () => void;
 }) {
   const upsert = useUpsertPlan();
   const remove = useDeletePlan();
