@@ -151,6 +151,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Comptabilité", url: "/app/erp/comptabilite", icon: "Calculator" },
     { title: "RH", url: "/app/erp/rh", icon: "Briefcase" },
     { title: "Documents", url: "/app/erp/documents", icon: "FolderOpen" },
+    { title: "Rapports", url: "/app/erp/rapports", icon: "BarChart3" },
   ],
   // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
   // Paramètres — rien de commun dans la nav entre applications (le
@@ -257,6 +258,15 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // fournisseurs, salesperson → clients, hr_manager → employés,
   // accountant → contrats, owner/manager → tout).
   "/app/erp/documents": ["stock", "cashier"],
+  // Rapports : les 4 vues (migration 059 — stock/achats/ventes/trésorerie)
+  // héritent chacune de la RLS de leurs tables sous-jacentes plutôt que
+  // d'imposer un rôle uniforme. buyer/salesperson/stock/cashier gardent un
+  // accès partiel cohérent avec leur périmètre habituel (stock → onglet
+  // Stock, buyer → Achats, salesperson → Ventes, cashier → onglet Ventes
+  // via le canal POS) — mais hr_manager n'a RLS-wise accès à aucune des 4
+  // tables sources (aucun de ces domaines n'est RH), donc les 4 onglets lui
+  // seraient vides : masqué en cohérence avec le reste de HIDDEN_FOR.
+  "/app/erp/rapports": ["hr_manager"],
 };
 
 export function AppSidebar() {

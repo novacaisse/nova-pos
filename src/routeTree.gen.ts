@@ -81,6 +81,7 @@ import { Route as AppHotelCanauxRouteImport } from './routes/app.hotel.canaux'
 import { Route as AppErpVentesRouteImport } from './routes/app.erp.ventes'
 import { Route as AppErpStockRouteImport } from './routes/app.erp.stock'
 import { Route as AppErpRhRouteImport } from './routes/app.erp.rh'
+import { Route as AppErpRapportsRouteImport } from './routes/app.erp.rapports'
 import { Route as AppErpProduitsRouteImport } from './routes/app.erp.produits'
 import { Route as AppErpPosRouteImport } from './routes/app.erp.pos'
 import { Route as AppErpFinanceRouteImport } from './routes/app.erp.finance'
@@ -450,6 +451,11 @@ const AppErpRhRoute = AppErpRhRouteImport.update({
   path: '/rh',
   getParentRoute: () => AppErpRoute,
 } as any)
+const AppErpRapportsRoute = AppErpRapportsRouteImport.update({
+  id: '/rapports',
+  path: '/rapports',
+  getParentRoute: () => AppErpRoute,
+} as any)
 const AppErpProduitsRoute = AppErpProduitsRouteImport.update({
   id: '/produits',
   path: '/produits',
@@ -535,6 +541,7 @@ export interface FileRoutesByFullPath {
   '/app/erp/finance': typeof AppErpFinanceRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
+  '/app/erp/rapports': typeof AppErpRapportsRoute
   '/app/erp/rh': typeof AppErpRhRoute
   '/app/erp/stock': typeof AppErpStockRoute
   '/app/erp/ventes': typeof AppErpVentesRoute
@@ -608,6 +615,7 @@ export interface FileRoutesByTo {
   '/app/erp/finance': typeof AppErpFinanceRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
+  '/app/erp/rapports': typeof AppErpRapportsRoute
   '/app/erp/rh': typeof AppErpRhRoute
   '/app/erp/stock': typeof AppErpStockRoute
   '/app/erp/ventes': typeof AppErpVentesRoute
@@ -690,6 +698,7 @@ export interface FileRoutesById {
   '/app/erp/finance': typeof AppErpFinanceRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
+  '/app/erp/rapports': typeof AppErpRapportsRoute
   '/app/erp/rh': typeof AppErpRhRoute
   '/app/erp/stock': typeof AppErpStockRoute
   '/app/erp/ventes': typeof AppErpVentesRoute
@@ -773,6 +782,7 @@ export interface FileRouteTypes {
     | '/app/erp/finance'
     | '/app/erp/pos'
     | '/app/erp/produits'
+    | '/app/erp/rapports'
     | '/app/erp/rh'
     | '/app/erp/stock'
     | '/app/erp/ventes'
@@ -846,6 +856,7 @@ export interface FileRouteTypes {
     | '/app/erp/finance'
     | '/app/erp/pos'
     | '/app/erp/produits'
+    | '/app/erp/rapports'
     | '/app/erp/rh'
     | '/app/erp/stock'
     | '/app/erp/ventes'
@@ -927,6 +938,7 @@ export interface FileRouteTypes {
     | '/app/erp/finance'
     | '/app/erp/pos'
     | '/app/erp/produits'
+    | '/app/erp/rapports'
     | '/app/erp/rh'
     | '/app/erp/stock'
     | '/app/erp/ventes'
@@ -1478,6 +1490,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppErpRhRouteImport
       parentRoute: typeof AppErpRoute
     }
+    '/app/erp/rapports': {
+      id: '/app/erp/rapports'
+      path: '/rapports'
+      fullPath: '/app/erp/rapports'
+      preLoaderRoute: typeof AppErpRapportsRouteImport
+      parentRoute: typeof AppErpRoute
+    }
     '/app/erp/produits': {
       id: '/app/erp/produits'
       path: '/produits'
@@ -1568,6 +1587,7 @@ interface AppErpRouteChildren {
   AppErpFinanceRoute: typeof AppErpFinanceRoute
   AppErpPosRoute: typeof AppErpPosRoute
   AppErpProduitsRoute: typeof AppErpProduitsRoute
+  AppErpRapportsRoute: typeof AppErpRapportsRoute
   AppErpRhRoute: typeof AppErpRhRoute
   AppErpStockRoute: typeof AppErpStockRoute
   AppErpVentesRoute: typeof AppErpVentesRoute
@@ -1582,6 +1602,7 @@ const AppErpRouteChildren: AppErpRouteChildren = {
   AppErpFinanceRoute: AppErpFinanceRoute,
   AppErpPosRoute: AppErpPosRoute,
   AppErpProduitsRoute: AppErpProduitsRoute,
+  AppErpRapportsRoute: AppErpRapportsRoute,
   AppErpRhRoute: AppErpRhRoute,
   AppErpStockRoute: AppErpStockRoute,
   AppErpVentesRoute: AppErpVentesRoute,

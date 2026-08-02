@@ -123,6 +123,7 @@ const ERP_MORE: Item[] = [
   { label: "Comptabilité", to: "/app/erp/comptabilite", icon: Calculator },
   { label: "RH", to: "/app/erp/rh", icon: Briefcase },
   { label: "Documents", to: "/app/erp/documents", icon: FolderOpen },
+  { label: "Rapports", to: "/app/erp/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },
 ];
 

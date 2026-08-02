@@ -98,6 +98,7 @@ export const ERP_MODULES: { url: string; label: string }[] = [
   { url: "/app/erp/comptabilite", label: "Comptabilité" },
   { url: "/app/erp/rh", label: "RH" },
   { url: "/app/erp/documents", label: "Documents" },
+  { url: "/app/erp/rapports", label: "Rapports" },
 ];
 
 // Point d'entrée unique pour récupérer le catalogue de modules bridables
