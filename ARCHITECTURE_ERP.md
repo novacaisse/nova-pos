@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 7 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH).** Les sections 8 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 8 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire).** Les sections 9 et 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -149,9 +149,17 @@ Volontairement **hors scope V1** : conversion automatique devis → commande, ca
 
 **Périmètre strictement resserré owner/manager/hr_manager** sur toutes les tables (select et write) — ni `accountant`, ni aucun autre rôle métier : données potentiellement sensibles (identité, congés, documents personnels), le principe est de ne pas élargir "pour être pratique". Cohérent avec le validé "`hr_manager`... rien hors de son périmètre — aucun accès Finance/Comptabilité/Ventes/Achats", appliqué ici symétriquement (les autres rôles n'ont pas non plus accès aux données RH).
 
-### 8. Gestion documentaire — schéma prévu, non migré
+### 8. Gestion documentaire — livré (migration 058)
 
-`erp_contracts`, `erp_documents` (+ bucket Storage dédié `erp-documents`, RLS scopée par `organization_id` via `storage.foldername(name)` — même pattern que `resto-menu-photos`/`product-images` — jamais le fichier dupliqué en base, seule l'URL/le chemin y vit), `erp_document_attachments` (polymorphe : `entity_type` + `entity_id`, lie un document à un contrat/employé/client/fournisseur...). Dépend de tous les modules qui ont des entités "documentables".
+| Table | Rôle |
+|---|---|
+| `erp_contracts` | owner/manager/accountant — un contrat n'est pas rattaché de façon polymorphe (il **est** un des types d'entité pour `erp_document_attachments`, pas une cible parmi d'autres). Liens optionnels vers `erp_suppliers`/`erp_customers`/`erp_employees` selon `contract_type`. |
+| `erp_documents` | Métadonnées seulement (`file_path` = chemin dans le bucket, jamais le fichier dupliqué en base — même principe que `product-images`/`resto-menu-photos`). |
+| `erp_document_attachments` | Polymorphe (`entity_type` `supplier`/`customer`/`employee`/`contract` + `entity_id`, pas de FK stricte). **C'est la table qui porte la RLS entité-scopée** promise dans la version précédente de ce document : un document attaché à un fournisseur suit les droits `buyer`, à un client `salesperson`, à un employé `hr_manager`, à un contrat `accountant`. `owner`/`manager` voient et gèrent toujours tout, quel que soit l'attachement. Un document **sans** attachement n'est visible que par `owner`/`manager`. |
+
+**Bucket Storage `erp-documents` — premier bucket PRIVÉ de ce dépôt** (`public: false`), à la différence de tous les buckets existants (`product-images`, `resto-menu-photos`, `avatars`...) qui sont publics en lecture : justifié par la sensibilité du contenu (pièces d'identité employé, contrats). Le niveau storage reste volontairement grossier (accès ouvert à toute l'organisation via `has_organization_access()`) ; la nuance fine par entité vit dans les tables ci-dessus, exactement comme `product-images` laisse la nuance métier à la table `products` et se contente d'un filtrage large côté storage. Convention de chemin : `{organization_id}/{document_id}/{nom_fichier}`.
+
+Dépend de tous les modules qui ont des entités "documentables" (2, 3, 7 — livrés).
 
 ### 9. Rapports & BI — schéma prévu, non migré
 

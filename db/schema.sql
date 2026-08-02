@@ -5975,6 +5975,175 @@ create policy erp_employee_documents_write on public.erp_employee_documents for 
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]))
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
 
+-- =============== ZegERP — Module 8/10 : Gestion documentaire (migration
+-- 058). Aucun rôle nouveau. RLS entité-scopée via erp_document_attachments
+-- (pas une liste de rôles à plat) : un document suit les droits de
+-- l'entité à laquelle il est rattaché. erp-documents est le premier bucket
+-- Storage PRIVÉ de ce dépôt (sensibilité du contenu — contrats, pièces
+-- d'identité employé) ; niveau storage grossier (toute l'organisation),
+-- nuance fine par entité dans les tables ci-dessous. ===============
+create table if not exists public.erp_contracts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  supplier_id uuid references public.erp_suppliers(id) on delete set null,
+  customer_id uuid references public.erp_customers(id) on delete set null,
+  employee_id uuid references public.erp_employees(id) on delete set null,
+  name text not null,
+  contract_type text not null default 'other' check (contract_type in ('supplier', 'customer', 'employee', 'lease', 'other')),
+  value numeric(14,2),
+  start_date date,
+  end_date date,
+  status text not null default 'active' check (status in ('active', 'expired', 'terminated')),
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_contracts_org on public.erp_contracts(organization_id);
+alter table public.erp_contracts enable row level security;
+
+create policy erp_contracts_select on public.erp_contracts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_contracts_write on public.erp_contracts for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+-- Métadonnées seulement ; le fichier vit dans le bucket erp-documents.
+-- Policies après erp_document_attachments (dont elles dépendent).
+create table if not exists public.erp_documents (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  document_type text not null default 'other' check (document_type in ('contract', 'invoice', 'id_card', 'certificate', 'report', 'other')),
+  file_path text not null,
+  file_size bigint,
+  mime_type text,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_documents_org on public.erp_documents(organization_id);
+alter table public.erp_documents enable row level security;
+
+-- Polymorphe : entity_type + entity_id, pas de FK stricte des deux côtés.
+create table if not exists public.erp_document_attachments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  document_id uuid not null references public.erp_documents(id) on delete cascade,
+  entity_type text not null check (entity_type in ('supplier', 'customer', 'employee', 'contract')),
+  entity_id uuid not null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (document_id, entity_type, entity_id)
+);
+create index if not exists idx_erp_document_attachments_org on public.erp_document_attachments(organization_id);
+create index if not exists idx_erp_document_attachments_entity on public.erp_document_attachments(entity_type, entity_id);
+create index if not exists idx_erp_document_attachments_document on public.erp_document_attachments(document_id);
+alter table public.erp_document_attachments enable row level security;
+
+create policy erp_document_attachments_select on public.erp_document_attachments for select to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or (entity_type = 'supplier' and public.has_any_role_in_organization(organization_id, array['accountant','buyer']::public.app_role[]))
+    or (entity_type = 'customer' and public.has_any_role_in_organization(organization_id, array['accountant','salesperson']::public.app_role[]))
+    or (entity_type = 'employee' and public.has_any_role_in_organization(organization_id, array['hr_manager']::public.app_role[]))
+    or (entity_type = 'contract' and public.has_any_role_in_organization(organization_id, array['accountant']::public.app_role[]))
+  );
+create policy erp_document_attachments_write on public.erp_document_attachments for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or (entity_type = 'supplier' and public.has_any_role_in_organization(organization_id, array['buyer']::public.app_role[]))
+    or (entity_type = 'customer' and public.has_any_role_in_organization(organization_id, array['salesperson']::public.app_role[]))
+    or (entity_type = 'employee' and public.has_any_role_in_organization(organization_id, array['hr_manager']::public.app_role[]))
+    or (entity_type = 'contract' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or (entity_type = 'supplier' and public.has_any_role_in_organization(organization_id, array['buyer']::public.app_role[]))
+    or (entity_type = 'customer' and public.has_any_role_in_organization(organization_id, array['salesperson']::public.app_role[]))
+    or (entity_type = 'employee' and public.has_any_role_in_organization(organization_id, array['hr_manager']::public.app_role[]))
+    or (entity_type = 'contract' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  );
+
+-- erp_documents — policies (erp_document_attachments existe désormais).
+-- owner/manager voient/gèrent tout ; les autres rôles n'ont accès à un
+-- document que s'il est attaché à une entité de leur périmètre.
+create policy erp_documents_select on public.erp_documents for select to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or exists (
+      select 1 from public.erp_document_attachments a
+      where a.document_id = erp_documents.id
+        and (
+          (a.entity_type = 'supplier' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','buyer']::public.app_role[]))
+          or (a.entity_type = 'customer' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','salesperson']::public.app_role[]))
+          or (a.entity_type = 'employee' and public.has_any_role_in_organization(erp_documents.organization_id, array['hr_manager']::public.app_role[]))
+          or (a.entity_type = 'contract' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant']::public.app_role[]))
+        )
+    )
+  );
+create policy erp_documents_insert on public.erp_documents for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[]));
+create policy erp_documents_update on public.erp_documents for update to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or exists (
+      select 1 from public.erp_document_attachments a
+      where a.document_id = erp_documents.id
+        and (
+          (a.entity_type = 'supplier' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','buyer']::public.app_role[]))
+          or (a.entity_type = 'customer' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','salesperson']::public.app_role[]))
+          or (a.entity_type = 'employee' and public.has_any_role_in_organization(erp_documents.organization_id, array['hr_manager']::public.app_role[]))
+          or (a.entity_type = 'contract' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant']::public.app_role[]))
+        )
+    )
+  )
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[]));
+create policy erp_documents_delete on public.erp_documents for delete to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or exists (
+      select 1 from public.erp_document_attachments a
+      where a.document_id = erp_documents.id
+        and (
+          (a.entity_type = 'supplier' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','buyer']::public.app_role[]))
+          or (a.entity_type = 'customer' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','salesperson']::public.app_role[]))
+          or (a.entity_type = 'employee' and public.has_any_role_in_organization(erp_documents.organization_id, array['hr_manager']::public.app_role[]))
+          or (a.entity_type = 'contract' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant']::public.app_role[]))
+        )
+    )
+  );
+
+-- Bucket Storage erp-documents (PRIVÉ). Convention de chemin obligatoire :
+-- {organization_id}/{document_id}/{nom_fichier}.
+insert into storage.buckets (id, name, public)
+values ('erp-documents', 'erp-documents', false)
+on conflict (id) do nothing;
+
+create policy erp_documents_bucket_select on storage.objects for select to authenticated
+  using (
+    bucket_id = 'erp-documents'
+    and public.has_organization_access(((storage.foldername(name))[1])::uuid)
+  );
+create policy erp_documents_bucket_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  );
+create policy erp_documents_bucket_update on storage.objects for update to authenticated
+  using (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  )
+  with check (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  );
+create policy erp_documents_bucket_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  );
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages) + les 15 tables
