@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 8 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire).** Les sections 9 et 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 9 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI).** Seule la section 10 ci-dessous décrit un schéma **prévu**, pas encore migré.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -161,9 +161,17 @@ Volontairement **hors scope V1** : conversion automatique devis → commande, ca
 
 Dépend de tous les modules qui ont des entités "documentables" (2, 3, 7 — livrés).
 
-### 9. Rapports & BI — schéma prévu, non migré
+### 9. Rapports & BI — livré (migration 059)
 
-Pas de nouvelles tables de données — vues SQL agrégées (`erp_v_*`, une par domaine : ventes, achats, stock, finance...) qui héritent de la RLS des tables sous-jacentes (une vue Postgres standard n'a pas sa propre RLS ; elle applique celle des tables qu'elle interroge — donc aucune fuite de périmètre par rôle même sans policy dédiée sur la vue elle-même). `erp_custom_reports` (configuration de rapport sauvegardée) est la seule vraie table, scopée par `organization_id` **et** `created_by = auth.uid()` — privée à son auteur, jamais partagée automatiquement entre collègues. Dépend de tout le reste (agrège les données de tous les modules livrés).
+| Vue / Table | Contenu |
+|---|---|
+| `erp_v_stock_valuation` | Valorisation du stock par produit/dépôt (`quantity * cost`). |
+| `erp_v_purchase_orders_summary` | Commandes fournisseur agrégées (montant commandé vs reçu, par ligne sommée). |
+| `erp_v_sales_summary` | **Unifie** commandes client (module 3) et ventes comptoir (module 4) via `union all`, colonne `channel` (`sales_order`/`pos`) pour distinguer l'origine. |
+| `erp_v_cash_position` | Position de trésorerie par compte (module 5). |
+| `erp_custom_reports` | Seule vraie table du module — configuration de rapport sauvegardée, scopée par `organization_id` **et** `created_by = auth.uid()` — privée à son auteur, jamais partagée automatiquement entre collègues. Pas de restriction par rôle métier au-delà de l'appartenance à l'organisation. |
+
+**Aucune RLS dédiée sur les 4 vues** : ce sont des vues Postgres standard (ni `security definer` ni `security_barrier`), elles s'exécutent avec les droits de l'appelant et héritent donc automatiquement de la RLS des tables sous-jacentes — un `salesperson` qui interroge `erp_v_sales_summary` ne voit que ce que la RLS de `erp_sales_orders`/`erp_pos_sales` lui permettrait déjà de voir directement, sans fuite de périmètre et sans policy à écrire sur la vue elle-même. Dépend des modules 1, 2, 3, 4, 5 (livrés) pour ses données sources.
 
 ### 10. Administration ERP — schéma prévu, non migré
 
