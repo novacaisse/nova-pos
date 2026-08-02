@@ -109,12 +109,13 @@ const COOK_PRIMARY: Item[] = [
 // à la phase Administration, pas de lien mort ici).
 const ERP_PRIMARY: Item[] = [
   { label: "Bord", to: "/app/erp", icon: LayoutDashboard },
-  { label: "Achats", to: "/app/erp/achats", icon: Truck },
+  { label: "POS", to: "/app/erp/pos", icon: ScanBarcode },
   { label: "Ventes", to: "/app/erp/ventes", icon: Receipt },
   { label: "Stock", to: "/app/erp/stock", icon: Warehouse },
 ];
 const ERP_MORE: Item[] = [
   { label: "Produits", to: "/app/erp/produits", icon: Package },
+  { label: "Achats", to: "/app/erp/achats", icon: Truck },
   { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },
 ];
 

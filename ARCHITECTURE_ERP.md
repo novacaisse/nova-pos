@@ -211,7 +211,9 @@ Même méthode que ZegHotel/ZegResto en leur temps : un socle transverse d'abord
 
 **Frontend Phase 3a — Ventes & CRM (cycle central) livré** (`src/lib/data/erpSalesHooks.ts`, `src/routes/app.erp.ventes.tsx`) : clients, devis (brouillon → envoi → accepté/refusé), commandes client (brouillon → confirmation → livraison), livraisons (portée par `salesperson`, **pas** `stock` — asymétrie assumée vs Achats, `confirm_erp_delivery()`), factures, retours client (portée par `stock`, **pas** `salesperson` — symétrique de Achats, `confirm_erp_customer_return()`). **Reste en Phase 3b** (non construit) : pipeline prospects (`erp_prospects`/`erp_sales_pipeline_stages`), avoirs (`erp_credit_notes`), encaissements (`erp_customer_payments`), activités CRM (`erp_crm_activities`) — périphériques au cycle commande→livraison→facture, différées pour avancer plus vite sur le reste des modules.
 
-**Reste à construire, dans l'ordre de dépendance du schéma** : Ventes & CRM Phase 3b (ci-dessus), POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration (`erp_settings`) — chaque module rejoint `ERP_MODULES`/`NAV.erp` au moment où son écran existe réellement, jamais en avance (même discipline que la navigation ZegResto en son temps : pas de lien vers une page qui n'existe pas).
+**Frontend Phase 4 — POS ERP livré** (`src/lib/data/erpPosHooks.ts`, `src/routes/app.erp.pos.tsx`) : sessions de caisse (ouverture/fermeture), ventes comptoir (brouillon → `complete_erp_pos_sale()`, totaux recalculés côté serveur), retours (`confirm_erp_pos_return()`). Aucun rôle ni type de mouvement nouveau — réutilise `cashier` et `sale`/`customer_return` du module 3.
+
+**Reste à construire, dans l'ordre de dépendance du schéma** : Ventes & CRM Phase 3b, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration (`erp_settings`) — chaque module rejoint `ERP_MODULES`/`NAV.erp` au moment où son écran existe réellement, jamais en avance (même discipline que la navigation ZegResto en son temps : pas de lien vers une page qui n'existe pas).
 
 ## Conventions transverses (héritées de ZegHotel/ZegResto, appliquées sans dérogation)
 

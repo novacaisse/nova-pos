@@ -140,6 +140,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Stock", url: "/app/erp/stock", icon: "Warehouse" },
     { title: "Achats", url: "/app/erp/achats", icon: "Truck" },
     { title: "Ventes", url: "/app/erp/ventes", icon: "Receipt" },
+    { title: "POS", url: "/app/erp/pos", icon: "ScanBarcode" },
   ],
   // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
   // Paramètres — rien de commun dans la nav entre applications (le
@@ -227,6 +228,9 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // erp_customers/erp_quotes/erp_sales_orders/... (migration 052) — stock
   // reste visible (accès légitime au seul onglet Retours client).
   "/app/erp/ventes": ["buyer", "hr_manager", "cashier"],
+  // POS ERP : select policy limitée à owner/manager/accountant/cashier
+  // (migration 053) — masqué pour buyer/salesperson/hr_manager/stock.
+  "/app/erp/pos": ["buyer", "salesperson", "hr_manager", "stock"],
 };
 
 export function AppSidebar() {
