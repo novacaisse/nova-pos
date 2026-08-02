@@ -20,7 +20,7 @@ Le socle partagé (`organizations`, `organization_members`, `accounts`/`account_
 
 `provision_organization()` n'a besoin d'aucune modification de code : `p_app` est un simple `text` (aucun `check` inline dans la fonction elle-même), donc `p_app = 'erp'` fonctionne dès que la contrainte `organizations_app_module_check` l'autorise. Le parcours d'inscription (écran de choix d'application) devra afficher ZegERP comme option — travail frontend hors scope de cette session (aucune route `/app/erp/*` n'existe encore).
 
-## Rôles ZegERP — proposition (validation requise avant la suite)
+## Rôles ZegERP — validés
 
 Les rôles core (`owner`, `manager`, `accountant`) sont **partagés** entre modules par construction (`app_role` est un seul enum pour tout ZegOS) — ZegERP les réutilise tels quels, avec la même sémantique que côté ZegCaisse/ZegHotel/ZegResto (owner = tous droits, manager = équivalent owner en opérationnel, accountant = lecture large + écriture sur son périmètre financier).
 
@@ -30,27 +30,24 @@ Deux rôles ZegCaisse existants sont **réutilisés par nom** plutôt que dupliq
 
 Réutiliser ces noms est sûr : `app_role` est un enum partagé mais la RLS reste filtrée par `organization_id`, et une organisation n'a qu'un seul `app_module` — un `stock` dans une organisation ZegERP n'a aucune portée sur une organisation ZegCaisse (lignes différentes, tables différentes). Ce n'est pas une entorse au principe d'isolation (qui porte sur les **données**, pas sur le vocabulaire des rôles) : c'est le même choix déjà fait pour `owner`/`manager`/`accountant`.
 
-**Trois rôles nouveaux proposés**, aucun n'existe encore dans l'enum (pas encore migrés — voir plus bas pourquoi) :
+**Trois rôles nouveaux validés** (noms confirmés), aucun n'existe encore dans l'enum (pas encore migrés — voir plus bas pourquoi) :
 
-| Rôle proposé | Couvre | Écriture | Lecture |
+| Rôle validé | Couvre | Écriture | Lecture |
 |---|---|---|---|
 | `buyer` (Acheteur) | Achats & Fournisseurs (module 2) | `erp_suppliers`, `erp_purchase_requests`, `erp_purchase_orders`, `erp_supplier_invoices`, `erp_supplier_returns` | + niveaux de stock (module 1) pour décider des réappros |
 | `salesperson` (Commercial) | Ventes & CRM (module 3) | `erp_customers`, `erp_prospects`, `erp_quotes`, `erp_sales_orders`, `erp_delivery_notes`, `erp_invoices` (création), `erp_crm_activities` | + niveaux de stock (module 1) pour vérifier la disponibilité |
 | `hr_manager` (RH) | RH (module 7) | `erp_departments`, `erp_positions`, `erp_employees`, `erp_attendance`, `erp_leave_requests`, `erp_employee_documents` | rien hors de son périmètre — aucun accès Finance/Comptabilité/Ventes/Achats |
 
+**`buyer` et `salesperson` sont strictement cloisonnés** (validé) : un commercial n'a aucun accès en lecture aux coûts d'achat/fournisseurs (`erp_purchase_orders`, `erp_supplier_invoices`...) et inversement un acheteur n'a aucun accès aux données de vente/CRM. Pas de chevauchement de lecture pour le calcul de marge — si ce besoin apparaît, il passera par un rapport dédié (module 9), pas par un élargissement RLS de l'un des deux rôles.
+
 Modules sans rôle dédié :
 - **POS ERP** (module 4) → `cashier` (réutilisé).
-- **Finance** (module 5, trésorerie) et **Comptabilité** (module 6) → `owner`/`manager`/`accountant` uniquement, aucun rôle "trésorier" séparé proposé (périmètre déjà couvert par `accountant`, pas de besoin identifié de le fragmenter davantage — à confirmer si un vrai besoin métier existe).
+- **Finance** (module 5, trésorerie) et **Comptabilité** (module 6) → `owner`/`manager`/`accountant` uniquement — **validé : aucun rôle "trésorier" séparé**, périmètre `accountant` suffisant.
 - **Gestion documentaire** (module 8) → pas de rôle dédié ; l'accès à un document suit les droits déjà accordés sur l'entité à laquelle il est rattaché (`erp_document_attachments`, polymorphe sur contrat/employé/client/fournisseur...) — un `salesperson` voit les documents liés à ses clients, un `hr_manager` ceux liés aux employés, etc. Détail RLS à finaliser au moment de coder ce module (dépend de tout le reste).
 - **Rapports & BI** (module 9) → lecture large `owner`/`manager`/`accountant` sur les vues agrégées (`erp_v_*`) ; chaque rôle métier garde par ailleurs l'accès aux données brutes de son propre périmètre (pas un accès BI élargi). `erp_custom_reports` scopé par utilisateur (`created_by = auth.uid()`), pas seulement par organisation — un rapport sauvegardé reste privé à son auteur, comme demandé.
 - **Administration ERP** (module 10) → `owner`/`manager` uniquement, même principe que `organization_members`/`shop_settings` côté socle (gestion d'équipe et de rôles toujours réservée aux deux rôles d'administration).
 
-**Pourquoi les 3 nouveaux rôles ne sont pas encore ajoutés à l'enum dans cette session** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Le prompt d'origine demande explicitement de valider la liste de rôles avant de coder la moindre RLS — les ajouter maintenant, avant validation, contredirait cette consigne. Ils seront migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin (`buyer` avec le module 2, `salesperson` avec le module 3, `hr_manager` avec le module 7) — jamais en avance de phase.
-
-**Points à valider explicitement avant de poursuivre vers le module 2 (Achats)** :
-1. Le nom des 3 rôles (`buyer`/`salesperson`/`hr_manager`) convient-il, ou préférez-vous un autre vocabulaire ?
-2. `buyer` et `salesperson` doivent-ils rester strictement cloisonnés (un commercial ne voit aucune donnée achats, et inversement), ou faut-il un chevauchement de lecture (ex. un commercial qui verrait aussi les coûts d'achat pour calculer sa marge) ?
-3. Confirmez-vous qu'aucun rôle "trésorier" séparé n'est nécessaire pour Finance/Comptabilité (périmètre `accountant` suffisant) ?
+**Pourquoi les 3 rôles validés ne sont pas encore ajoutés à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils seront migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin (`buyer` avec le module 2, `salesperson` avec le module 3, `hr_manager` avec le module 7) — jamais en avance de phase, même une fois le nom validé.
 
 ## Schéma par sous-module
 
