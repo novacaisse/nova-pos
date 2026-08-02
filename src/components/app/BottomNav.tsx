@@ -27,6 +27,7 @@ import {
   BookOpen,
   ChefHat,
   Calculator,
+  Briefcase,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -119,6 +120,7 @@ const ERP_MORE: Item[] = [
   { label: "Achats", to: "/app/erp/achats", icon: Truck },
   { label: "Finance", to: "/app/erp/finance", icon: Wallet },
   { label: "Comptabilité", to: "/app/erp/comptabilite", icon: Calculator },
+  { label: "RH", to: "/app/erp/rh", icon: Briefcase },
   { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },
 ];
 
