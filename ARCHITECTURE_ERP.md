@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 9 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI).** Seule la section 10 ci-dessous décrit un schéma **prévu**, pas encore migré.
+**État d'avancement à la date de ce document : les 10 sous-modules ont un schéma migré** (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration). Aucune route frontend `/app/erp/*` n'existe encore — ce document couvre uniquement le socle base de données (migrations 047 à 060, toutes présentées pour relecture, aucune exécutée automatiquement).
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -173,11 +173,27 @@ Dépend de tous les modules qui ont des entités "documentables" (2, 3, 7 — li
 
 **Aucune RLS dédiée sur les 4 vues** : ce sont des vues Postgres standard (ni `security definer` ni `security_barrier`), elles s'exécutent avec les droits de l'appelant et héritent donc automatiquement de la RLS des tables sous-jacentes — un `salesperson` qui interroge `erp_v_sales_summary` ne voit que ce que la RLS de `erp_sales_orders`/`erp_pos_sales` lui permettrait déjà de voir directement, sans fuite de périmètre et sans policy à écrire sur la vue elle-même. Dépend des modules 1, 2, 3, 4, 5 (livrés) pour ses données sources.
 
-### 10. Administration ERP — schéma prévu, non migré
+### 10. Administration ERP — livré (migration 060)
 
-Pas de nouvelle table dédiée aux rôles/permissions — `organization_members.role` (l'enum `app_role` partagé) reste la seule source de vérité, exactement comme pour ZegCaisse/ZegHotel/ZegResto. "Administration ERP" au sens de ce module correspond à un écran `/app/erp/parametres` (paramètres du module, à définir) plutôt qu'à un schéma de données propre.
+Pas de nouvelle table dédiée aux rôles/permissions — `organization_members.role` (l'enum `app_role` partagé) reste la seule source de vérité, exactement comme pour ZegCaisse/ZegHotel/ZegResto.
 
-Tableau de bord et Notifications : aucune table dédiée par conception (dashboard = agrégation des tables ci-dessus, notifications = table `notifications` du socle partagée), comme précisé dans le prompt d'origine.
+Seule addition, volontairement minimale (pas de champ ajouté "au cas où") : `erp_settings`, une ligne par organisation, portant uniquement des réglages déjà nécessaires aux modules précédemment livrés :
+
+| Champ | Sert à |
+|---|---|
+| `default_warehouse_id` | Pré-sélection du dépôt dans les écrans POS ERP (module 4) / réceptions (module 2). |
+| `invoice_prefix` / `quote_prefix` | Numérotation des factures et devis (module 3). |
+| `fiscal_year_start_month` | Référence pour la génération des périodes comptables (module 6). |
+
+Écriture réservée owner/manager (même principe que `organization_members`/`shop_settings`) ; lecture élargie à `accountant` (a besoin de la numérotation et du mois de clôture fiscal). Pas de ligne créée automatiquement à la provision de l'organisation — le frontend fait un upsert au premier enregistrement depuis `/app/erp/parametres`, comme les écrans de paramètres existants.
+
+Tableau de bord et Notifications : aucune table dédiée par conception (dashboard = agrégation des tables des modules 1 à 9, notifications = table `notifications` du socle partagée), comme précisé dans le prompt d'origine.
+
+## Récapitulatif — les 10 modules
+
+Les 10 sous-modules ont désormais un schéma migré (migrations 047 à 060) : Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration. Les 3 rôles validés (`buyer`, `salesperson`, `hr_manager`) sont tous ajoutés à l'enum. Isolation totale vis-à-vis de ZegCaisse maintenue sur l'ensemble (aucune table `erp_*` ne référence une table métier ZegCaisse). `db/schema.sql` reflète l'état final de chaque migration dans le même commit qu'elle.
+
+**Hors scope de ce chantier, explicitement** : aucune route frontend `/app/erp/*` n'a été construite (ni navigation, ni pages, ni data layer React/TanStack Query) — uniquement le socle base de données. C'est le travail à prévoir pour la prochaine session ZegERP, module par module, dans le même ordre de dépendance que ce document.
 
 ## Conventions transverses (héritées de ZegHotel/ZegResto, appliquées sans dérogation)
 

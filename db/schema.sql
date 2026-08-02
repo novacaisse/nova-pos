@@ -6240,6 +6240,31 @@ create policy erp_custom_reports_write on public.erp_custom_reports for all to a
   using (public.has_organization_access(organization_id) and created_by = auth.uid())
   with check (public.has_organization_access(organization_id) and created_by = auth.uid());
 
+-- =============== ZegERP — Module 10/10 : Administration (migration 060).
+-- Aucun rôle nouveau, aucune table de rôles/permissions dédiée —
+-- organization_members.role reste la seule source de vérité. Seule
+-- addition : erp_settings (une ligne par organisation), champs limités à
+-- ce dont les modules déjà livrés ont besoin (dépôt par défaut, préfixes
+-- facture/devis, mois de début d'exercice fiscal). ===============
+create table if not exists public.erp_settings (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  default_warehouse_id uuid references public.erp_warehouses(id) on delete set null,
+  invoice_prefix text not null default 'FAC-',
+  quote_prefix text not null default 'DEV-',
+  fiscal_year_start_month smallint not null default 1 check (fiscal_year_start_month between 1 and 12),
+  updated_at timestamptz not null default now(),
+  unique (organization_id)
+);
+create index if not exists idx_erp_settings_org on public.erp_settings(organization_id);
+alter table public.erp_settings enable row level security;
+
+create policy erp_settings_select on public.erp_settings for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_settings_write on public.erp_settings for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages) + les 15 tables
