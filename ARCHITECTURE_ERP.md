@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phase 1 (Stock/Produits) + Phase 2 (Achats & Fournisseurs) + Phase 3 (Ventes & CRM).** Les sections 4 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 4 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP).** Les sections 5 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -104,9 +104,15 @@ Volontairement **hors scope V1** : conversion automatique demande → commande (
 
 Volontairement **hors scope V1** : conversion automatique devis → commande, calcul de marge croisé achats/ventes (passera par un rapport dédié module 9, pas par un élargissement RLS), relances de facture automatisées.
 
-### 4. POS ERP — schéma prévu, non migré
+### 4. POS ERP — livré (migration 053)
 
-`erp_cash_sessions`, `erp_pos_sales` + `erp_pos_sale_lines`, `erp_pos_returns`. Isolé du POS ZegCaisse (`sales`/`payments`) même si conceptuellement proche — même principe d'isolation totale que le reste du module. Dépend du module 1 (produits/stock) et probablement du module 3 (client optionnel sur une vente comptoir).
+| Table | Rôle |
+|---|---|
+| `erp_cash_sessions` | Session de caisse (`warehouse_id` : la vente comptoir décrémente ce dépôt). Fermeture (`closing_amount`) par simple UPDATE — aucun mouvement de stock associé à la fermeture, pas de RPC nécessaire. |
+| `erp_pos_sales` + `erp_pos_sale_lines` | Vente comptoir, `customer_id` optionnel (module 3). `complete_erp_pos_sale()` (RPC) crée les mouvements **`sale`** (réutilisé tel quel du module 3 — une vente comptoir décrémente le stock exactement comme une livraison, seul le canal diffère), recalcule `total_amount`/`tax_amount` côté serveur (jamais fait confiance à une valeur envoyée par le client), bloque si la session de caisse n'est plus ouverte. |
+| `erp_pos_returns` + `erp_pos_return_lines` | Retour comptoir. `confirm_erp_pos_return()` (RPC) crée les mouvements **`customer_return`** (réutilisé du module 3), incrémente `returned_quantity` sur la ligne de vente d'origine (bloque le sur-retour). |
+
+**Aucun rôle ni type de mouvement nouveau** : `cashier` (existant, réutilisé) et `sale`/`customer_return` (ajoutés migration 051, module 3) suffisent — seule migration de ce module, pas de préliminaire d'enum. Isolé du POS ZegCaisse (`sales`/`payments`) même si conceptuellement proche.
 
 ### 5. Finance — schéma prévu, non migré
 
