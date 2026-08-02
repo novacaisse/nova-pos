@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 6 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité).** Les sections 7 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 7 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH).** Les sections 8 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -47,7 +47,7 @@ Modules sans rôle dédié :
 - **Rapports & BI** (module 9) → lecture large `owner`/`manager`/`accountant` sur les vues agrégées (`erp_v_*`) ; chaque rôle métier garde par ailleurs l'accès aux données brutes de son propre périmètre (pas un accès BI élargi). `erp_custom_reports` scopé par utilisateur (`created_by = auth.uid()`), pas seulement par organisation — un rapport sauvegardé reste privé à son auteur, comme demandé.
 - **Administration ERP** (module 10) → `owner`/`manager` uniquement, même principe que `organization_members`/`shop_settings` côté socle (gestion d'équipe et de rôles toujours réservée aux deux rôles d'administration).
 
-**Pourquoi les 3 rôles validés ne sont pas encore tous ajoutés à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils sont migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin — jamais en avance de phase, même une fois le nom validé. `buyer` (migration 049, module 2) et `salesperson` (migration 051, module 3) sont faits ; `hr_manager` (module 7) reste à venir.
+**Pourquoi les 3 rôles validés n'ont pas été ajoutés d'un coup à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils ont été migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en avait réellement besoin — jamais en avance de phase. Les 3 sont désormais faits : `buyer` (migration 049, module 2), `salesperson` (migration 051, module 3), `hr_manager` (migration 056, module 7).
 
 ## Schéma par sous-module
 
@@ -137,9 +137,17 @@ Volontairement **hors scope V1** : conversion automatique devis → commande, ca
 
 **Aucun rôle nouveau** (owner/manager/accountant, même périmètre que Finance). Saisie manuelle en V1 : aucune écriture n'est générée automatiquement depuis Achats/Ventes/Finance (même limite assumée que le module 5, pour les mêmes raisons).
 
-### 7. RH — schéma prévu, non migré
+### 7. RH — livré (migrations 056+057)
 
-`erp_departments`, `erp_positions`, `erp_employees`, `erp_attendance`, `erp_leave_requests`, `erp_employee_documents`. Indépendant des autres modules métier (peut être construit dès que le socle rôles ERP existe), mais dépend du module 8 pour le stockage réel des documents joints.
+| Table | Rôle |
+|---|---|
+| `erp_departments`, `erp_positions` | Référentiel RH de base. |
+| `erp_employees` | Fiche employé. `user_id` optionnel (nullable) : un employé n'a pas forcément de compte ZegOS (ex. personnel de terrain sans accès app). |
+| `erp_attendance` | Pointage, `unique(employee_id, date)`. |
+| `erp_leave_requests` | Demande de congé. **Pas de split créateur/approbateur** (contrairement à `erp_purchase_requests`, module 2) : `hr_manager` porte une autorité managériale complète et validée sur son périmètre, une seule policy `write` suffit. |
+| `erp_employee_documents` | `file_url` en texte simple en V1 (comme `erp_products.image_url`, module 1) — **pas encore raccroché** au bucket Storage `erp-documents` prévu module 8 (non livré) : pas de dépendance dure sur un module qui n'existe pas encore. |
+
+**Périmètre strictement resserré owner/manager/hr_manager** sur toutes les tables (select et write) — ni `accountant`, ni aucun autre rôle métier : données potentiellement sensibles (identité, congés, documents personnels), le principe est de ne pas élargir "pour être pratique". Cohérent avec le validé "`hr_manager`... rien hors de son périmètre — aucun accès Finance/Comptabilité/Ventes/Achats", appliqué ici symétriquement (les autres rôles n'ont pas non plus accès aux données RH).
 
 ### 8. Gestion documentaire — schéma prévu, non migré
 

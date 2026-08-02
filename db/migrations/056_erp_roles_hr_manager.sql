@@ -1,0 +1,15 @@
+-- Migration 056 — ZegERP, étape préliminaire au module 7/10 (RH) : ajoute
+-- UNIQUEMENT le rôle validé requis par ce module. Présentée pour relecture
+-- — NE PAS exécuter automatiquement. À exécuter après 055, avant 057.
+--
+-- IMPORTANT — à exécuter SEULE, dans sa propre exécution, avant la
+-- migration 057 : même précaution que 049/051/035/020f (Postgres interdit
+-- d'utiliser une nouvelle valeur d'enum dans la même transaction que celle
+-- qui l'a ajoutée).
+--
+-- `hr_manager` (RH) — dernier des 3 rôles validés dans ARCHITECTURE_ERP.md,
+-- section "Rôles ZegERP — validés". Couvre erp_departments/erp_positions/
+-- erp_employees/erp_attendance/erp_leave_requests/erp_employee_documents,
+-- rien hors de ce périmètre — aucun accès Finance/Comptabilité/Ventes/
+-- Achats.
+alter type public.app_role add value if not exists 'hr_manager';
