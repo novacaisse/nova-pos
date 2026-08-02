@@ -32,6 +32,7 @@ import {
   LayoutGrid,
   BookOpen,
   ChefHat,
+  Calculator,
 } from "lucide-react";
 import {
   Sidebar,
@@ -77,6 +78,7 @@ const ICONS = {
   LayoutGrid,
   BookOpen,
   ChefHat,
+  Calculator,
 } as const;
 
 type NavItem = {
@@ -142,6 +144,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Ventes", url: "/app/erp/ventes", icon: "Receipt" },
     { title: "POS", url: "/app/erp/pos", icon: "ScanBarcode" },
     { title: "Finance", url: "/app/erp/finance", icon: "Wallet" },
+    { title: "Comptabilité", url: "/app/erp/comptabilite", icon: "Calculator" },
   ],
   // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
   // Paramètres — rien de commun dans la nav entre applications (le
@@ -235,6 +238,8 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // Finance : owner/manager/accountant uniquement (validé, pas de
   // trésorier séparé) — masqué pour tous les autres rôles ERP.
   "/app/erp/finance": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
+  // Comptabilité : même périmètre que Finance (owner/manager/accountant).
+  "/app/erp/comptabilite": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
 };
 
 export function AppSidebar() {

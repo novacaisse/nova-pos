@@ -84,6 +84,7 @@ import { Route as AppErpProduitsRouteImport } from './routes/app.erp.produits'
 import { Route as AppErpPosRouteImport } from './routes/app.erp.pos'
 import { Route as AppErpFinanceRouteImport } from './routes/app.erp.finance'
 import { Route as AppErpEquipeRouteImport } from './routes/app.erp.equipe'
+import { Route as AppErpComptabiliteRouteImport } from './routes/app.erp.comptabilite'
 import { Route as AppErpAchatsRouteImport } from './routes/app.erp.achats'
 
 const TarifsRoute = TarifsRouteImport.update({
@@ -462,6 +463,11 @@ const AppErpEquipeRoute = AppErpEquipeRouteImport.update({
   path: '/equipe',
   getParentRoute: () => AppErpRoute,
 } as any)
+const AppErpComptabiliteRoute = AppErpComptabiliteRouteImport.update({
+  id: '/comptabilite',
+  path: '/comptabilite',
+  getParentRoute: () => AppErpRoute,
+} as any)
 const AppErpAchatsRoute = AppErpAchatsRouteImport.update({
   id: '/achats',
   path: '/achats',
@@ -511,6 +517,7 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
   '/app/erp/achats': typeof AppErpAchatsRoute
+  '/app/erp/comptabilite': typeof AppErpComptabiliteRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
   '/app/erp/pos': typeof AppErpPosRoute
@@ -581,6 +588,7 @@ export interface FileRoutesByTo {
   '/app': typeof AppIndexRoute
   '/souscription': typeof SouscriptionIndexRoute
   '/app/erp/achats': typeof AppErpAchatsRoute
+  '/app/erp/comptabilite': typeof AppErpComptabiliteRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
   '/app/erp/pos': typeof AppErpPosRoute
@@ -660,6 +668,7 @@ export interface FileRoutesById {
   '/app/': typeof AppIndexRoute
   '/souscription/': typeof SouscriptionIndexRoute
   '/app/erp/achats': typeof AppErpAchatsRoute
+  '/app/erp/comptabilite': typeof AppErpComptabiliteRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
   '/app/erp/pos': typeof AppErpPosRoute
@@ -740,6 +749,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/souscription/'
     | '/app/erp/achats'
+    | '/app/erp/comptabilite'
     | '/app/erp/equipe'
     | '/app/erp/finance'
     | '/app/erp/pos'
@@ -810,6 +820,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/souscription'
     | '/app/erp/achats'
+    | '/app/erp/comptabilite'
     | '/app/erp/equipe'
     | '/app/erp/finance'
     | '/app/erp/pos'
@@ -888,6 +899,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/souscription/'
     | '/app/erp/achats'
+    | '/app/erp/comptabilite'
     | '/app/erp/equipe'
     | '/app/erp/finance'
     | '/app/erp/pos'
@@ -1463,6 +1475,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppErpEquipeRouteImport
       parentRoute: typeof AppErpRoute
     }
+    '/app/erp/comptabilite': {
+      id: '/app/erp/comptabilite'
+      path: '/comptabilite'
+      fullPath: '/app/erp/comptabilite'
+      preLoaderRoute: typeof AppErpComptabiliteRouteImport
+      parentRoute: typeof AppErpRoute
+    }
     '/app/erp/achats': {
       id: '/app/erp/achats'
       path: '/achats'
@@ -1505,6 +1524,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppErpRouteChildren {
   AppErpAchatsRoute: typeof AppErpAchatsRoute
+  AppErpComptabiliteRoute: typeof AppErpComptabiliteRoute
   AppErpEquipeRoute: typeof AppErpEquipeRoute
   AppErpFinanceRoute: typeof AppErpFinanceRoute
   AppErpPosRoute: typeof AppErpPosRoute
@@ -1516,6 +1536,7 @@ interface AppErpRouteChildren {
 
 const AppErpRouteChildren: AppErpRouteChildren = {
   AppErpAchatsRoute: AppErpAchatsRoute,
+  AppErpComptabiliteRoute: AppErpComptabiliteRoute,
   AppErpEquipeRoute: AppErpEquipeRoute,
   AppErpFinanceRoute: AppErpFinanceRoute,
   AppErpPosRoute: AppErpPosRoute,
