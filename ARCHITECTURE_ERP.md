@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 5 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance).** Les sections 6 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 6 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité).** Les sections 7 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -125,9 +125,17 @@ Volontairement **hors scope V1** : conversion automatique devis → commande, ca
 
 **Aucun rôle nouveau** (validé : owner/manager/accountant uniquement, pas de rôle trésorier séparé). `erp_cash_transaction_type` est un type entièrement nouveau créé dans la même migration que son premier usage — pas une extension d'un enum existant, donc aucune contrainte de transaction séparée (contrairement aux rôles/types ajoutés aux modules 2 et 3).
 
-### 6. Comptabilité — schéma prévu, non migré
+### 6. Comptabilité — livré (migration 055)
 
-`erp_chart_of_accounts` (plan comptable SYSCOHADA, cohérent avec le format déjà utilisé pour les autres exports PDF ZegOS), `erp_accounting_journals`, `erp_journal_entries` + `erp_journal_entry_lines` (grand livre), `erp_bank_reconciliations`, `erp_accounting_periods` (clôtures — une période clôturée doit bloquer toute nouvelle écriture dessus, contrainte à poser au niveau RLS/trigger le moment venu). Dépend de Finance + Ventes + Achats (les écritures comptables reflètent les flux de ces modules).
+| Table | Rôle |
+|---|---|
+| `erp_chart_of_accounts` | Plan comptable SYSCOHADA — `code` porte la numérotation SYSCOHADA elle-même, `type` (`asset`/`liability`/`equity`/`revenue`/`expense`) est une classification simplifiée pour les rapports, pas une redite du code. |
+| `erp_accounting_journals` | Journaux (codes libres — VE/AC/BQ/CA/OD usuels SYSCOHADA, pas une liste figée). |
+| `erp_accounting_periods` | Clôtures. **Contrainte de clôture posée au niveau RLS** (pas trigger) : les policies INSERT et UPDATE (tant que `draft`) de `erp_journal_entries` vérifient par sous-requête qu'aucune période `closed` ne couvre `entry_date` — une période clôturée bloque toute nouvelle écriture ou modification dessus, comme demandé. L'absence de période pour une date ne bloque rien. |
+| `erp_journal_entries` + `erp_journal_entry_lines` | Grand livre en partie double. Une ligne est soit un débit soit un crédit (`check (debit = 0 or credit = 0)`). `post_erp_journal_entry()` (RPC) **vérifie l'équilibre débit = crédit** (rejette toute écriture déséquilibrée) et la non-clôture de la période avant de passer l'écriture `posted` — immuable ensuite (aucune policy update ne s'applique hors `draft`). |
+| `erp_bank_reconciliations` + `erp_bank_reconciliation_lines` | Rapprochement bancaire, pointe des `erp_cash_transactions` (module 5) contre un relevé. `complete_erp_bank_reconciliation()` (RPC) recalcule `reconciled_balance` à partir des lignes pointées (somme signée) ; l'écart avec `statement_balance` n'est pas bloquant, laissé à l'affichage frontend. |
+
+**Aucun rôle nouveau** (owner/manager/accountant, même périmètre que Finance). Saisie manuelle en V1 : aucune écriture n'est générée automatiquement depuis Achats/Ventes/Finance (même limite assumée que le module 5, pour les mêmes raisons).
 
 ### 7. RH — schéma prévu, non migré
 
