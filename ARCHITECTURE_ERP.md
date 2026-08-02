@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phase 1 (Stock/Produits) + Phase 2 (Achats & Fournisseurs).** Les sections 3 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phase 1 (Stock/Produits) + Phase 2 (Achats & Fournisseurs) + Phase 3 (Ventes & CRM).** Les sections 4 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -47,7 +47,7 @@ Modules sans rôle dédié :
 - **Rapports & BI** (module 9) → lecture large `owner`/`manager`/`accountant` sur les vues agrégées (`erp_v_*`) ; chaque rôle métier garde par ailleurs l'accès aux données brutes de son propre périmètre (pas un accès BI élargi). `erp_custom_reports` scopé par utilisateur (`created_by = auth.uid()`), pas seulement par organisation — un rapport sauvegardé reste privé à son auteur, comme demandé.
 - **Administration ERP** (module 10) → `owner`/`manager` uniquement, même principe que `organization_members`/`shop_settings` côté socle (gestion d'équipe et de rôles toujours réservée aux deux rôles d'administration).
 
-**Pourquoi les 3 rôles validés ne sont pas encore tous ajoutés à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils sont migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin — jamais en avance de phase, même une fois le nom validé. `buyer` est fait (migration 049, avec le module 2) ; `salesperson` (module 3) et `hr_manager` (module 7) restent à venir.
+**Pourquoi les 3 rôles validés ne sont pas encore tous ajoutés à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils sont migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin — jamais en avance de phase, même une fois le nom validé. `buyer` (migration 049, module 2) et `salesperson` (migration 051, module 3) sont faits ; `hr_manager` (module 7) reste à venir.
 
 ## Schéma par sous-module
 
@@ -84,9 +84,25 @@ Volontairement **hors scope V1** (non demandé, à ajouter si besoin confirmé) 
 
 Volontairement **hors scope V1** : conversion automatique demande → commande (copie des lignes), variance de coût à la réception (prix facturé vs prix commandé), réception contre plusieurs commandes en une seule fois.
 
-### 3. Ventes & CRM — schéma prévu, non migré
+### 3. Ventes & CRM — livré (migrations 051+052)
 
-`erp_customers`, `erp_prospects` + `erp_sales_pipeline_stages`, `erp_quotes` + `erp_quote_lines`, `erp_sales_orders` + `erp_sales_order_lines`, `erp_delivery_notes`, `erp_invoices` + `erp_invoice_lines`, `erp_credit_notes`, `erp_customer_payments`, `erp_customer_returns`, `erp_crm_activities` (polymorphe customer/prospect, `entity_type` + `entity_id`, pas de FK stricte des deux côtés — même pattern que `erp_document_attachments` plus bas). Dépend du module 1 (lignes produits) ; une commande livrée doit générer une sortie de stock (`erp_stock_movements`, type à définir, ex. `sale` — nouvelle valeur d'enum à ce moment-là).
+| Table | Rôle |
+|---|---|
+| `erp_customers` | Fiche client. Select : owner/manager/accountant/salesperson. Écriture : owner/manager/salesperson. |
+| `erp_sales_pipeline_stages` | Configuration du pipeline (étapes, `is_won`/`is_lost`) — écriture réservée owner/manager (paramétrage), lecture élargie à salesperson. |
+| `erp_prospects` | Fiche prospect, `stage_id` vers le pipeline, `converted_customer_id` renseigné manuellement quand un prospect devient client (pas de RPC de conversion automatique en V1). |
+| `erp_quotes` + `erp_quote_lines` | Devis client. Statuts `draft` → `sent` → `accepted`/`refused`/`expired` (terminaux, pas de réouverture — on recrée un devis). `converted` existe comme statut mais aucune conversion automatique en commande n'est câblée en V1 (création manuelle d'une `erp_sales_orders` avec `quote_id` renseigné). |
+| `erp_sales_orders` + `erp_sales_order_lines` | Commande client. Statuts `draft` → `confirmed` → `partially_delivered`/`delivered` (ou `cancelled`). `delivered_quantity` (ligne) jamais modifiée directement — incrémentée exclusivement par `confirm_erp_delivery()`. |
+| `erp_delivery_notes` + `erp_delivery_note_lines` | Bon de livraison. **Portée `salesperson`** (pas `stock`) — asymétrie assumée vis-à-vis du module 2 : la table de rôles validée liste explicitement `erp_delivery_notes` sous `salesperson`, contrairement à `erp_goods_receipts` qui excluait `buyer`. `confirm_erp_delivery()` (RPC) crée les mouvements `sale` (coût repris de `erp_products.cost`, snapshot COGS approximatif V1), incrémente `delivered_quantity`, recalcule le statut de la commande. Livraison partielle supportée nativement. |
+| `erp_invoices` + `erp_invoice_lines` | Facture client. Statuts `draft`/`sent`/`partially_paid`/`paid`/`overdue`/`cancelled`. Écriture élargie à `accountant` (suivi paiement), pas seulement `salesperson` — comme `erp_supplier_invoices` côté achats. |
+| `erp_credit_notes` | Avoir client — montant unique, pas de lignes détaillées (simplification V1 assumée). |
+| `erp_customer_payments` | Encaissement. `method` typé `erp_payment_method` — **nouvel enum dédié**, pas de réutilisation de `public.payment_method` (ZegCaisse) : même principe de découplage que `erp_stock_movement_type` vis-à-vis de `stock_movement_type`. |
+| `erp_customer_returns` + `erp_customer_return_lines` | Retour client. **Portée `stock`** (pas `salesperson`) — symétrique de `erp_goods_receipts` : `erp_customer_returns` n'apparaît pas dans le périmètre `salesperson` validé, traité comme une réception physique. `confirm_erp_customer_return()` (RPC) crée les mouvements `customer_return` (entrée). |
+| `erp_crm_activities` | Polymorphe (`entity_type` `customer`/`prospect` + `entity_id`, pas de FK stricte des deux côtés — même pattern prévu pour `erp_document_attachments`, module 8). Visibilité équipe complète (pas privée par auteur, à la différence de `erp_custom_reports`, module 9). |
+
+`erp_stock_movement_type` étendu (migration 051, valeurs ajoutées seules avant tout usage) : `sale` (−, garde anti-survente incluse) et `customer_return` (+). `apply_erp_stock_movement()` mis à jour en conséquence (3ᵉ `CREATE OR REPLACE`, signature toujours inchangée). Rôle `salesperson` ajouté à `app_role` par la même migration, **strictement cloisonné de `buyer`** (validé — aucune policy de ce fichier ne référence les deux rôles ensemble).
+
+Volontairement **hors scope V1** : conversion automatique devis → commande, calcul de marge croisé achats/ventes (passera par un rapport dédié module 9, pas par un élargissement RLS), relances de facture automatisées.
 
 ### 4. POS ERP — schéma prévu, non migré
 
