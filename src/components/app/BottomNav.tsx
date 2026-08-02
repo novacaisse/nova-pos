@@ -116,6 +116,7 @@ const ERP_PRIMARY: Item[] = [
 const ERP_MORE: Item[] = [
   { label: "Produits", to: "/app/erp/produits", icon: Package },
   { label: "Achats", to: "/app/erp/achats", icon: Truck },
+  { label: "Finance", to: "/app/erp/finance", icon: Wallet },
   { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },
 ];
 

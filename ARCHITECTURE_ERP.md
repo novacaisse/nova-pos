@@ -213,7 +213,9 @@ Même méthode que ZegHotel/ZegResto en leur temps : un socle transverse d'abord
 
 **Frontend Phase 4 — POS ERP livré** (`src/lib/data/erpPosHooks.ts`, `src/routes/app.erp.pos.tsx`) : sessions de caisse (ouverture/fermeture), ventes comptoir (brouillon → `complete_erp_pos_sale()`, totaux recalculés côté serveur), retours (`confirm_erp_pos_return()`). Aucun rôle ni type de mouvement nouveau — réutilise `cashier` et `sale`/`customer_return` du module 3.
 
-**Reste à construire, dans l'ordre de dépendance du schéma** : Ventes & CRM Phase 3b, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration (`erp_settings`) — chaque module rejoint `ERP_MODULES`/`NAV.erp` au moment où son écran existe réellement, jamais en avance (même discipline que la navigation ZegResto en son temps : pas de lien vers une page qui n'existe pas).
+**Frontend Phase 5 — Finance livré** (`src/lib/data/erpFinanceHooks.ts`, `src/routes/app.erp.finance.tsx`) : comptes caisse/banque (solde en lecture seule, jointure sur `erp_cash_account_balances`, jamais écrit directement côté client), transactions manuelles (`in`/`out`), virements internes (brouillon → `confirm_erp_fund_transfer()`). Aucun rôle nouveau — owner/manager/accountant uniquement, validé (pas de trésorier séparé).
+
+**Reste à construire, dans l'ordre de dépendance du schéma** : Ventes & CRM Phase 3b, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration (`erp_settings`) — chaque module rejoint `ERP_MODULES`/`NAV.erp` au moment où son écran existe réellement, jamais en avance (même discipline que la navigation ZegResto en son temps : pas de lien vers une page qui n'existe pas).
 
 ## Conventions transverses (héritées de ZegHotel/ZegResto, appliquées sans dérogation)
 
