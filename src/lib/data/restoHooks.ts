@@ -2,7 +2,7 @@
 // conventions que hooks.ts (ZegCaisse) et hotelHooks.ts (ZegHotel) : RLS
 // fait foi côté serveur, le filtre organization_id ici est ceinture +
 // bretelles. Toutes les tables sont préfixées resto_ (migrations 035-041).
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -339,12 +339,26 @@ export type RestoKitchenTicket = {
 // appelant décide QUELLES query keys invalider (ex. resto_order_items est
 // caché par order_id, pas par organization_id : un simple [table,
 // organizationId] générique ne matcherait pas ces caches).
+// Bug corrigé (V2, crash reproduit en prod) : le topic de canal ne portait
+// que `table_${organizationId}`, identique pour tous les composants
+// abonnés à la même table — dès que deux composants montés en même temps
+// s'abonnent à la même table (ex. depuis la Phase 3, le statut du ticket
+// cuisine d'une commande est affiché à la fois dans la carte de la colonne
+// de bascule ET dans le panneau de la commande active), le second `.on()`
+// tombe sur un canal déjà `subscribe()`-é par le premier et
+// realtime-js lève une exception synchrone ("cannot add `postgres_changes`
+// callbacks ... after `subscribe()`") depuis l'effet — non rattrapée, elle
+// remonte jusqu'à l'errorComponent racine et casse toute la page. `useId()`
+// donne à chaque instance de hook (donc chaque composant monté) un topic
+// vraiment unique, quel que soit le nombre de composants qui observent la
+// même table en parallèle.
 function useRestoRealtimeInvalidate(table: string, onChange: () => void) {
   const organizationId = useOrganizationId();
+  const instanceId = useId();
   useEffect(() => {
     if (!organizationId) return;
     const channel = supabase
-      .channel(`resto_${table}_${organizationId}`)
+      .channel(`resto_${table}_${organizationId}_${instanceId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table, filter: `organization_id=eq.${organizationId}` },
@@ -353,7 +367,7 @@ function useRestoRealtimeInvalidate(table: string, onChange: () => void) {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId, table]);
+  }, [organizationId, table, instanceId]);
 }
 
 export function useRestoOrders(includeClosed = false) {

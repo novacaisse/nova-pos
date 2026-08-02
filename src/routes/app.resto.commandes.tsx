@@ -20,10 +20,10 @@
 // enregistrement des paiements (add_resto_bill_payment) jusqu'à couvrir le
 // total — la note passe alors "payee" et la commande "fermee".
 import { createFileRoute } from "@tanstack/react-router";
-import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Plus, X, Loader2, Receipt, CheckCircle2, Ban, Utensils, CreditCard, Smartphone, Wallet, Users,
-  Search, Send, ChefHat, Image as ImageIcon, Circle, Gift, AlertTriangle,
+  Search, Send, ChefHat, Image as ImageIcon, Circle, Gift,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
@@ -92,11 +92,7 @@ function CommandesPage() {
           <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
             <OrdersRail orders={orders} activeId={activeOrderId} onSelect={setActiveOrderId} />
             <div className="min-w-0">
-              {activeOrder && (
-                <OrderWorkspaceErrorBoundary key={activeOrder.id}>
-                  <OrderWorkspace order={activeOrder} />
-                </OrderWorkspaceErrorBoundary>
-              )}
+              {activeOrder && <OrderWorkspace key={activeOrder.id} order={activeOrder} />}
             </div>
           </div>
         )}
@@ -105,35 +101,6 @@ function CommandesPage() {
       {creating && <NewOrderModal onClose={() => setCreating(false)} onCreated={(o) => { setCreating(false); setActiveOrderId(o.id); }} />}
     </div>
   );
-}
-
-// Filet de sécurité local (diagnostic) : si le rendu d'une commande plante,
-// affiche l'erreur réelle ici plutôt que de laisser remonter jusqu'à
-// l'errorComponent global (__root.tsx), qui masque le message technique
-// derrière un écran générique — la colonne des commandes reste utilisable.
-// À retirer une fois la cause identifiée et corrigée.
-class OrderWorkspaceErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { error: null };
-  }
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
-    console.error("OrderWorkspace crash:", error, info.componentStack);
-  }
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-          <div className="mb-2 flex items-center gap-2 font-bold"><AlertTriangle className="h-4 w-4" /> Erreur d'affichage de cette commande</div>
-          <div className="whitespace-pre-wrap break-words rounded-lg bg-destructive/10 p-2 font-mono text-xs">{this.state.error.message}</div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
 }
 
 // ============ COLONNE DE BASCULE RAPIDE ENTRE COMMANDES ACTIVES ============
