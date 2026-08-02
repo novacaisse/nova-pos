@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 4 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP).** Les sections 5 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : Phase 0 (socle module) + Phases 1 à 5 (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance).** Les sections 6 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -114,9 +114,16 @@ Volontairement **hors scope V1** : conversion automatique devis → commande, ca
 
 **Aucun rôle ni type de mouvement nouveau** : `cashier` (existant, réutilisé) et `sale`/`customer_return` (ajoutés migration 051, module 3) suffisent — seule migration de ce module, pas de préliminaire d'enum. Isolé du POS ZegCaisse (`sales`/`payments`) même si conceptuellement proche.
 
-### 5. Finance — schéma prévu, non migré
+### 5. Finance — livré (migration 054)
 
-`erp_cash_accounts` (caisse/banque — un "type" de compte, pas une distinction table par table), `erp_cash_transactions`, `erp_fund_transfers` (entre comptes). Alimenté par les encaissements/décaissements des modules Achats/Ventes/RH une fois ceux-ci en place.
+| Table | Rôle |
+|---|---|
+| `erp_cash_accounts` | Compte caisse/banque (`type` : `cash`/`bank`, pas une table par type). Écriture normale owner/manager/accountant. |
+| `erp_cash_account_balances` | Solde — jamais d'écriture directe (comme `erp_stock_levels`, module 1), maintenu exclusivement par `apply_erp_cash_transaction()` (trigger). Table séparée de `erp_cash_accounts` précisément pour ça : impossible de "glisser" une modification de solde dans une policy UPDATE normale du compte. |
+| `erp_fund_transfers` | Virement entre deux comptes internes. `confirm_erp_fund_transfer()` (RPC) crée la paire `transfer_out`/`transfer_in`. |
+| `erp_cash_transactions` | Ledger immuable (aucune update/delete). `source_type`/`source_id` : lien libre non contraint (polymorphe) vers l'origine d'une transaction manuelle — les modules Achats/Ventes ne génèrent **pas** encore de transaction automatiquement en V1 (l'intégration Achats/Ventes/RH → Finance reste manuelle pour l'instant, à réévaluer plus tard). Pas de garde anti-négatif sur le solde (à la différence du stock) : un compte peut légitimement passer en négatif (découvert bancaire, caisse en attente de dépôt). |
+
+**Aucun rôle nouveau** (validé : owner/manager/accountant uniquement, pas de rôle trésorier séparé). `erp_cash_transaction_type` est un type entièrement nouveau créé dans la même migration que son premier usage — pas une extension d'un enum existant, donc aucune contrainte de transaction séparée (contrairement aux rôles/types ajoutés aux modules 2 et 3).
 
 ### 6. Comptabilité — schéma prévu, non migré
 

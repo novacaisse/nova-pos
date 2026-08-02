@@ -5404,6 +5404,166 @@ $$;
 revoke all on function public.confirm_erp_pos_return(uuid, uuid) from public;
 grant execute on function public.confirm_erp_pos_return(uuid, uuid) to authenticated;
 
+-- =============== ZegERP — Module 5/10 : Finance (migration 054). Aucun
+-- rôle nouveau (owner/manager/accountant uniquement, validé — pas de
+-- trésorier séparé). erp_cash_transaction_type : type entièrement nouveau,
+-- pas d'extension d'enum existant, aucune contrainte de transaction. ===============
+create table if not exists public.erp_cash_accounts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  type text not null default 'cash' check (type in ('cash', 'bank')),
+  account_number text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_cash_accounts_org on public.erp_cash_accounts(organization_id);
+alter table public.erp_cash_accounts enable row level security;
+
+create policy erp_cash_accounts_select on public.erp_cash_accounts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_cash_accounts_write on public.erp_cash_accounts for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+-- Jamais d'écriture directe (comme erp_stock_levels, module 1) : maintenue
+-- exclusivement par apply_erp_cash_transaction() plus bas.
+create table if not exists public.erp_cash_account_balances (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  cash_account_id uuid not null references public.erp_cash_accounts(id) on delete cascade,
+  balance numeric(14,2) not null default 0,
+  updated_at timestamptz not null default now(),
+  unique (cash_account_id)
+);
+create index if not exists idx_erp_cash_account_balances_org on public.erp_cash_account_balances(organization_id);
+alter table public.erp_cash_account_balances enable row level security;
+
+create policy erp_cash_account_balances_select on public.erp_cash_account_balances for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+create table if not exists public.erp_fund_transfers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  from_account_id uuid not null references public.erp_cash_accounts(id) on delete restrict,
+  to_account_id uuid not null references public.erp_cash_accounts(id) on delete restrict,
+  amount numeric(14,2) not null check (amount > 0),
+  reference text,
+  notes text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed')),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz,
+  check (from_account_id <> to_account_id)
+);
+create index if not exists idx_erp_fund_transfers_org on public.erp_fund_transfers(organization_id);
+alter table public.erp_fund_transfers enable row level security;
+
+create policy erp_fund_transfers_select on public.erp_fund_transfers for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_fund_transfers_insert on public.erp_fund_transfers for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_fund_transfers_update on public.erp_fund_transfers for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_fund_transfers_delete on public.erp_fund_transfers for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+do $$ begin
+  create type public.erp_cash_transaction_type as enum ('in', 'out', 'transfer_in', 'transfer_out');
+exception when duplicate_object then null;
+end $$;
+
+-- Ledger immuable (comme erp_stock_movements). 'transfer_in'/'transfer_out'
+-- exclus de l'insert direct — uniquement créés par
+-- confirm_erp_fund_transfer().
+create table if not exists public.erp_cash_transactions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  cash_account_id uuid not null references public.erp_cash_accounts(id) on delete restrict,
+  type public.erp_cash_transaction_type not null,
+  amount numeric(14,2) not null check (amount > 0),
+  reference text,
+  reason text,
+  source_type text,
+  source_id uuid,
+  transfer_id uuid references public.erp_fund_transfers(id) on delete set null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_cash_transactions_org on public.erp_cash_transactions(organization_id);
+create index if not exists idx_erp_cash_transactions_account on public.erp_cash_transactions(cash_account_id);
+create index if not exists idx_erp_cash_transactions_transfer on public.erp_cash_transactions(transfer_id);
+alter table public.erp_cash_transactions enable row level security;
+
+create policy erp_cash_transactions_select on public.erp_cash_transactions for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_cash_transactions_insert on public.erp_cash_transactions for insert to authenticated
+  with check (
+    type in ('in', 'out')
+    and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+  );
+
+-- Pas de garde anti-négatif (contrairement au stock) : un compte peut
+-- légitimement passer en négatif (découvert, caisse en attente de dépôt).
+create or replace function public.apply_erp_cash_transaction()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  delta numeric(14,2);
+begin
+  delta := case new.type
+    when 'in' then new.amount
+    when 'transfer_in' then new.amount
+    when 'out' then -new.amount
+    when 'transfer_out' then -new.amount
+    else 0
+  end;
+
+  insert into public.erp_cash_account_balances (organization_id, cash_account_id, balance)
+  values (new.organization_id, new.cash_account_id, delta)
+  on conflict (cash_account_id)
+  do update set balance = public.erp_cash_account_balances.balance + delta, updated_at = now();
+
+  return new;
+end;
+$$;
+create trigger trg_erp_cash_transactions_apply
+  after insert on public.erp_cash_transactions
+  for each row execute function public.apply_erp_cash_transaction();
+
+-- confirm_erp_fund_transfer() : crée la paire transfer_out/transfer_in et
+-- passe le transfert "confirmed".
+create or replace function public.confirm_erp_fund_transfer(
+  p_organization_id uuid,
+  p_transfer_id uuid
+) returns public.erp_fund_transfers
+language plpgsql security definer set search_path = public as $$
+declare
+  v_transfer public.erp_fund_transfers;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','accountant']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_transfer from public.erp_fund_transfers
+    where id = p_transfer_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Transfert introuvable.'; end if;
+  if v_transfer.status <> 'draft' then raise exception 'Ce transfert a déjà été confirmé.'; end if;
+
+  insert into public.erp_cash_transactions (organization_id, cash_account_id, type, amount, reference, transfer_id, created_by)
+  values (p_organization_id, v_transfer.from_account_id, 'transfer_out', v_transfer.amount, v_transfer.reference, p_transfer_id, auth.uid());
+  insert into public.erp_cash_transactions (organization_id, cash_account_id, type, amount, reference, transfer_id, created_by)
+  values (p_organization_id, v_transfer.to_account_id, 'transfer_in', v_transfer.amount, v_transfer.reference, p_transfer_id, auth.uid());
+
+  update public.erp_fund_transfers set status = 'confirmed', confirmed_at = now()
+    where id = p_transfer_id returning * into v_transfer;
+
+  return v_transfer;
+end;
+$$;
+revoke all on function public.confirm_erp_fund_transfer(uuid, uuid) from public;
+grant execute on function public.confirm_erp_fund_transfer(uuid, uuid) to authenticated;
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages) + les 15 tables
