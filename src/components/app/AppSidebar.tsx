@@ -139,6 +139,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Produits", url: "/app/erp/produits", icon: "Package" },
     { title: "Stock", url: "/app/erp/stock", icon: "Warehouse" },
     { title: "Achats", url: "/app/erp/achats", icon: "Truck" },
+    { title: "Ventes", url: "/app/erp/ventes", icon: "Receipt" },
   ],
   // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
   // Paramètres — rien de commun dans la nav entre applications (le
@@ -222,6 +223,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // cashier (aucune de leurs policies select ne couvre erp_suppliers/
   // erp_purchase_orders/..., migration 050) — masqué ici en cohérence.
   "/app/erp/achats": ["salesperson", "hr_manager", "cashier"],
+  // Ventes : aucune policy select ne couvre buyer/hr_manager/cashier sur
+  // erp_customers/erp_quotes/erp_sales_orders/... (migration 052) — stock
+  // reste visible (accès légitime au seul onglet Retours client).
+  "/app/erp/ventes": ["buyer", "hr_manager", "cashier"],
 };
 
 export function AppSidebar() {
