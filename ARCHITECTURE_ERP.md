@@ -193,7 +193,21 @@ Tableau de bord et Notifications : aucune table dédiée par conception (dashboa
 
 Les 10 sous-modules ont désormais un schéma migré (migrations 047 à 060) : Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration. Les 3 rôles validés (`buyer`, `salesperson`, `hr_manager`) sont tous ajoutés à l'enum. Isolation totale vis-à-vis de ZegCaisse maintenue sur l'ensemble (aucune table `erp_*` ne référence une table métier ZegCaisse). `db/schema.sql` reflète l'état final de chaque migration dans le même commit qu'elle.
 
-**Hors scope de ce chantier, explicitement** : aucune route frontend `/app/erp/*` n'a été construite (ni navigation, ni pages, ni data layer React/TanStack Query) — uniquement le socle base de données. C'est le travail à prévoir pour la prochaine session ZegERP, module par module, dans le même ordre de dépendance que ce document.
+## Frontend `/app/erp/*` — en cours (chantier séparé, construit au fil des phases)
+
+Même méthode que ZegHotel/ZegResto en leur temps : un socle transverse d'abord (rôles frontend, onboarding, navigation, catalogue de modules bridables par formule), puis les écrans module par module, dans le même ordre de dépendance que le schéma ci-dessus.
+
+**Socle livré** :
+- `src/lib/roles.ts` — `AppRole`/`ROLE_LABEL` incluent désormais `buyer`/`salesperson`/`hr_manager`.
+- `src/components/app/OnboardingFlow.tsx` — ZegERP est un 4ᵉ choix pleinement actif (`ErpSetupForm`, même structure que les 3 autres).
+- `src/components/app/AppSidebar.tsx` / `BottomNav.tsx` / `AppSwitcher.tsx` — contexte `/app/erp/*` reconnu au même titre que pos/hotel/resto (isolation totale : jamais deux menus d'applications affichés en même temps).
+- `src/lib/data/adminHooks.ts` — `ERP_MODULES` (catalogue des modules bridables par formule, construit au fil des phases comme `RESTO_MODULES` en son temps), `getModulesForApp()` étendu.
+- `src/routes/admin.formules.tsx` — ZegERP est un 4ᵉ onglet de gestion de formules.
+- Tous les littéraux `"pos" | "hotel" | "resto"` du frontend étendus à `"erp"` (`OrganizationProvider`, `accountHooks`, `adminHooks`).
+
+**Frontend Phase 1 — Stock/Produits livré** (`src/lib/data/erpHooks.ts`, `src/routes/app.erp.tsx`, `app.erp.index.tsx`, `app.erp.produits.tsx`, `app.erp.stock.tsx`, `app.erp.equipe.tsx`) : catégories/marques/unités/dépôts/produits (CRUD), niveaux de stock (lecture), transferts inter-dépôts (brouillon → `send_erp_stock_transfer()` → `receive_erp_stock_transfer()`, jamais d'écriture directe de `status`), inventaires physiques (brouillon → comptage → `validate_erp_inventory()`), ledger des mouvements (lecture), tableau de bord avec KPI réels (produits actifs, dépôts actifs, stock bas, transferts en transit, inventaires en cours). Pas d'upload de photo produit en V1 (`image_url` texte simple, pas de bucket dédié — même limite assumée que le schéma DB, migration 048).
+
+**Reste à construire, dans l'ordre de dépendance du schéma** : Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration (`erp_settings`) — chaque module rejoint `ERP_MODULES`/`NAV.erp` au moment où son écran existe réellement, jamais en avance (même discipline que la navigation ZegResto en son temps : pas de lien vers une page qui n'existe pas).
 
 ## Conventions transverses (héritées de ZegHotel/ZegResto, appliquées sans dérogation)
 

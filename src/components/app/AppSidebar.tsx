@@ -130,10 +130,19 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Réservations", url: "/app/resto/reservations", icon: "CalendarRange" },
     { title: "Rapports", url: "/app/resto/rapports", icon: "BarChart3" },
   ],
-  // ZegCaisse et ZegHôtel ont chacun leur propre Équipe/Paramètres — rien
-  // de commun dans la nav entre les deux applications (le paramètre
-  // "Applications" pour activer/désactiver/basculer vit maintenant comme
-  // onglet DANS chacune de ces deux pages Paramètres, plus de nav item dédié).
+  // Même logique incrémentale que resto ci-dessus (Frontend Phase 1 :
+  // Produits + Stock, module DB "Stock/Produits" déjà livré) — les autres
+  // modules ZegERP (Achats, Ventes, POS, Finance, Comptabilité, RH,
+  // Documents, Rapports) rejoignent ce groupe au fil des phases suivantes.
+  erp: [
+    { title: "Tableau de bord", url: "/app/erp", icon: "LayoutDashboard" },
+    { title: "Produits", url: "/app/erp/produits", icon: "Package" },
+    { title: "Stock", url: "/app/erp/stock", icon: "Warehouse" },
+  ],
+  // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
+  // Paramètres — rien de commun dans la nav entre applications (le
+  // paramètre "Applications" pour activer/désactiver/basculer vit comme
+  // onglet DANS chacune de ces pages Paramètres, plus de nav item dédié).
   adminPos: [
     { title: "Équipe", url: "/app/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/parametres", icon: "Settings" },
@@ -145,6 +154,11 @@ const NAV: Record<string, NavItem[]> = {
   adminResto: [
     { title: "Équipe", url: "/app/resto/equipe", icon: "UsersRound" },
     { title: "Paramètres", url: "/app/resto/parametres", icon: "Settings" },
+  ],
+  // Paramètres ZegERP (erp_settings) rejoint ce groupe à la phase
+  // Administration — pas encore d'écran, pas de lien mort ici.
+  adminErp: [
+    { title: "Équipe", url: "/app/erp/equipe", icon: "UsersRound" },
   ],
 };
 
@@ -220,9 +234,11 @@ export function AppSidebar() {
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
   const inRestoContext = pathname.startsWith("/app/resto");
-  const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext) && !inRestoContext;
-  const showHotel = activeApps.includes("hotel") && (!bothAppsActive || inHotelContext) && !inRestoContext;
-  const showResto = activeApps.includes("resto") || inRestoContext;
+  const inErpContext = pathname.startsWith("/app/erp");
+  const showPos = activeApps.includes("pos") && (!bothAppsActive || !inHotelContext) && !inRestoContext && !inErpContext;
+  const showHotel = activeApps.includes("hotel") && (!bothAppsActive || inHotelContext) && !inRestoContext && !inErpContext;
+  const showResto = (activeApps.includes("resto") || inRestoContext) && !inErpContext;
+  const showErp = activeApps.includes("erp") || inErpContext;
 
   const isActive = (url: string) =>
     url === "/app" ? pathname === "/app" : pathname === url || pathname.startsWith(url + "/");
@@ -321,9 +337,11 @@ export function AppSidebar() {
         {showPos && renderGroup("Catalogue", NAV.catalogue)}
         {showHotel && renderGroup("Hôtel", NAV.hotel)}
         {showResto && renderGroup("Restaurant", NAV.resto)}
+        {showErp && renderGroup("ERP", NAV.erp)}
         {showPos && renderGroup("Administration", NAV.adminPos)}
         {showHotel && renderGroup("Administration", NAV.adminHotel)}
         {showResto && renderGroup("Administration", NAV.adminResto)}
+        {showErp && renderGroup("Administration", NAV.adminErp)}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-3">

@@ -42,7 +42,7 @@ export type Plan = {
   // distingue une formule ZegCaisse d'une formule ZegHotel ; max_establishments
   // et max_users bornent le compte (account_subscriptions) pour cette app.
   // null = illimité / non assignée.
-  app_module: "pos" | "hotel" | "resto" | null;
+  app_module: "pos" | "hotel" | "resto" | "erp" | null;
   max_establishments: number | null;
   max_users: number | null;
 };
@@ -85,16 +85,25 @@ export const RESTO_MODULES: { url: string; label: string }[] = [
   { url: "/app/resto/rapports", label: "Rapports" },
 ];
 
+// Construit au fil des phases du chantier frontend ZegERP (Phase 1 :
+// Produits + Stock) — même logique incrémentale que RESTO_MODULES en son
+// temps, un module n'y entre que lorsque son écran existe réellement.
+export const ERP_MODULES: { url: string; label: string }[] = [
+  { url: "/app/erp/produits", label: "Produits" },
+  { url: "/app/erp/stock", label: "Stock" },
+];
+
 // Point d'entrée unique pour récupérer le catalogue de modules bridables
 // d'une application — jamais d'import direct de POS_MODULES/HOTEL_MODULES/
-// RESTO_MODULES en dehors de ce fichier et du formulaire d'édition
-// (admin.formules.tsx), pour éviter qu'un des catalogues reste câblé en dur
-// ailleurs (c'est exactement le bug corrigé en Phase 4 : AppSidebar/
-// BottomNav ne vérifiaient jusqu'ici que POS_MODULES, y compris côté
-// ZegHotel).
-export function getModulesForApp(appModule: "pos" | "hotel" | "resto" | null | undefined): { url: string; label: string }[] {
+// RESTO_MODULES/ERP_MODULES en dehors de ce fichier et du formulaire
+// d'édition (admin.formules.tsx), pour éviter qu'un des catalogues reste
+// câblé en dur ailleurs (c'est exactement le bug corrigé en Phase 4 :
+// AppSidebar/BottomNav ne vérifiaient jusqu'ici que POS_MODULES, y compris
+// côté ZegHotel).
+export function getModulesForApp(appModule: "pos" | "hotel" | "resto" | "erp" | null | undefined): { url: string; label: string }[] {
   if (appModule === "hotel") return HOTEL_MODULES;
   if (appModule === "resto") return RESTO_MODULES;
+  if (appModule === "erp") return ERP_MODULES;
   return POS_MODULES;
 }
 
@@ -230,7 +239,7 @@ export function useAdminOrganizations() {
 // Phase 1 (accounts_select_admin/account_subscriptions_select_admin,
 // is_super_admin()) — aucune nouvelle policy nécessaire pour cet écran.
 export type AdminAccountSubscription = {
-  app_module: "pos" | "hotel" | "resto"; plan_id: string; status: string;
+  app_module: "pos" | "hotel" | "resto" | "erp"; plan_id: string; status: string;
   trial_ends_at: string | null; current_period_end: string | null;
 };
 export type AdminAccount = {
@@ -238,7 +247,7 @@ export type AdminAccount = {
   owner_profile: { full_name: string | null; phone: string | null } | null;
   owner_email: string | null;
   subscriptions: AdminAccountSubscription[];
-  establishment_counts: Partial<Record<"pos" | "hotel" | "resto", number>>;
+  establishment_counts: Partial<Record<"pos" | "hotel" | "resto" | "erp", number>>;
 };
 
 export function useAdminAccounts() {
@@ -261,7 +270,7 @@ export function useAdminAccounts() {
       }
 
       const subsByAccount: Record<string, AdminAccountSubscription[]> = {};
-      const countsByAccount: Record<string, Partial<Record<"pos" | "hotel" | "resto", number>>> = {};
+      const countsByAccount: Record<string, Partial<Record<"pos" | "hotel" | "resto" | "erp", number>>> = {};
       if (accountIds.length) {
         const { data: subs } = await supabase.from("account_subscriptions")
           .select("account_id, app_module, plan_id, status, trial_ends_at, current_period_end").in("account_id", accountIds);
@@ -271,7 +280,7 @@ export function useAdminAccounts() {
         const { data: orgs } = await supabase.from("organizations").select("account_id, app_module").in("account_id", accountIds);
         for (const o of (orgs ?? []) as any[]) {
           const byApp = (countsByAccount[o.account_id] ??= {});
-          byApp[o.app_module as "pos" | "hotel" | "resto"] = (byApp[o.app_module as "pos" | "hotel" | "resto"] ?? 0) + 1;
+          byApp[o.app_module as "pos" | "hotel" | "resto" | "erp"] = (byApp[o.app_module as "pos" | "hotel" | "resto" | "erp"] ?? 0) + 1;
         }
       }
 

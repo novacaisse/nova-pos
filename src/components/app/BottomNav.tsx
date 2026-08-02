@@ -104,6 +104,18 @@ const COOK_PRIMARY: Item[] = [
   { label: "Cuisine", to: "/app/resto/cuisine", icon: ChefHat },
 ];
 
+// Même logique incrémentale que RESTO_PRIMARY/RESTO_MORE en son temps —
+// ERP_MORE ne porte qu'Équipe pour l'instant (Paramètres rejoint ce groupe
+// à la phase Administration, pas de lien mort ici).
+const ERP_PRIMARY: Item[] = [
+  { label: "Bord", to: "/app/erp", icon: LayoutDashboard },
+  { label: "Produits", to: "/app/erp/produits", icon: Package },
+  { label: "Stock", to: "/app/erp/stock", icon: Warehouse },
+];
+const ERP_MORE: Item[] = [
+  { label: "Équipe", to: "/app/erp/equipe", icon: UsersRound },
+];
+
 export function BottomNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -128,21 +140,27 @@ export function BottomNav() {
   const bothAppsActive = activeApps.includes("pos") && activeApps.includes("hotel");
   const inHotelContext = pathname.startsWith("/app/hotel");
   const inRestoContext = pathname.startsWith("/app/resto");
-  const useHotelNav = !isRestoOnlyRole && (isHotelOnlyRole
+  const inErpContext = pathname.startsWith("/app/erp");
+  const useHotelNav = !isRestoOnlyRole && !inErpContext && (isHotelOnlyRole
     || (activeApps.includes("hotel") && (!activeApps.includes("pos") || (bothAppsActive && inHotelContext))));
-  const useRestoNav = isRestoOnlyRole || (!useHotelNav && (activeApps.includes("resto") || inRestoContext));
+  const useRestoNav = !inErpContext && (isRestoOnlyRole || (!useHotelNav && (activeApps.includes("resto") || inRestoContext)));
+  const useErpNav = activeApps.includes("erp") || inErpContext;
 
   // HOUSEKEEPING_PRIMARY reste toujours affiché tel quel pour ce rôle (ses
   // deux seuls écrans opérationnels, pas des modules "métier" bridables par
   // formule) — HOTEL_PRIMARY/HOTEL_MORE, eux, passent par `included` comme
   // PRIMARY/MORE côté ZegCaisse (oubli corrigé en Phase 4 : ces deux tableaux
   // n'étaient jusqu'ici jamais filtrés, donc jamais bridés par une formule).
-  const primary = useHotelNav
-    ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
-    : useRestoNav
-      ? (myRole === "cook" ? COOK_PRIMARY : RESTO_PRIMARY.filter(included))
-      : PRIMARY.filter(included);
-  const more = useHotelNav
+  const primary = useErpNav
+    ? ERP_PRIMARY.filter(included)
+    : useHotelNav
+      ? (myRole === "housekeeping" ? HOUSEKEEPING_PRIMARY : HOTEL_PRIMARY.filter(included))
+      : useRestoNav
+        ? (myRole === "cook" ? COOK_PRIMARY : RESTO_PRIMARY.filter(included))
+        : PRIMARY.filter(included);
+  const more = useErpNav
+    ? ERP_MORE.filter(included)
+    : useHotelNav
     ? (myRole === "housekeeping"
         ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
         // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de
