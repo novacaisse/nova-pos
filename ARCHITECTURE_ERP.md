@@ -2,7 +2,7 @@
 
 Document séparé de `ARCHITECTURE.md` (à la différence de ZegHotel/ZegResto, documentés en section dans le fichier principal) — décision explicite pour ce module vu son volume (13 sous-modules, plusieurs dizaines de tables à terme). `ARCHITECTURE.md` reste la référence pour le socle ZegOS partagé (comptes, organisations, rôles core, abonnements) : ce document ne le duplique pas, il documente uniquement ce qui est spécifique à ZegERP. Voir aussi `CLAUDE.md` pour les conventions de travail transverses (règles de migration, pièges Postgres, etc.), inchangées pour ce module.
 
-**État d'avancement à la date de ce document : Phase 0 (socle module) + Phase 1 (Stock/Produits) seulement.** Les sections 2 à 10 ci-dessous décrivent le schéma **prévu**, pas encore migré — elles servent de plan de dépendance et seront mises à jour au fur et à mesure de chaque phase livrée.
+**État d'avancement à la date de ce document : les 10 sous-modules ont un schéma migré** (Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration). Aucune route frontend `/app/erp/*` n'existe encore — ce document couvre uniquement le socle base de données (migrations 047 à 060, toutes présentées pour relecture, aucune exécutée automatiquement).
 
 ## Principe d'isolation (non négociable, validé)
 
@@ -47,7 +47,7 @@ Modules sans rôle dédié :
 - **Rapports & BI** (module 9) → lecture large `owner`/`manager`/`accountant` sur les vues agrégées (`erp_v_*`) ; chaque rôle métier garde par ailleurs l'accès aux données brutes de son propre périmètre (pas un accès BI élargi). `erp_custom_reports` scopé par utilisateur (`created_by = auth.uid()`), pas seulement par organisation — un rapport sauvegardé reste privé à son auteur, comme demandé.
 - **Administration ERP** (module 10) → `owner`/`manager` uniquement, même principe que `organization_members`/`shop_settings` côté socle (gestion d'équipe et de rôles toujours réservée aux deux rôles d'administration).
 
-**Pourquoi les 3 rôles validés ne sont pas encore ajoutés à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils seront migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en a réellement besoin (`buyer` avec le module 2, `salesperson` avec le module 3, `hr_manager` avec le module 7) — jamais en avance de phase, même une fois le nom validé.
+**Pourquoi les 3 rôles validés n'ont pas été ajoutés d'un coup à l'enum** : `ALTER TYPE ... ADD VALUE` est irréversible (Postgres ne permet pas de retirer une valeur d'enum) et doit s'exécuter seule, dans sa propre transaction, avant toute policy qui la référence (piège documenté dans `CLAUDE.md`). Ils ont été migrés (une ligne par rôle, migration dédiée, sur le modèle de `035_resto_roles.sql`) au moment de démarrer le module qui en avait réellement besoin — jamais en avance de phase. Les 3 sont désormais faits : `buyer` (migration 049, module 2), `salesperson` (migration 051, module 3), `hr_manager` (migration 056, module 7).
 
 ## Schéma par sous-module
 
@@ -69,43 +69,131 @@ Alertes de stock bas : seuil sur `erp_products.low_stock_threshold`, comparé au
 
 Volontairement **hors scope V1** (non demandé, à ajouter si besoin confirmé) : conversion d'unité automatique (ex. carton ↔ unité), valorisation de stock par méthode (FIFO/CMP) autre que coût moyen implicite, code-barres multiples par produit, upload de photo produit (texte `image_url` pour l'instant, comme ZegCaisse V1 — un vrai composant d'upload type `ImageUploadField.tsx`, déjà générique et réutilisable, viendra quand l'écran Produits sera construit).
 
-### 2. Achats & Fournisseurs — schéma prévu, non migré
+### 2. Achats & Fournisseurs — livré (migrations 049+050)
 
-`erp_suppliers`, `erp_purchase_requests`, `erp_purchase_orders` + `erp_purchase_order_lines`, `erp_goods_receipts` + `erp_goods_receipt_lines` (la réception crée des `erp_stock_movements` de type à ajouter à l'enum, ex. `purchase_receipt`, plutôt que de réutiliser `in` — traçabilité de l'origine du mouvement), `erp_supplier_invoices`, `erp_supplier_returns`. Dépend du module 1 (les lignes de commande/réception référencent `erp_products`).
+| Table | Rôle |
+|---|---|
+| `erp_suppliers` | Fiche fournisseur. Select : owner/manager/accountant/buyer/stock. Écriture : owner/manager/buyer. |
+| `erp_purchase_requests` + `erp_purchase_request_lines` | Demande interne, étape optionnelle avant commande (`request_id` nullable sur `erp_purchase_orders`). Statuts `draft` → `submitted` → `approved`/`rejected`. Créée par owner/manager/buyer/**stock** (un magasinier peut signaler un besoin de réappro) ; l'approbation (`submitted` → `approved`/`rejected`) est réservée à owner/manager, même si l'auteur a le rôle buyer/stock — pas d'auto-approbation. |
+| `erp_purchase_orders` + `erp_purchase_order_lines` | Commande fournisseur. Statuts `draft` → `confirmed` → `partially_received`/`received` (ou `cancelled`). `received_quantity` (ligne) jamais modifiée directement — incrémentée exclusivement par `confirm_erp_goods_receipt()`. **Masquage de colonne** : `erp_purchase_order_lines` porte `unit_cost` (donnée sensible) ; le rôle `stock` n'a **aucune** policy SELECT dessus — il consulte quantités commandées/reçues via `erp_purchase_order_lines_for_receiving()` (RPC `security definer`, ne retourne jamais `unit_cost`), pattern `hotel_guest_contact()` imposé par `CLAUDE.md`. |
+| `erp_goods_receipts` + `erp_goods_receipt_lines` | Réception physique — rôle **stock** exclusivement (`buyer` n'y a aucun accès direct), cohérent avec "réceptionner est un geste d'entrepôt, pas d'achat". `confirm_erp_goods_receipt()` (RPC) crée les mouvements `purchase_receipt` (coût repris de la ligne de commande, jamais saisi par `stock`), incrémente `received_quantity`, recalcule le statut de la commande. Réception partielle supportée nativement. |
+| `erp_supplier_invoices` | Facture fournisseur / suivi paiement (`unpaid`/`partially_paid`/`paid`/`disputed`). Écriture élargie à `accountant` (périmètre financier), pas seulement `buyer`. Aucun mouvement de stock associé, pas de RPC nécessaire. |
+| `erp_supplier_returns` + `erp_supplier_return_lines` | Retour marchandise au fournisseur. Porté par **buyer** en V1 (pas `stock`) — simplification assumée, à revisiter si un geste physique distinct par le magasinier se confirme nécessaire. `confirm_erp_supplier_return()` (RPC) crée les mouvements `supplier_return` (sortie, bloquée si stock insuffisant). |
 
-### 3. Ventes & CRM — schéma prévu, non migré
+`erp_stock_movement_type` étendu (migration 049, valeurs ajoutées seules avant tout usage) : `purchase_receipt` (+) et `supplier_return` (−, garde anti-survente incluse) — `apply_erp_stock_movement()` mis à jour en conséquence (`CREATE OR REPLACE`, signature inchangée, sûr). Rôle `buyer` ajouté à `app_role` par la même migration.
 
-`erp_customers`, `erp_prospects` + `erp_sales_pipeline_stages`, `erp_quotes` + `erp_quote_lines`, `erp_sales_orders` + `erp_sales_order_lines`, `erp_delivery_notes`, `erp_invoices` + `erp_invoice_lines`, `erp_credit_notes`, `erp_customer_payments`, `erp_customer_returns`, `erp_crm_activities` (polymorphe customer/prospect, `entity_type` + `entity_id`, pas de FK stricte des deux côtés — même pattern que `erp_document_attachments` plus bas). Dépend du module 1 (lignes produits) ; une commande livrée doit générer une sortie de stock (`erp_stock_movements`, type à définir, ex. `sale` — nouvelle valeur d'enum à ce moment-là).
+Volontairement **hors scope V1** : conversion automatique demande → commande (copie des lignes), variance de coût à la réception (prix facturé vs prix commandé), réception contre plusieurs commandes en une seule fois.
 
-### 4. POS ERP — schéma prévu, non migré
+### 3. Ventes & CRM — livré (migrations 051+052)
 
-`erp_cash_sessions`, `erp_pos_sales` + `erp_pos_sale_lines`, `erp_pos_returns`. Isolé du POS ZegCaisse (`sales`/`payments`) même si conceptuellement proche — même principe d'isolation totale que le reste du module. Dépend du module 1 (produits/stock) et probablement du module 3 (client optionnel sur une vente comptoir).
+| Table | Rôle |
+|---|---|
+| `erp_customers` | Fiche client. Select : owner/manager/accountant/salesperson. Écriture : owner/manager/salesperson. |
+| `erp_sales_pipeline_stages` | Configuration du pipeline (étapes, `is_won`/`is_lost`) — écriture réservée owner/manager (paramétrage), lecture élargie à salesperson. |
+| `erp_prospects` | Fiche prospect, `stage_id` vers le pipeline, `converted_customer_id` renseigné manuellement quand un prospect devient client (pas de RPC de conversion automatique en V1). |
+| `erp_quotes` + `erp_quote_lines` | Devis client. Statuts `draft` → `sent` → `accepted`/`refused`/`expired` (terminaux, pas de réouverture — on recrée un devis). `converted` existe comme statut mais aucune conversion automatique en commande n'est câblée en V1 (création manuelle d'une `erp_sales_orders` avec `quote_id` renseigné). |
+| `erp_sales_orders` + `erp_sales_order_lines` | Commande client. Statuts `draft` → `confirmed` → `partially_delivered`/`delivered` (ou `cancelled`). `delivered_quantity` (ligne) jamais modifiée directement — incrémentée exclusivement par `confirm_erp_delivery()`. |
+| `erp_delivery_notes` + `erp_delivery_note_lines` | Bon de livraison. **Portée `salesperson`** (pas `stock`) — asymétrie assumée vis-à-vis du module 2 : la table de rôles validée liste explicitement `erp_delivery_notes` sous `salesperson`, contrairement à `erp_goods_receipts` qui excluait `buyer`. `confirm_erp_delivery()` (RPC) crée les mouvements `sale` (coût repris de `erp_products.cost`, snapshot COGS approximatif V1), incrémente `delivered_quantity`, recalcule le statut de la commande. Livraison partielle supportée nativement. |
+| `erp_invoices` + `erp_invoice_lines` | Facture client. Statuts `draft`/`sent`/`partially_paid`/`paid`/`overdue`/`cancelled`. Écriture élargie à `accountant` (suivi paiement), pas seulement `salesperson` — comme `erp_supplier_invoices` côté achats. |
+| `erp_credit_notes` | Avoir client — montant unique, pas de lignes détaillées (simplification V1 assumée). |
+| `erp_customer_payments` | Encaissement. `method` typé `erp_payment_method` — **nouvel enum dédié**, pas de réutilisation de `public.payment_method` (ZegCaisse) : même principe de découplage que `erp_stock_movement_type` vis-à-vis de `stock_movement_type`. |
+| `erp_customer_returns` + `erp_customer_return_lines` | Retour client. **Portée `stock`** (pas `salesperson`) — symétrique de `erp_goods_receipts` : `erp_customer_returns` n'apparaît pas dans le périmètre `salesperson` validé, traité comme une réception physique. `confirm_erp_customer_return()` (RPC) crée les mouvements `customer_return` (entrée). |
+| `erp_crm_activities` | Polymorphe (`entity_type` `customer`/`prospect` + `entity_id`, pas de FK stricte des deux côtés — même pattern prévu pour `erp_document_attachments`, module 8). Visibilité équipe complète (pas privée par auteur, à la différence de `erp_custom_reports`, module 9). |
 
-### 5. Finance — schéma prévu, non migré
+`erp_stock_movement_type` étendu (migration 051, valeurs ajoutées seules avant tout usage) : `sale` (−, garde anti-survente incluse) et `customer_return` (+). `apply_erp_stock_movement()` mis à jour en conséquence (3ᵉ `CREATE OR REPLACE`, signature toujours inchangée). Rôle `salesperson` ajouté à `app_role` par la même migration, **strictement cloisonné de `buyer`** (validé — aucune policy de ce fichier ne référence les deux rôles ensemble).
 
-`erp_cash_accounts` (caisse/banque — un "type" de compte, pas une distinction table par table), `erp_cash_transactions`, `erp_fund_transfers` (entre comptes). Alimenté par les encaissements/décaissements des modules Achats/Ventes/RH une fois ceux-ci en place.
+Volontairement **hors scope V1** : conversion automatique devis → commande, calcul de marge croisé achats/ventes (passera par un rapport dédié module 9, pas par un élargissement RLS), relances de facture automatisées.
 
-### 6. Comptabilité — schéma prévu, non migré
+### 4. POS ERP — livré (migration 053)
 
-`erp_chart_of_accounts` (plan comptable SYSCOHADA, cohérent avec le format déjà utilisé pour les autres exports PDF ZegOS), `erp_accounting_journals`, `erp_journal_entries` + `erp_journal_entry_lines` (grand livre), `erp_bank_reconciliations`, `erp_accounting_periods` (clôtures — une période clôturée doit bloquer toute nouvelle écriture dessus, contrainte à poser au niveau RLS/trigger le moment venu). Dépend de Finance + Ventes + Achats (les écritures comptables reflètent les flux de ces modules).
+| Table | Rôle |
+|---|---|
+| `erp_cash_sessions` | Session de caisse (`warehouse_id` : la vente comptoir décrémente ce dépôt). Fermeture (`closing_amount`) par simple UPDATE — aucun mouvement de stock associé à la fermeture, pas de RPC nécessaire. |
+| `erp_pos_sales` + `erp_pos_sale_lines` | Vente comptoir, `customer_id` optionnel (module 3). `complete_erp_pos_sale()` (RPC) crée les mouvements **`sale`** (réutilisé tel quel du module 3 — une vente comptoir décrémente le stock exactement comme une livraison, seul le canal diffère), recalcule `total_amount`/`tax_amount` côté serveur (jamais fait confiance à une valeur envoyée par le client), bloque si la session de caisse n'est plus ouverte. |
+| `erp_pos_returns` + `erp_pos_return_lines` | Retour comptoir. `confirm_erp_pos_return()` (RPC) crée les mouvements **`customer_return`** (réutilisé du module 3), incrémente `returned_quantity` sur la ligne de vente d'origine (bloque le sur-retour). |
 
-### 7. RH — schéma prévu, non migré
+**Aucun rôle ni type de mouvement nouveau** : `cashier` (existant, réutilisé) et `sale`/`customer_return` (ajoutés migration 051, module 3) suffisent — seule migration de ce module, pas de préliminaire d'enum. Isolé du POS ZegCaisse (`sales`/`payments`) même si conceptuellement proche.
 
-`erp_departments`, `erp_positions`, `erp_employees`, `erp_attendance`, `erp_leave_requests`, `erp_employee_documents`. Indépendant des autres modules métier (peut être construit dès que le socle rôles ERP existe), mais dépend du module 8 pour le stockage réel des documents joints.
+### 5. Finance — livré (migration 054)
 
-### 8. Gestion documentaire — schéma prévu, non migré
+| Table | Rôle |
+|---|---|
+| `erp_cash_accounts` | Compte caisse/banque (`type` : `cash`/`bank`, pas une table par type). Écriture normale owner/manager/accountant. |
+| `erp_cash_account_balances` | Solde — jamais d'écriture directe (comme `erp_stock_levels`, module 1), maintenu exclusivement par `apply_erp_cash_transaction()` (trigger). Table séparée de `erp_cash_accounts` précisément pour ça : impossible de "glisser" une modification de solde dans une policy UPDATE normale du compte. |
+| `erp_fund_transfers` | Virement entre deux comptes internes. `confirm_erp_fund_transfer()` (RPC) crée la paire `transfer_out`/`transfer_in`. |
+| `erp_cash_transactions` | Ledger immuable (aucune update/delete). `source_type`/`source_id` : lien libre non contraint (polymorphe) vers l'origine d'une transaction manuelle — les modules Achats/Ventes ne génèrent **pas** encore de transaction automatiquement en V1 (l'intégration Achats/Ventes/RH → Finance reste manuelle pour l'instant, à réévaluer plus tard). Pas de garde anti-négatif sur le solde (à la différence du stock) : un compte peut légitimement passer en négatif (découvert bancaire, caisse en attente de dépôt). |
 
-`erp_contracts`, `erp_documents` (+ bucket Storage dédié `erp-documents`, RLS scopée par `organization_id` via `storage.foldername(name)` — même pattern que `resto-menu-photos`/`product-images` — jamais le fichier dupliqué en base, seule l'URL/le chemin y vit), `erp_document_attachments` (polymorphe : `entity_type` + `entity_id`, lie un document à un contrat/employé/client/fournisseur...). Dépend de tous les modules qui ont des entités "documentables".
+**Aucun rôle nouveau** (validé : owner/manager/accountant uniquement, pas de rôle trésorier séparé). `erp_cash_transaction_type` est un type entièrement nouveau créé dans la même migration que son premier usage — pas une extension d'un enum existant, donc aucune contrainte de transaction séparée (contrairement aux rôles/types ajoutés aux modules 2 et 3).
 
-### 9. Rapports & BI — schéma prévu, non migré
+### 6. Comptabilité — livré (migration 055)
 
-Pas de nouvelles tables de données — vues SQL agrégées (`erp_v_*`, une par domaine : ventes, achats, stock, finance...) qui héritent de la RLS des tables sous-jacentes (une vue Postgres standard n'a pas sa propre RLS ; elle applique celle des tables qu'elle interroge — donc aucune fuite de périmètre par rôle même sans policy dédiée sur la vue elle-même). `erp_custom_reports` (configuration de rapport sauvegardée) est la seule vraie table, scopée par `organization_id` **et** `created_by = auth.uid()` — privée à son auteur, jamais partagée automatiquement entre collègues. Dépend de tout le reste (agrège les données de tous les modules livrés).
+| Table | Rôle |
+|---|---|
+| `erp_chart_of_accounts` | Plan comptable SYSCOHADA — `code` porte la numérotation SYSCOHADA elle-même, `type` (`asset`/`liability`/`equity`/`revenue`/`expense`) est une classification simplifiée pour les rapports, pas une redite du code. |
+| `erp_accounting_journals` | Journaux (codes libres — VE/AC/BQ/CA/OD usuels SYSCOHADA, pas une liste figée). |
+| `erp_accounting_periods` | Clôtures. **Contrainte de clôture posée au niveau RLS** (pas trigger) : les policies INSERT et UPDATE (tant que `draft`) de `erp_journal_entries` vérifient par sous-requête qu'aucune période `closed` ne couvre `entry_date` — une période clôturée bloque toute nouvelle écriture ou modification dessus, comme demandé. L'absence de période pour une date ne bloque rien. |
+| `erp_journal_entries` + `erp_journal_entry_lines` | Grand livre en partie double. Une ligne est soit un débit soit un crédit (`check (debit = 0 or credit = 0)`). `post_erp_journal_entry()` (RPC) **vérifie l'équilibre débit = crédit** (rejette toute écriture déséquilibrée) et la non-clôture de la période avant de passer l'écriture `posted` — immuable ensuite (aucune policy update ne s'applique hors `draft`). |
+| `erp_bank_reconciliations` + `erp_bank_reconciliation_lines` | Rapprochement bancaire, pointe des `erp_cash_transactions` (module 5) contre un relevé. `complete_erp_bank_reconciliation()` (RPC) recalcule `reconciled_balance` à partir des lignes pointées (somme signée) ; l'écart avec `statement_balance` n'est pas bloquant, laissé à l'affichage frontend. |
 
-### 10. Administration ERP — schéma prévu, non migré
+**Aucun rôle nouveau** (owner/manager/accountant, même périmètre que Finance). Saisie manuelle en V1 : aucune écriture n'est générée automatiquement depuis Achats/Ventes/Finance (même limite assumée que le module 5, pour les mêmes raisons).
 
-Pas de nouvelle table dédiée aux rôles/permissions — `organization_members.role` (l'enum `app_role` partagé) reste la seule source de vérité, exactement comme pour ZegCaisse/ZegHotel/ZegResto. "Administration ERP" au sens de ce module correspond à un écran `/app/erp/parametres` (paramètres du module, à définir) plutôt qu'à un schéma de données propre.
+### 7. RH — livré (migrations 056+057)
 
-Tableau de bord et Notifications : aucune table dédiée par conception (dashboard = agrégation des tables ci-dessus, notifications = table `notifications` du socle partagée), comme précisé dans le prompt d'origine.
+| Table | Rôle |
+|---|---|
+| `erp_departments`, `erp_positions` | Référentiel RH de base. |
+| `erp_employees` | Fiche employé. `user_id` optionnel (nullable) : un employé n'a pas forcément de compte ZegOS (ex. personnel de terrain sans accès app). |
+| `erp_attendance` | Pointage, `unique(employee_id, date)`. |
+| `erp_leave_requests` | Demande de congé. **Pas de split créateur/approbateur** (contrairement à `erp_purchase_requests`, module 2) : `hr_manager` porte une autorité managériale complète et validée sur son périmètre, une seule policy `write` suffit. |
+| `erp_employee_documents` | `file_url` en texte simple en V1 (comme `erp_products.image_url`, module 1) — **pas encore raccroché** au bucket Storage `erp-documents` prévu module 8 (non livré) : pas de dépendance dure sur un module qui n'existe pas encore. |
+
+**Périmètre strictement resserré owner/manager/hr_manager** sur toutes les tables (select et write) — ni `accountant`, ni aucun autre rôle métier : données potentiellement sensibles (identité, congés, documents personnels), le principe est de ne pas élargir "pour être pratique". Cohérent avec le validé "`hr_manager`... rien hors de son périmètre — aucun accès Finance/Comptabilité/Ventes/Achats", appliqué ici symétriquement (les autres rôles n'ont pas non plus accès aux données RH).
+
+### 8. Gestion documentaire — livré (migration 058)
+
+| Table | Rôle |
+|---|---|
+| `erp_contracts` | owner/manager/accountant — un contrat n'est pas rattaché de façon polymorphe (il **est** un des types d'entité pour `erp_document_attachments`, pas une cible parmi d'autres). Liens optionnels vers `erp_suppliers`/`erp_customers`/`erp_employees` selon `contract_type`. |
+| `erp_documents` | Métadonnées seulement (`file_path` = chemin dans le bucket, jamais le fichier dupliqué en base — même principe que `product-images`/`resto-menu-photos`). |
+| `erp_document_attachments` | Polymorphe (`entity_type` `supplier`/`customer`/`employee`/`contract` + `entity_id`, pas de FK stricte). **C'est la table qui porte la RLS entité-scopée** promise dans la version précédente de ce document : un document attaché à un fournisseur suit les droits `buyer`, à un client `salesperson`, à un employé `hr_manager`, à un contrat `accountant`. `owner`/`manager` voient et gèrent toujours tout, quel que soit l'attachement. Un document **sans** attachement n'est visible que par `owner`/`manager`. |
+
+**Bucket Storage `erp-documents` — premier bucket PRIVÉ de ce dépôt** (`public: false`), à la différence de tous les buckets existants (`product-images`, `resto-menu-photos`, `avatars`...) qui sont publics en lecture : justifié par la sensibilité du contenu (pièces d'identité employé, contrats). Le niveau storage reste volontairement grossier (accès ouvert à toute l'organisation via `has_organization_access()`) ; la nuance fine par entité vit dans les tables ci-dessus, exactement comme `product-images` laisse la nuance métier à la table `products` et se contente d'un filtrage large côté storage. Convention de chemin : `{organization_id}/{document_id}/{nom_fichier}`.
+
+Dépend de tous les modules qui ont des entités "documentables" (2, 3, 7 — livrés).
+
+### 9. Rapports & BI — livré (migration 059)
+
+| Vue / Table | Contenu |
+|---|---|
+| `erp_v_stock_valuation` | Valorisation du stock par produit/dépôt (`quantity * cost`). |
+| `erp_v_purchase_orders_summary` | Commandes fournisseur agrégées (montant commandé vs reçu, par ligne sommée). |
+| `erp_v_sales_summary` | **Unifie** commandes client (module 3) et ventes comptoir (module 4) via `union all`, colonne `channel` (`sales_order`/`pos`) pour distinguer l'origine. |
+| `erp_v_cash_position` | Position de trésorerie par compte (module 5). |
+| `erp_custom_reports` | Seule vraie table du module — configuration de rapport sauvegardée, scopée par `organization_id` **et** `created_by = auth.uid()` — privée à son auteur, jamais partagée automatiquement entre collègues. Pas de restriction par rôle métier au-delà de l'appartenance à l'organisation. |
+
+**Aucune RLS dédiée sur les 4 vues** : ce sont des vues Postgres standard (ni `security definer` ni `security_barrier`), elles s'exécutent avec les droits de l'appelant et héritent donc automatiquement de la RLS des tables sous-jacentes — un `salesperson` qui interroge `erp_v_sales_summary` ne voit que ce que la RLS de `erp_sales_orders`/`erp_pos_sales` lui permettrait déjà de voir directement, sans fuite de périmètre et sans policy à écrire sur la vue elle-même. Dépend des modules 1, 2, 3, 4, 5 (livrés) pour ses données sources.
+
+### 10. Administration ERP — livré (migration 060)
+
+Pas de nouvelle table dédiée aux rôles/permissions — `organization_members.role` (l'enum `app_role` partagé) reste la seule source de vérité, exactement comme pour ZegCaisse/ZegHotel/ZegResto.
+
+Seule addition, volontairement minimale (pas de champ ajouté "au cas où") : `erp_settings`, une ligne par organisation, portant uniquement des réglages déjà nécessaires aux modules précédemment livrés :
+
+| Champ | Sert à |
+|---|---|
+| `default_warehouse_id` | Pré-sélection du dépôt dans les écrans POS ERP (module 4) / réceptions (module 2). |
+| `invoice_prefix` / `quote_prefix` | Numérotation des factures et devis (module 3). |
+| `fiscal_year_start_month` | Référence pour la génération des périodes comptables (module 6). |
+
+Écriture réservée owner/manager (même principe que `organization_members`/`shop_settings`) ; lecture élargie à `accountant` (a besoin de la numérotation et du mois de clôture fiscal). Pas de ligne créée automatiquement à la provision de l'organisation — le frontend fait un upsert au premier enregistrement depuis `/app/erp/parametres`, comme les écrans de paramètres existants.
+
+Tableau de bord et Notifications : aucune table dédiée par conception (dashboard = agrégation des tables des modules 1 à 9, notifications = table `notifications` du socle partagée), comme précisé dans le prompt d'origine.
+
+## Récapitulatif — les 10 modules
+
+Les 10 sous-modules ont désormais un schéma migré (migrations 047 à 060) : Stock/Produits, Achats & Fournisseurs, Ventes & CRM, POS ERP, Finance, Comptabilité, RH, Gestion documentaire, Rapports & BI, Administration. Les 3 rôles validés (`buyer`, `salesperson`, `hr_manager`) sont tous ajoutés à l'enum. Isolation totale vis-à-vis de ZegCaisse maintenue sur l'ensemble (aucune table `erp_*` ne référence une table métier ZegCaisse). `db/schema.sql` reflète l'état final de chaque migration dans le même commit qu'elle.
+
+**Hors scope de ce chantier, explicitement** : aucune route frontend `/app/erp/*` n'a été construite (ni navigation, ni pages, ni data layer React/TanStack Query) — uniquement le socle base de données. C'est le travail à prévoir pour la prochaine session ZegERP, module par module, dans le même ordre de dépendance que ce document.
 
 ## Conventions transverses (héritées de ZegHotel/ZegResto, appliquées sans dérogation)
 

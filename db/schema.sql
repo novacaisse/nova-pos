@@ -3810,10 +3810,10 @@ grant execute on function public.apply_resto_bill_loyalty(uuid, uuid, text, text
 -- =============== ZegERP (migrations 047+) ===============
 -- Voir ARCHITECTURE_ERP.md pour la documentation complète (isolation
 -- totale vis-à-vis de ZegCaisse, schéma des 10 sous-modules, rôles).
--- Module 1/10 livré ici : Stock / Produits (migration 048). Colonnes en
--- anglais (comme ZegCaisse/ZegHotel — ZegResto est l'exception, pas la
--- référence). Rôles utilisés : owner/manager/accountant/stock (tous
--- partagés par nom, aucun rôle ERP-spécifique nécessaire pour ce module).
+-- Module 1/10 livré ici : Stock / Produits (migration 048). Module 2/10
+-- livré plus bas : Achats & Fournisseurs (migrations 049+050, introduit le
+-- rôle buyer). Colonnes en anglais (comme ZegCaisse/ZegHotel — ZegResto est
+-- l'exception, pas la référence).
 
 create table if not exists public.erp_product_categories (
   id uuid primary key default gen_random_uuid(),
@@ -4093,6 +4093,9 @@ create policy erp_stock_movements_insert on public.erp_stock_movements for inser
     and public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[])
   );
 
+-- Mise à jour par la migration 052 (ZegERP module 3, Ventes & CRM) : ajoute
+-- 'sale' (sortie) et 'customer_return' (entrée) — version finale ci-dessous
+-- (migration 050 avait ajouté purchase_receipt/supplier_return avant).
 create or replace function public.apply_erp_stock_movement()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
@@ -4102,9 +4105,13 @@ begin
   delta := case new.type
     when 'in' then new.quantity
     when 'transfer_in' then new.quantity
+    when 'purchase_receipt' then new.quantity
+    when 'customer_return' then new.quantity
     when 'adjustment' then new.quantity
     when 'out' then -new.quantity
     when 'transfer_out' then -new.quantity
+    when 'supplier_return' then -new.quantity
+    when 'sale' then -new.quantity
     else 0
   end;
 
@@ -4114,7 +4121,7 @@ begin
   do update set quantity = public.erp_stock_levels.quantity + delta, updated_at = now()
   returning quantity into v_new_qty;
 
-  if new.type in ('out', 'transfer_out') and v_new_qty < 0 then
+  if new.type in ('out', 'transfer_out', 'supplier_return', 'sale') and v_new_qty < 0 then
     raise exception 'Stock insuffisant pour ce produit dans ce dépôt (quantité disponible dépassée).';
   end if;
 
@@ -4239,6 +4246,2024 @@ end;
 $$;
 revoke all on function public.validate_erp_inventory(uuid, uuid) from public;
 grant execute on function public.validate_erp_inventory(uuid, uuid) to authenticated;
+
+-- =============== ZegERP — Module 2/10 : Achats & Fournisseurs (migrations
+-- 049+050). Rôle buyer (papier commercial : fournisseurs/demandes/
+-- commandes/factures/retours) vs stock existant, réutilisé (réception
+-- physique uniquement) — cloisonnement volontaire, voir migration 050.
+-- unit_cost (coût d'achat) masqué au rôle stock : pas de policy select sur
+-- erp_purchase_order_lines pour ce rôle, accès uniquement via la fonction
+-- erp_purchase_order_lines_for_receiving() (masquage de colonne, pattern
+-- hotel_guest_contact() imposé par CLAUDE.md). ===============
+alter type public.app_role add value if not exists 'buyer';
+alter type public.erp_stock_movement_type add value if not exists 'purchase_receipt';
+alter type public.erp_stock_movement_type add value if not exists 'supplier_return';
+
+create table if not exists public.erp_suppliers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  contact_name text,
+  phone text,
+  email text,
+  address text,
+  tax_id text,
+  notes text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_suppliers_org on public.erp_suppliers(organization_id);
+alter table public.erp_suppliers enable row level security;
+
+create policy erp_suppliers_select on public.erp_suppliers for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','stock']::public.app_role[]));
+create policy erp_suppliers_write on public.erp_suppliers for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+
+-- Demande interne, étape optionnelle avant commande.
+create table if not exists public.erp_purchase_requests (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'submitted', 'approved', 'rejected')),
+  requested_by uuid references auth.users(id) on delete set null,
+  notes text,
+  created_at timestamptz not null default now(),
+  submitted_at timestamptz,
+  reviewed_at timestamptz,
+  reviewed_by uuid references auth.users(id) on delete set null
+);
+create index if not exists idx_erp_purchase_requests_org on public.erp_purchase_requests(organization_id);
+alter table public.erp_purchase_requests enable row level security;
+
+create policy erp_purchase_requests_select on public.erp_purchase_requests for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','stock']::public.app_role[]));
+create policy erp_purchase_requests_insert on public.erp_purchase_requests for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','buyer','stock']::public.app_role[]));
+create policy erp_purchase_requests_update_draft on public.erp_purchase_requests for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer','stock']::public.app_role[]))
+  with check (status in ('draft', 'submitted') and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer','stock']::public.app_role[]));
+-- Revue (approve/reject) réservée à owner/manager.
+create policy erp_purchase_requests_review on public.erp_purchase_requests for update to authenticated
+  using (status = 'submitted' and public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (status in ('approved', 'rejected') and public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+create policy erp_purchase_requests_delete on public.erp_purchase_requests for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer','stock']::public.app_role[]));
+
+create table if not exists public.erp_purchase_request_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  request_id uuid not null references public.erp_purchase_requests(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  notes text
+);
+create index if not exists idx_erp_purchase_request_lines_org on public.erp_purchase_request_lines(organization_id);
+create index if not exists idx_erp_purchase_request_lines_request on public.erp_purchase_request_lines(request_id);
+alter table public.erp_purchase_request_lines enable row level security;
+
+create policy erp_purchase_request_lines_select on public.erp_purchase_request_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','stock']::public.app_role[]));
+create policy erp_purchase_request_lines_write on public.erp_purchase_request_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','buyer','stock']::public.app_role[])
+    and exists (select 1 from public.erp_purchase_requests r where r.id = request_id and r.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','buyer','stock']::public.app_role[])
+    and exists (select 1 from public.erp_purchase_requests r where r.id = request_id and r.status = 'draft')
+  );
+
+create table if not exists public.erp_purchase_orders (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  supplier_id uuid not null references public.erp_suppliers(id) on delete restrict,
+  request_id uuid references public.erp_purchase_requests(id) on delete set null,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed', 'partially_received', 'received', 'cancelled')),
+  expected_date date,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create index if not exists idx_erp_purchase_orders_org on public.erp_purchase_orders(organization_id);
+create index if not exists idx_erp_purchase_orders_supplier on public.erp_purchase_orders(supplier_id);
+alter table public.erp_purchase_orders enable row level security;
+
+create policy erp_purchase_orders_select on public.erp_purchase_orders for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','stock']::public.app_role[]));
+create policy erp_purchase_orders_insert on public.erp_purchase_orders for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+create policy erp_purchase_orders_update_draft on public.erp_purchase_orders for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]))
+  with check (status in ('draft', 'confirmed') and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+-- Annulation possible tant que la réception n'est pas terminée. Les
+-- transitions vers partially_received/received passent exclusivement par
+-- confirm_erp_goods_receipt() plus bas.
+create policy erp_purchase_orders_cancel on public.erp_purchase_orders for update to authenticated
+  using (status in ('confirmed', 'partially_received') and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]))
+  with check (status = 'cancelled' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+create policy erp_purchase_orders_delete on public.erp_purchase_orders for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+
+-- received_quantity jamais modifiée directement (aucune policy update ne
+-- s'applique une fois la commande hors 'draft') : incrémentée exclusivement
+-- par confirm_erp_goods_receipt() (security definer, bypass RLS).
+create table if not exists public.erp_purchase_order_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  purchase_order_id uuid not null references public.erp_purchase_orders(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  unit_cost numeric(14,2) not null default 0,
+  received_quantity numeric(14,3) not null default 0,
+  check (received_quantity >= 0 and received_quantity <= quantity)
+);
+create index if not exists idx_erp_purchase_order_lines_org on public.erp_purchase_order_lines(organization_id);
+create index if not exists idx_erp_purchase_order_lines_order on public.erp_purchase_order_lines(purchase_order_id);
+alter table public.erp_purchase_order_lines enable row level security;
+
+-- `stock` volontairement absent (unit_cost sensible) : voir
+-- erp_purchase_order_lines_for_receiving() ci-dessous.
+create policy erp_purchase_order_lines_select on public.erp_purchase_order_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer']::public.app_role[]));
+create policy erp_purchase_order_lines_write on public.erp_purchase_order_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[])
+    and exists (select 1 from public.erp_purchase_orders o where o.id = purchase_order_id and o.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[])
+    and exists (select 1 from public.erp_purchase_orders o where o.id = purchase_order_id and o.status = 'draft')
+  );
+
+-- Masquage de colonne pour `stock` : produit/quantité commandée/reçue
+-- uniquement, jamais unit_cost.
+create or replace function public.erp_purchase_order_lines_for_receiving(
+  p_organization_id uuid,
+  p_purchase_order_id uuid
+) returns table (id uuid, product_id uuid, quantity numeric, received_quantity numeric)
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','accountant','buyer','stock']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  return query
+    select l.id, l.product_id, l.quantity, l.received_quantity
+    from public.erp_purchase_order_lines l
+    join public.erp_purchase_orders o on o.id = l.purchase_order_id
+    where l.purchase_order_id = p_purchase_order_id and o.organization_id = p_organization_id;
+end;
+$$;
+revoke all on function public.erp_purchase_order_lines_for_receiving(uuid, uuid) from public;
+grant execute on function public.erp_purchase_order_lines_for_receiving(uuid, uuid) to authenticated;
+
+-- Réception physique — rôle stock, jamais buyer directement.
+create table if not exists public.erp_goods_receipts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  purchase_order_id uuid not null references public.erp_purchase_orders(id) on delete restrict,
+  warehouse_id uuid not null references public.erp_warehouses(id) on delete restrict,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed')),
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create index if not exists idx_erp_goods_receipts_org on public.erp_goods_receipts(organization_id);
+create index if not exists idx_erp_goods_receipts_order on public.erp_goods_receipts(purchase_order_id);
+alter table public.erp_goods_receipts enable row level security;
+
+create policy erp_goods_receipts_select on public.erp_goods_receipts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','stock']::public.app_role[]));
+create policy erp_goods_receipts_insert on public.erp_goods_receipts for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+create policy erp_goods_receipts_update on public.erp_goods_receipts for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]))
+  with check (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+create policy erp_goods_receipts_delete on public.erp_goods_receipts for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+
+create table if not exists public.erp_goods_receipt_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  receipt_id uuid not null references public.erp_goods_receipts(id) on delete cascade,
+  purchase_order_line_id uuid not null references public.erp_purchase_order_lines(id) on delete restrict,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0)
+);
+create index if not exists idx_erp_goods_receipt_lines_org on public.erp_goods_receipt_lines(organization_id);
+create index if not exists idx_erp_goods_receipt_lines_receipt on public.erp_goods_receipt_lines(receipt_id);
+alter table public.erp_goods_receipt_lines enable row level security;
+
+create policy erp_goods_receipt_lines_select on public.erp_goods_receipt_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','stock']::public.app_role[]));
+create policy erp_goods_receipt_lines_write on public.erp_goods_receipt_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[])
+    and exists (select 1 from public.erp_goods_receipts r where r.id = receipt_id and r.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[])
+    and exists (select 1 from public.erp_goods_receipts r where r.id = receipt_id and r.status = 'draft')
+  );
+
+-- confirm_erp_goods_receipt() : crée les mouvements 'purchase_receipt'
+-- (coût repris de la ligne de commande, jamais saisi par stock), incrémente
+-- received_quantity (bloque le sur-réceptionnement), recalcule le statut de
+-- la commande, passe la réception "confirmed". Réception partielle
+-- supportée nativement (plusieurs erp_goods_receipts par commande).
+create or replace function public.confirm_erp_goods_receipt(
+  p_organization_id uuid,
+  p_receipt_id uuid
+) returns public.erp_goods_receipts
+language plpgsql security definer set search_path = public as $$
+declare
+  v_receipt public.erp_goods_receipts;
+  v_line record;
+  v_po_line public.erp_purchase_order_lines;
+  v_new_received numeric(14,3);
+  v_total_lines integer;
+  v_fully_received_lines integer;
+  v_any_received_lines integer;
+  v_po_status text;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','stock']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_receipt from public.erp_goods_receipts
+    where id = p_receipt_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Réception introuvable.'; end if;
+  if v_receipt.status <> 'draft' then raise exception 'Cette réception a déjà été confirmée.'; end if;
+
+  if not exists (select 1 from public.erp_goods_receipt_lines where receipt_id = p_receipt_id) then
+    raise exception 'Aucune ligne à réceptionner pour cette réception.';
+  end if;
+
+  for v_line in select * from public.erp_goods_receipt_lines where receipt_id = p_receipt_id loop
+    select * into v_po_line from public.erp_purchase_order_lines where id = v_line.purchase_order_line_id for update;
+
+    v_new_received := v_po_line.received_quantity + v_line.quantity;
+    if v_new_received > v_po_line.quantity then
+      raise exception 'Quantité reçue dépasse la quantité commandée pour ce produit.';
+    end if;
+
+    update public.erp_purchase_order_lines set received_quantity = v_new_received where id = v_po_line.id;
+
+    insert into public.erp_stock_movements (organization_id, product_id, warehouse_id, type, quantity, unit_cost, reference, created_by)
+    values (p_organization_id, v_line.product_id, v_receipt.warehouse_id, 'purchase_receipt', v_line.quantity, v_po_line.unit_cost, v_receipt.reference, auth.uid());
+  end loop;
+
+  select count(*), count(*) filter (where received_quantity >= quantity), count(*) filter (where received_quantity > 0)
+    into v_total_lines, v_fully_received_lines, v_any_received_lines
+    from public.erp_purchase_order_lines where purchase_order_id = v_receipt.purchase_order_id;
+
+  v_po_status := case
+    when v_fully_received_lines = v_total_lines then 'received'
+    when v_any_received_lines > 0 then 'partially_received'
+    else 'confirmed'
+  end;
+  update public.erp_purchase_orders set status = v_po_status where id = v_receipt.purchase_order_id;
+
+  update public.erp_goods_receipts set status = 'confirmed', confirmed_at = now()
+    where id = p_receipt_id returning * into v_receipt;
+
+  return v_receipt;
+end;
+$$;
+revoke all on function public.confirm_erp_goods_receipt(uuid, uuid) from public;
+grant execute on function public.confirm_erp_goods_receipt(uuid, uuid) to authenticated;
+
+-- Rapprochement facture fournisseur — pas de mouvement de stock associé.
+create table if not exists public.erp_supplier_invoices (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  supplier_id uuid not null references public.erp_suppliers(id) on delete restrict,
+  purchase_order_id uuid references public.erp_purchase_orders(id) on delete set null,
+  reference text,
+  amount numeric(14,2) not null check (amount >= 0),
+  due_date date,
+  status text not null default 'unpaid' check (status in ('unpaid', 'partially_paid', 'paid', 'disputed')),
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_supplier_invoices_org on public.erp_supplier_invoices(organization_id);
+create index if not exists idx_erp_supplier_invoices_supplier on public.erp_supplier_invoices(supplier_id);
+alter table public.erp_supplier_invoices enable row level security;
+
+create policy erp_supplier_invoices_select on public.erp_supplier_invoices for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer']::public.app_role[]));
+create policy erp_supplier_invoices_write on public.erp_supplier_invoices for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer']::public.app_role[]));
+
+-- Retour marchandise au fournisseur — porté par buyer en V1 (pas stock),
+-- choix simplificateur assumé (voir migration 050).
+create table if not exists public.erp_supplier_returns (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  supplier_id uuid not null references public.erp_suppliers(id) on delete restrict,
+  warehouse_id uuid not null references public.erp_warehouses(id) on delete restrict,
+  purchase_order_id uuid references public.erp_purchase_orders(id) on delete set null,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed')),
+  reason text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create index if not exists idx_erp_supplier_returns_org on public.erp_supplier_returns(organization_id);
+alter table public.erp_supplier_returns enable row level security;
+
+create policy erp_supplier_returns_select on public.erp_supplier_returns for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer']::public.app_role[]));
+create policy erp_supplier_returns_insert on public.erp_supplier_returns for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+create policy erp_supplier_returns_update on public.erp_supplier_returns for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]))
+  with check (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+create policy erp_supplier_returns_delete on public.erp_supplier_returns for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[]));
+
+create table if not exists public.erp_supplier_return_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  return_id uuid not null references public.erp_supplier_returns(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  unit_cost numeric(14,2)
+);
+create index if not exists idx_erp_supplier_return_lines_org on public.erp_supplier_return_lines(organization_id);
+create index if not exists idx_erp_supplier_return_lines_return on public.erp_supplier_return_lines(return_id);
+alter table public.erp_supplier_return_lines enable row level security;
+
+create policy erp_supplier_return_lines_select on public.erp_supplier_return_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer']::public.app_role[]));
+create policy erp_supplier_return_lines_write on public.erp_supplier_return_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[])
+    and exists (select 1 from public.erp_supplier_returns r where r.id = return_id and r.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','buyer']::public.app_role[])
+    and exists (select 1 from public.erp_supplier_returns r where r.id = return_id and r.status = 'draft')
+  );
+
+-- confirm_erp_supplier_return() : crée un mouvement 'supplier_return' par
+-- ligne (sortie de stock, bloquée si stock insuffisant) et passe le retour
+-- "confirmed".
+create or replace function public.confirm_erp_supplier_return(
+  p_organization_id uuid,
+  p_return_id uuid
+) returns public.erp_supplier_returns
+language plpgsql security definer set search_path = public as $$
+declare
+  v_return public.erp_supplier_returns;
+  v_line record;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','buyer']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_return from public.erp_supplier_returns
+    where id = p_return_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Retour fournisseur introuvable.'; end if;
+  if v_return.status <> 'draft' then raise exception 'Ce retour a déjà été confirmé.'; end if;
+
+  if not exists (select 1 from public.erp_supplier_return_lines where return_id = p_return_id) then
+    raise exception 'Aucune ligne à retourner pour ce retour fournisseur.';
+  end if;
+
+  for v_line in select * from public.erp_supplier_return_lines where return_id = p_return_id loop
+    insert into public.erp_stock_movements (organization_id, product_id, warehouse_id, type, quantity, unit_cost, reference, created_by)
+    values (p_organization_id, v_line.product_id, v_return.warehouse_id, 'supplier_return', v_line.quantity, v_line.unit_cost, v_return.reference, auth.uid());
+  end loop;
+
+  update public.erp_supplier_returns set status = 'confirmed', confirmed_at = now()
+    where id = p_return_id returning * into v_return;
+
+  return v_return;
+end;
+$$;
+revoke all on function public.confirm_erp_supplier_return(uuid, uuid) from public;
+grant execute on function public.confirm_erp_supplier_return(uuid, uuid) to authenticated;
+
+-- =============== ZegERP — Module 3/10 : Ventes & CRM (migrations 051+052).
+-- Rôle salesperson, strictement cloisonné de buyer (aucune policy commune).
+-- Asymétrie assumée vs module 2 : erp_delivery_notes est porté par
+-- salesperson (pas stock, contrairement à erp_goods_receipts) ; à
+-- l'inverse erp_customer_returns est porté par stock (pas salesperson,
+-- symétrique de erp_goods_receipts) — voir migration 052 pour le détail. ===============
+alter type public.app_role add value if not exists 'salesperson';
+alter type public.erp_stock_movement_type add value if not exists 'sale';
+alter type public.erp_stock_movement_type add value if not exists 'customer_return';
+
+create table if not exists public.erp_customers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  contact_name text,
+  phone text,
+  email text,
+  address text,
+  tax_id text,
+  notes text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_customers_org on public.erp_customers(organization_id);
+alter table public.erp_customers enable row level security;
+
+create policy erp_customers_select on public.erp_customers for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_customers_write on public.erp_customers for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+
+create table if not exists public.erp_sales_pipeline_stages (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  position integer not null default 0,
+  is_won boolean not null default false,
+  is_lost boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_sales_pipeline_stages_org on public.erp_sales_pipeline_stages(organization_id);
+alter table public.erp_sales_pipeline_stages enable row level security;
+
+create policy erp_sales_pipeline_stages_select on public.erp_sales_pipeline_stages for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_sales_pipeline_stages_write on public.erp_sales_pipeline_stages for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- converted_customer_id renseigné manuellement quand un prospect devient
+-- client (pas de RPC de conversion en V1, comme la non-conversion
+-- automatique demande→commande du module 2).
+create table if not exists public.erp_prospects (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  stage_id uuid references public.erp_sales_pipeline_stages(id) on delete set null,
+  converted_customer_id uuid references public.erp_customers(id) on delete set null,
+  name text not null,
+  contact_name text,
+  phone text,
+  email text,
+  estimated_value numeric(14,2),
+  notes text,
+  assigned_to uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_prospects_org on public.erp_prospects(organization_id);
+create index if not exists idx_erp_prospects_stage on public.erp_prospects(stage_id);
+alter table public.erp_prospects enable row level security;
+
+create policy erp_prospects_select on public.erp_prospects for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_prospects_write on public.erp_prospects for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+
+create table if not exists public.erp_quotes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id uuid not null references public.erp_customers(id) on delete restrict,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'sent', 'accepted', 'refused', 'expired', 'converted')),
+  valid_until date,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  sent_at timestamptz
+);
+create index if not exists idx_erp_quotes_org on public.erp_quotes(organization_id);
+create index if not exists idx_erp_quotes_customer on public.erp_quotes(customer_id);
+alter table public.erp_quotes enable row level security;
+
+create policy erp_quotes_select on public.erp_quotes for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_quotes_insert on public.erp_quotes for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_quotes_update_draft on public.erp_quotes for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (status in ('draft', 'sent') and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_quotes_resolve on public.erp_quotes for update to authenticated
+  using (status = 'sent' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (status in ('accepted', 'refused', 'expired') and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_quotes_delete on public.erp_quotes for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+
+create table if not exists public.erp_quote_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  quote_id uuid not null references public.erp_quotes(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  unit_price numeric(14,2) not null default 0,
+  tax_rate numeric(5,2) not null default 0
+);
+create index if not exists idx_erp_quote_lines_org on public.erp_quote_lines(organization_id);
+create index if not exists idx_erp_quote_lines_quote on public.erp_quote_lines(quote_id);
+alter table public.erp_quote_lines enable row level security;
+
+create policy erp_quote_lines_select on public.erp_quote_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_quote_lines_write on public.erp_quote_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[])
+    and exists (select 1 from public.erp_quotes q where q.id = quote_id and q.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[])
+    and exists (select 1 from public.erp_quotes q where q.id = quote_id and q.status = 'draft')
+  );
+
+create table if not exists public.erp_sales_orders (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id uuid not null references public.erp_customers(id) on delete restrict,
+  quote_id uuid references public.erp_quotes(id) on delete set null,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed', 'partially_delivered', 'delivered', 'cancelled')),
+  expected_date date,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create index if not exists idx_erp_sales_orders_org on public.erp_sales_orders(organization_id);
+create index if not exists idx_erp_sales_orders_customer on public.erp_sales_orders(customer_id);
+alter table public.erp_sales_orders enable row level security;
+
+create policy erp_sales_orders_select on public.erp_sales_orders for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_sales_orders_insert on public.erp_sales_orders for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_sales_orders_update_draft on public.erp_sales_orders for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (status in ('draft', 'confirmed') and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_sales_orders_cancel on public.erp_sales_orders for update to authenticated
+  using (status in ('confirmed', 'partially_delivered') and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (status = 'cancelled' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_sales_orders_delete on public.erp_sales_orders for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+
+-- delivered_quantity jamais modifiée directement : incrémentée
+-- exclusivement par confirm_erp_delivery() (security definer).
+create table if not exists public.erp_sales_order_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  sales_order_id uuid not null references public.erp_sales_orders(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  unit_price numeric(14,2) not null default 0,
+  tax_rate numeric(5,2) not null default 0,
+  delivered_quantity numeric(14,3) not null default 0,
+  check (delivered_quantity >= 0 and delivered_quantity <= quantity)
+);
+create index if not exists idx_erp_sales_order_lines_org on public.erp_sales_order_lines(organization_id);
+create index if not exists idx_erp_sales_order_lines_order on public.erp_sales_order_lines(sales_order_id);
+alter table public.erp_sales_order_lines enable row level security;
+
+create policy erp_sales_order_lines_select on public.erp_sales_order_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_sales_order_lines_write on public.erp_sales_order_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[])
+    and exists (select 1 from public.erp_sales_orders o where o.id = sales_order_id and o.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[])
+    and exists (select 1 from public.erp_sales_orders o where o.id = sales_order_id and o.status = 'draft')
+  );
+
+-- Portée salesperson (pas stock — asymétrie assumée, voir en-tête de section).
+create table if not exists public.erp_delivery_notes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  sales_order_id uuid not null references public.erp_sales_orders(id) on delete restrict,
+  warehouse_id uuid not null references public.erp_warehouses(id) on delete restrict,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed')),
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create index if not exists idx_erp_delivery_notes_org on public.erp_delivery_notes(organization_id);
+create index if not exists idx_erp_delivery_notes_order on public.erp_delivery_notes(sales_order_id);
+alter table public.erp_delivery_notes enable row level security;
+
+create policy erp_delivery_notes_select on public.erp_delivery_notes for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_delivery_notes_insert on public.erp_delivery_notes for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_delivery_notes_update on public.erp_delivery_notes for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+create policy erp_delivery_notes_delete on public.erp_delivery_notes for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+
+create table if not exists public.erp_delivery_note_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  delivery_note_id uuid not null references public.erp_delivery_notes(id) on delete cascade,
+  sales_order_line_id uuid not null references public.erp_sales_order_lines(id) on delete restrict,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0)
+);
+create index if not exists idx_erp_delivery_note_lines_org on public.erp_delivery_note_lines(organization_id);
+create index if not exists idx_erp_delivery_note_lines_note on public.erp_delivery_note_lines(delivery_note_id);
+alter table public.erp_delivery_note_lines enable row level security;
+
+create policy erp_delivery_note_lines_select on public.erp_delivery_note_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_delivery_note_lines_write on public.erp_delivery_note_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[])
+    and exists (select 1 from public.erp_delivery_notes d where d.id = delivery_note_id and d.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[])
+    and exists (select 1 from public.erp_delivery_notes d where d.id = delivery_note_id and d.status = 'draft')
+  );
+
+-- confirm_erp_delivery() : crée les mouvements 'sale' (coût repris de
+-- erp_products.cost — snapshot COGS approximatif V1), incrémente
+-- delivered_quantity, recalcule le statut de la commande, passe la
+-- livraison "confirmed". Livraison partielle supportée nativement.
+create or replace function public.confirm_erp_delivery(
+  p_organization_id uuid,
+  p_delivery_note_id uuid
+) returns public.erp_delivery_notes
+language plpgsql security definer set search_path = public as $$
+declare
+  v_delivery public.erp_delivery_notes;
+  v_line record;
+  v_so_line public.erp_sales_order_lines;
+  v_product_cost numeric(14,2);
+  v_new_delivered numeric(14,3);
+  v_total_lines integer;
+  v_fully_delivered_lines integer;
+  v_any_delivered_lines integer;
+  v_so_status text;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','salesperson']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_delivery from public.erp_delivery_notes
+    where id = p_delivery_note_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Livraison introuvable.'; end if;
+  if v_delivery.status <> 'draft' then raise exception 'Cette livraison a déjà été confirmée.'; end if;
+
+  if not exists (select 1 from public.erp_delivery_note_lines where delivery_note_id = p_delivery_note_id) then
+    raise exception 'Aucune ligne à livrer pour cette livraison.';
+  end if;
+
+  for v_line in select * from public.erp_delivery_note_lines where delivery_note_id = p_delivery_note_id loop
+    select * into v_so_line from public.erp_sales_order_lines where id = v_line.sales_order_line_id for update;
+
+    v_new_delivered := v_so_line.delivered_quantity + v_line.quantity;
+    if v_new_delivered > v_so_line.quantity then
+      raise exception 'Quantité livrée dépasse la quantité commandée pour ce produit.';
+    end if;
+
+    update public.erp_sales_order_lines set delivered_quantity = v_new_delivered where id = v_so_line.id;
+
+    select cost into v_product_cost from public.erp_products where id = v_line.product_id;
+    insert into public.erp_stock_movements (organization_id, product_id, warehouse_id, type, quantity, unit_cost, reference, created_by)
+    values (p_organization_id, v_line.product_id, v_delivery.warehouse_id, 'sale', v_line.quantity, v_product_cost, v_delivery.reference, auth.uid());
+  end loop;
+
+  select count(*), count(*) filter (where delivered_quantity >= quantity), count(*) filter (where delivered_quantity > 0)
+    into v_total_lines, v_fully_delivered_lines, v_any_delivered_lines
+    from public.erp_sales_order_lines where sales_order_id = v_delivery.sales_order_id;
+
+  v_so_status := case
+    when v_fully_delivered_lines = v_total_lines then 'delivered'
+    when v_any_delivered_lines > 0 then 'partially_delivered'
+    else 'confirmed'
+  end;
+  update public.erp_sales_orders set status = v_so_status where id = v_delivery.sales_order_id;
+
+  update public.erp_delivery_notes set status = 'confirmed', confirmed_at = now()
+    where id = p_delivery_note_id returning * into v_delivery;
+
+  return v_delivery;
+end;
+$$;
+revoke all on function public.confirm_erp_delivery(uuid, uuid) from public;
+grant execute on function public.confirm_erp_delivery(uuid, uuid) to authenticated;
+
+create table if not exists public.erp_invoices (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id uuid not null references public.erp_customers(id) on delete restrict,
+  sales_order_id uuid references public.erp_sales_orders(id) on delete set null,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'sent', 'partially_paid', 'paid', 'overdue', 'cancelled')),
+  issue_date date not null default current_date,
+  due_date date,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_invoices_org on public.erp_invoices(organization_id);
+create index if not exists idx_erp_invoices_customer on public.erp_invoices(customer_id);
+alter table public.erp_invoices enable row level security;
+
+create policy erp_invoices_select on public.erp_invoices for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_invoices_write on public.erp_invoices for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+
+create table if not exists public.erp_invoice_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  invoice_id uuid not null references public.erp_invoices(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  unit_price numeric(14,2) not null default 0,
+  tax_rate numeric(5,2) not null default 0
+);
+create index if not exists idx_erp_invoice_lines_org on public.erp_invoice_lines(organization_id);
+create index if not exists idx_erp_invoice_lines_invoice on public.erp_invoice_lines(invoice_id);
+alter table public.erp_invoice_lines enable row level security;
+
+create policy erp_invoice_lines_select on public.erp_invoice_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_invoice_lines_write on public.erp_invoice_lines for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+
+-- Avoir client — montant unique, pas de lignes détaillées en V1.
+create table if not exists public.erp_credit_notes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id uuid not null references public.erp_customers(id) on delete restrict,
+  invoice_id uuid references public.erp_invoices(id) on delete set null,
+  reference text,
+  amount numeric(14,2) not null check (amount >= 0),
+  reason text,
+  status text not null default 'draft' check (status in ('draft', 'issued')),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_credit_notes_org on public.erp_credit_notes(organization_id);
+alter table public.erp_credit_notes enable row level security;
+
+create policy erp_credit_notes_select on public.erp_credit_notes for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_credit_notes_write on public.erp_credit_notes for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+
+-- Enum dédié (découplage vis-à-vis de public.payment_method ZegCaisse,
+-- même principe que erp_stock_movement_type).
+do $$ begin
+  create type public.erp_payment_method as enum ('cash', 'mobile_money', 'card', 'bank_transfer', 'credit', 'mixed');
+exception when duplicate_object then null;
+end $$;
+
+create table if not exists public.erp_customer_payments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id uuid not null references public.erp_customers(id) on delete restrict,
+  invoice_id uuid references public.erp_invoices(id) on delete set null,
+  amount numeric(14,2) not null check (amount > 0),
+  method public.erp_payment_method not null default 'cash',
+  reference text,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_customer_payments_org on public.erp_customer_payments(organization_id);
+create index if not exists idx_erp_customer_payments_customer on public.erp_customer_payments(customer_id);
+alter table public.erp_customer_payments enable row level security;
+
+create policy erp_customer_payments_select on public.erp_customer_payments for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_customer_payments_write on public.erp_customer_payments for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+
+-- Portée stock (pas salesperson — symétrique de erp_goods_receipts).
+create table if not exists public.erp_customer_returns (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id uuid not null references public.erp_customers(id) on delete restrict,
+  warehouse_id uuid not null references public.erp_warehouses(id) on delete restrict,
+  sales_order_id uuid references public.erp_sales_orders(id) on delete set null,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed')),
+  reason text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create index if not exists idx_erp_customer_returns_org on public.erp_customer_returns(organization_id);
+alter table public.erp_customer_returns enable row level security;
+
+create policy erp_customer_returns_select on public.erp_customer_returns for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','stock']::public.app_role[]));
+create policy erp_customer_returns_insert on public.erp_customer_returns for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+create policy erp_customer_returns_update on public.erp_customer_returns for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]))
+  with check (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+create policy erp_customer_returns_delete on public.erp_customer_returns for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+
+create table if not exists public.erp_customer_return_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  return_id uuid not null references public.erp_customer_returns(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  unit_cost numeric(14,2)
+);
+create index if not exists idx_erp_customer_return_lines_org on public.erp_customer_return_lines(organization_id);
+create index if not exists idx_erp_customer_return_lines_return on public.erp_customer_return_lines(return_id);
+alter table public.erp_customer_return_lines enable row level security;
+
+create policy erp_customer_return_lines_select on public.erp_customer_return_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','stock']::public.app_role[]));
+create policy erp_customer_return_lines_write on public.erp_customer_return_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[])
+    and exists (select 1 from public.erp_customer_returns r where r.id = return_id and r.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[])
+    and exists (select 1 from public.erp_customer_returns r where r.id = return_id and r.status = 'draft')
+  );
+
+create or replace function public.confirm_erp_customer_return(
+  p_organization_id uuid,
+  p_return_id uuid
+) returns public.erp_customer_returns
+language plpgsql security definer set search_path = public as $$
+declare
+  v_return public.erp_customer_returns;
+  v_line record;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','stock']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_return from public.erp_customer_returns
+    where id = p_return_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Retour client introuvable.'; end if;
+  if v_return.status <> 'draft' then raise exception 'Ce retour a déjà été confirmé.'; end if;
+
+  if not exists (select 1 from public.erp_customer_return_lines where return_id = p_return_id) then
+    raise exception 'Aucune ligne à retourner pour ce retour client.';
+  end if;
+
+  for v_line in select * from public.erp_customer_return_lines where return_id = p_return_id loop
+    insert into public.erp_stock_movements (organization_id, product_id, warehouse_id, type, quantity, unit_cost, reference, created_by)
+    values (p_organization_id, v_line.product_id, v_return.warehouse_id, 'customer_return', v_line.quantity, v_line.unit_cost, v_return.reference, auth.uid());
+  end loop;
+
+  update public.erp_customer_returns set status = 'confirmed', confirmed_at = now()
+    where id = p_return_id returning * into v_return;
+
+  return v_return;
+end;
+$$;
+revoke all on function public.confirm_erp_customer_return(uuid, uuid) from public;
+grant execute on function public.confirm_erp_customer_return(uuid, uuid) to authenticated;
+
+create table if not exists public.erp_crm_activities (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  entity_type text not null check (entity_type in ('customer', 'prospect')),
+  entity_id uuid not null,
+  activity_type text not null check (activity_type in ('call', 'email', 'meeting', 'note', 'task')),
+  content text,
+  due_date timestamptz,
+  assigned_to uuid references auth.users(id) on delete set null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_crm_activities_org on public.erp_crm_activities(organization_id);
+create index if not exists idx_erp_crm_activities_entity on public.erp_crm_activities(entity_type, entity_id);
+alter table public.erp_crm_activities enable row level security;
+
+create policy erp_crm_activities_select on public.erp_crm_activities for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','salesperson']::public.app_role[]));
+create policy erp_crm_activities_write on public.erp_crm_activities for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','salesperson']::public.app_role[]));
+
+-- =============== ZegERP — Module 4/10 : POS ERP (migration 053). Aucun
+-- rôle/enum nouveau — réutilise cashier (existant) et 'sale'/
+-- 'customer_return' (déjà ajoutés module 3). Isolé du POS ZegCaisse. ===============
+create table if not exists public.erp_cash_sessions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  warehouse_id uuid not null references public.erp_warehouses(id) on delete restrict,
+  status text not null default 'open' check (status in ('open', 'closed')),
+  opening_amount numeric(14,2) not null default 0,
+  closing_amount numeric(14,2),
+  notes text,
+  opened_by uuid references auth.users(id) on delete set null,
+  opened_at timestamptz not null default now(),
+  closed_by uuid references auth.users(id) on delete set null,
+  closed_at timestamptz
+);
+create index if not exists idx_erp_cash_sessions_org on public.erp_cash_sessions(organization_id);
+alter table public.erp_cash_sessions enable row level security;
+
+create policy erp_cash_sessions_select on public.erp_cash_sessions for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','cashier']::public.app_role[]));
+create policy erp_cash_sessions_insert on public.erp_cash_sessions for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+create policy erp_cash_sessions_update on public.erp_cash_sessions for update to authenticated
+  using (status = 'open' and public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+
+create table if not exists public.erp_pos_sales (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  cash_session_id uuid not null references public.erp_cash_sessions(id) on delete restrict,
+  customer_id uuid references public.erp_customers(id) on delete set null,
+  reference text,
+  status text not null default 'draft' check (status in ('draft', 'completed', 'cancelled')),
+  payment_method public.erp_payment_method not null default 'cash',
+  discount_amount numeric(14,2) not null default 0,
+  tax_amount numeric(14,2) not null default 0,
+  total_amount numeric(14,2) not null default 0,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+create index if not exists idx_erp_pos_sales_org on public.erp_pos_sales(organization_id);
+create index if not exists idx_erp_pos_sales_session on public.erp_pos_sales(cash_session_id);
+alter table public.erp_pos_sales enable row level security;
+
+create policy erp_pos_sales_select on public.erp_pos_sales for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','cashier']::public.app_role[]));
+create policy erp_pos_sales_insert on public.erp_pos_sales for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+create policy erp_pos_sales_update_draft on public.erp_pos_sales for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]))
+  with check (status in ('draft', 'cancelled') and public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+create policy erp_pos_sales_delete on public.erp_pos_sales for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+
+-- returned_quantity jamais modifiée directement : incrémentée
+-- exclusivement par confirm_erp_pos_return() (security definer).
+create table if not exists public.erp_pos_sale_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  sale_id uuid not null references public.erp_pos_sales(id) on delete cascade,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0),
+  unit_price numeric(14,2) not null default 0,
+  tax_rate numeric(5,2) not null default 0,
+  discount_amount numeric(14,2) not null default 0,
+  returned_quantity numeric(14,3) not null default 0,
+  check (returned_quantity >= 0 and returned_quantity <= quantity)
+);
+create index if not exists idx_erp_pos_sale_lines_org on public.erp_pos_sale_lines(organization_id);
+create index if not exists idx_erp_pos_sale_lines_sale on public.erp_pos_sale_lines(sale_id);
+alter table public.erp_pos_sale_lines enable row level security;
+
+create policy erp_pos_sale_lines_select on public.erp_pos_sale_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','cashier']::public.app_role[]));
+create policy erp_pos_sale_lines_write on public.erp_pos_sale_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[])
+    and exists (select 1 from public.erp_pos_sales s where s.id = sale_id and s.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[])
+    and exists (select 1 from public.erp_pos_sales s where s.id = sale_id and s.status = 'draft')
+  );
+
+-- complete_erp_pos_sale() : crée un mouvement 'sale' par ligne (coût repris
+-- de erp_products.cost), recalcule total_amount à partir des lignes,
+-- passe la vente "completed". Bloque si la session de caisse est fermée.
+create or replace function public.complete_erp_pos_sale(
+  p_organization_id uuid,
+  p_sale_id uuid
+) returns public.erp_pos_sales
+language plpgsql security definer set search_path = public as $$
+declare
+  v_sale public.erp_pos_sales;
+  v_session public.erp_cash_sessions;
+  v_line record;
+  v_product_cost numeric(14,2);
+  v_subtotal numeric(14,2) := 0;
+  v_tax numeric(14,2) := 0;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','cashier']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_sale from public.erp_pos_sales
+    where id = p_sale_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Vente introuvable.'; end if;
+  if v_sale.status <> 'draft' then raise exception 'Cette vente a déjà été finalisée ou annulée.'; end if;
+
+  select * into v_session from public.erp_cash_sessions where id = v_sale.cash_session_id for update;
+  if v_session.status <> 'open' then raise exception 'La session de caisse de cette vente n''est plus ouverte.'; end if;
+
+  if not exists (select 1 from public.erp_pos_sale_lines where sale_id = p_sale_id) then
+    raise exception 'Aucune ligne pour cette vente.';
+  end if;
+
+  for v_line in select * from public.erp_pos_sale_lines where sale_id = p_sale_id loop
+    v_subtotal := v_subtotal + (v_line.quantity * v_line.unit_price) - v_line.discount_amount;
+    v_tax := v_tax + (v_line.quantity * v_line.unit_price - v_line.discount_amount) * (v_line.tax_rate / 100);
+
+    select cost into v_product_cost from public.erp_products where id = v_line.product_id;
+    insert into public.erp_stock_movements (organization_id, product_id, warehouse_id, type, quantity, unit_cost, reference, created_by)
+    values (p_organization_id, v_line.product_id, v_session.warehouse_id, 'sale', v_line.quantity, v_product_cost, v_sale.reference, auth.uid());
+  end loop;
+
+  update public.erp_pos_sales
+    set status = 'completed', completed_at = now(), tax_amount = v_tax, total_amount = v_subtotal + v_tax
+    where id = p_sale_id returning * into v_sale;
+
+  return v_sale;
+end;
+$$;
+revoke all on function public.complete_erp_pos_sale(uuid, uuid) from public;
+grant execute on function public.complete_erp_pos_sale(uuid, uuid) to authenticated;
+
+create table if not exists public.erp_pos_returns (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  sale_id uuid not null references public.erp_pos_sales(id) on delete restrict,
+  cash_session_id uuid not null references public.erp_cash_sessions(id) on delete restrict,
+  reason text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed')),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create index if not exists idx_erp_pos_returns_org on public.erp_pos_returns(organization_id);
+create index if not exists idx_erp_pos_returns_sale on public.erp_pos_returns(sale_id);
+alter table public.erp_pos_returns enable row level security;
+
+create policy erp_pos_returns_select on public.erp_pos_returns for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','cashier']::public.app_role[]));
+create policy erp_pos_returns_insert on public.erp_pos_returns for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+create policy erp_pos_returns_update on public.erp_pos_returns for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]))
+  with check (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+create policy erp_pos_returns_delete on public.erp_pos_returns for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+
+create table if not exists public.erp_pos_return_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  return_id uuid not null references public.erp_pos_returns(id) on delete cascade,
+  sale_line_id uuid not null references public.erp_pos_sale_lines(id) on delete restrict,
+  product_id uuid not null references public.erp_products(id) on delete restrict,
+  quantity numeric(14,3) not null check (quantity > 0)
+);
+create index if not exists idx_erp_pos_return_lines_org on public.erp_pos_return_lines(organization_id);
+create index if not exists idx_erp_pos_return_lines_return on public.erp_pos_return_lines(return_id);
+alter table public.erp_pos_return_lines enable row level security;
+
+create policy erp_pos_return_lines_select on public.erp_pos_return_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','cashier']::public.app_role[]));
+create policy erp_pos_return_lines_write on public.erp_pos_return_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[])
+    and exists (select 1 from public.erp_pos_returns r where r.id = return_id and r.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[])
+    and exists (select 1 from public.erp_pos_returns r where r.id = return_id and r.status = 'draft')
+  );
+
+-- confirm_erp_pos_return() : crée un mouvement 'customer_return' par ligne
+-- (warehouse repris de la session de caisse du retour), incrémente
+-- returned_quantity (bloque le sur-retour), passe le retour "confirmed".
+create or replace function public.confirm_erp_pos_return(
+  p_organization_id uuid,
+  p_return_id uuid
+) returns public.erp_pos_returns
+language plpgsql security definer set search_path = public as $$
+declare
+  v_return public.erp_pos_returns;
+  v_session public.erp_cash_sessions;
+  v_line record;
+  v_sale_line public.erp_pos_sale_lines;
+  v_new_returned numeric(14,3);
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','cashier']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_return from public.erp_pos_returns
+    where id = p_return_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Retour introuvable.'; end if;
+  if v_return.status <> 'draft' then raise exception 'Ce retour a déjà été confirmé.'; end if;
+
+  select * into v_session from public.erp_cash_sessions where id = v_return.cash_session_id;
+
+  if not exists (select 1 from public.erp_pos_return_lines where return_id = p_return_id) then
+    raise exception 'Aucune ligne à retourner pour ce retour.';
+  end if;
+
+  for v_line in select * from public.erp_pos_return_lines where return_id = p_return_id loop
+    select * into v_sale_line from public.erp_pos_sale_lines where id = v_line.sale_line_id for update;
+
+    v_new_returned := v_sale_line.returned_quantity + v_line.quantity;
+    if v_new_returned > v_sale_line.quantity then
+      raise exception 'Quantité retournée dépasse la quantité vendue pour ce produit.';
+    end if;
+
+    update public.erp_pos_sale_lines set returned_quantity = v_new_returned where id = v_sale_line.id;
+
+    insert into public.erp_stock_movements (organization_id, product_id, warehouse_id, type, quantity, reference, created_by)
+    values (p_organization_id, v_line.product_id, v_session.warehouse_id, 'customer_return', v_line.quantity, v_return.reason, auth.uid());
+  end loop;
+
+  update public.erp_pos_returns set status = 'confirmed', confirmed_at = now()
+    where id = p_return_id returning * into v_return;
+
+  return v_return;
+end;
+$$;
+revoke all on function public.confirm_erp_pos_return(uuid, uuid) from public;
+grant execute on function public.confirm_erp_pos_return(uuid, uuid) to authenticated;
+
+-- =============== ZegERP — Module 5/10 : Finance (migration 054). Aucun
+-- rôle nouveau (owner/manager/accountant uniquement, validé — pas de
+-- trésorier séparé). erp_cash_transaction_type : type entièrement nouveau,
+-- pas d'extension d'enum existant, aucune contrainte de transaction. ===============
+create table if not exists public.erp_cash_accounts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  type text not null default 'cash' check (type in ('cash', 'bank')),
+  account_number text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_cash_accounts_org on public.erp_cash_accounts(organization_id);
+alter table public.erp_cash_accounts enable row level security;
+
+create policy erp_cash_accounts_select on public.erp_cash_accounts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_cash_accounts_write on public.erp_cash_accounts for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+-- Jamais d'écriture directe (comme erp_stock_levels, module 1) : maintenue
+-- exclusivement par apply_erp_cash_transaction() plus bas.
+create table if not exists public.erp_cash_account_balances (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  cash_account_id uuid not null references public.erp_cash_accounts(id) on delete cascade,
+  balance numeric(14,2) not null default 0,
+  updated_at timestamptz not null default now(),
+  unique (cash_account_id)
+);
+create index if not exists idx_erp_cash_account_balances_org on public.erp_cash_account_balances(organization_id);
+alter table public.erp_cash_account_balances enable row level security;
+
+create policy erp_cash_account_balances_select on public.erp_cash_account_balances for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+create table if not exists public.erp_fund_transfers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  from_account_id uuid not null references public.erp_cash_accounts(id) on delete restrict,
+  to_account_id uuid not null references public.erp_cash_accounts(id) on delete restrict,
+  amount numeric(14,2) not null check (amount > 0),
+  reference text,
+  notes text,
+  status text not null default 'draft' check (status in ('draft', 'confirmed')),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz,
+  check (from_account_id <> to_account_id)
+);
+create index if not exists idx_erp_fund_transfers_org on public.erp_fund_transfers(organization_id);
+alter table public.erp_fund_transfers enable row level security;
+
+create policy erp_fund_transfers_select on public.erp_fund_transfers for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_fund_transfers_insert on public.erp_fund_transfers for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_fund_transfers_update on public.erp_fund_transfers for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_fund_transfers_delete on public.erp_fund_transfers for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+do $$ begin
+  create type public.erp_cash_transaction_type as enum ('in', 'out', 'transfer_in', 'transfer_out');
+exception when duplicate_object then null;
+end $$;
+
+-- Ledger immuable (comme erp_stock_movements). 'transfer_in'/'transfer_out'
+-- exclus de l'insert direct — uniquement créés par
+-- confirm_erp_fund_transfer().
+create table if not exists public.erp_cash_transactions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  cash_account_id uuid not null references public.erp_cash_accounts(id) on delete restrict,
+  type public.erp_cash_transaction_type not null,
+  amount numeric(14,2) not null check (amount > 0),
+  reference text,
+  reason text,
+  source_type text,
+  source_id uuid,
+  transfer_id uuid references public.erp_fund_transfers(id) on delete set null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_cash_transactions_org on public.erp_cash_transactions(organization_id);
+create index if not exists idx_erp_cash_transactions_account on public.erp_cash_transactions(cash_account_id);
+create index if not exists idx_erp_cash_transactions_transfer on public.erp_cash_transactions(transfer_id);
+alter table public.erp_cash_transactions enable row level security;
+
+create policy erp_cash_transactions_select on public.erp_cash_transactions for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_cash_transactions_insert on public.erp_cash_transactions for insert to authenticated
+  with check (
+    type in ('in', 'out')
+    and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+  );
+
+-- Pas de garde anti-négatif (contrairement au stock) : un compte peut
+-- légitimement passer en négatif (découvert, caisse en attente de dépôt).
+create or replace function public.apply_erp_cash_transaction()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  delta numeric(14,2);
+begin
+  delta := case new.type
+    when 'in' then new.amount
+    when 'transfer_in' then new.amount
+    when 'out' then -new.amount
+    when 'transfer_out' then -new.amount
+    else 0
+  end;
+
+  insert into public.erp_cash_account_balances (organization_id, cash_account_id, balance)
+  values (new.organization_id, new.cash_account_id, delta)
+  on conflict (cash_account_id)
+  do update set balance = public.erp_cash_account_balances.balance + delta, updated_at = now();
+
+  return new;
+end;
+$$;
+create trigger trg_erp_cash_transactions_apply
+  after insert on public.erp_cash_transactions
+  for each row execute function public.apply_erp_cash_transaction();
+
+-- confirm_erp_fund_transfer() : crée la paire transfer_out/transfer_in et
+-- passe le transfert "confirmed".
+create or replace function public.confirm_erp_fund_transfer(
+  p_organization_id uuid,
+  p_transfer_id uuid
+) returns public.erp_fund_transfers
+language plpgsql security definer set search_path = public as $$
+declare
+  v_transfer public.erp_fund_transfers;
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','accountant']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_transfer from public.erp_fund_transfers
+    where id = p_transfer_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Transfert introuvable.'; end if;
+  if v_transfer.status <> 'draft' then raise exception 'Ce transfert a déjà été confirmé.'; end if;
+
+  insert into public.erp_cash_transactions (organization_id, cash_account_id, type, amount, reference, transfer_id, created_by)
+  values (p_organization_id, v_transfer.from_account_id, 'transfer_out', v_transfer.amount, v_transfer.reference, p_transfer_id, auth.uid());
+  insert into public.erp_cash_transactions (organization_id, cash_account_id, type, amount, reference, transfer_id, created_by)
+  values (p_organization_id, v_transfer.to_account_id, 'transfer_in', v_transfer.amount, v_transfer.reference, p_transfer_id, auth.uid());
+
+  update public.erp_fund_transfers set status = 'confirmed', confirmed_at = now()
+    where id = p_transfer_id returning * into v_transfer;
+
+  return v_transfer;
+end;
+$$;
+revoke all on function public.confirm_erp_fund_transfer(uuid, uuid) from public;
+grant execute on function public.confirm_erp_fund_transfer(uuid, uuid) to authenticated;
+
+-- =============== ZegERP — Module 6/10 : Comptabilité (migration 055).
+-- Aucun rôle nouveau (owner/manager/accountant). Saisie manuelle en V1 :
+-- aucune écriture générée automatiquement depuis Achats/Ventes/Finance. ===============
+create table if not exists public.erp_chart_of_accounts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  parent_id uuid references public.erp_chart_of_accounts(id) on delete set null,
+  code text not null,
+  name text not null,
+  type text not null check (type in ('asset', 'liability', 'equity', 'revenue', 'expense')),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  unique (organization_id, code)
+);
+create index if not exists idx_erp_chart_of_accounts_org on public.erp_chart_of_accounts(organization_id);
+alter table public.erp_chart_of_accounts enable row level security;
+
+create policy erp_chart_of_accounts_select on public.erp_chart_of_accounts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_chart_of_accounts_write on public.erp_chart_of_accounts for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+create table if not exists public.erp_accounting_journals (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  code text not null,
+  name text not null,
+  created_at timestamptz not null default now(),
+  unique (organization_id, code)
+);
+create index if not exists idx_erp_accounting_journals_org on public.erp_accounting_journals(organization_id);
+alter table public.erp_accounting_journals enable row level security;
+
+create policy erp_accounting_journals_select on public.erp_accounting_journals for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_accounting_journals_write on public.erp_accounting_journals for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+create table if not exists public.erp_accounting_periods (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  label text not null,
+  start_date date not null,
+  end_date date not null,
+  status text not null default 'open' check (status in ('open', 'closed')),
+  closed_by uuid references auth.users(id) on delete set null,
+  closed_at timestamptz,
+  created_at timestamptz not null default now(),
+  check (end_date >= start_date)
+);
+create index if not exists idx_erp_accounting_periods_org on public.erp_accounting_periods(organization_id);
+alter table public.erp_accounting_periods enable row level security;
+
+create policy erp_accounting_periods_select on public.erp_accounting_periods for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_accounting_periods_insert on public.erp_accounting_periods for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_accounting_periods_update on public.erp_accounting_periods for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_accounting_periods_delete on public.erp_accounting_periods for delete to authenticated
+  using (status = 'open' and public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Garde-fou clôture : aucune écriture ne peut viser une date couverte par
+-- une période 'closed' (insert et update tant que draft).
+create table if not exists public.erp_journal_entries (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  journal_id uuid not null references public.erp_accounting_journals(id) on delete restrict,
+  entry_date date not null default current_date,
+  reference text,
+  description text,
+  status text not null default 'draft' check (status in ('draft', 'posted')),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  posted_at timestamptz
+);
+create index if not exists idx_erp_journal_entries_org on public.erp_journal_entries(organization_id);
+create index if not exists idx_erp_journal_entries_journal on public.erp_journal_entries(journal_id);
+alter table public.erp_journal_entries enable row level security;
+
+create policy erp_journal_entries_select on public.erp_journal_entries for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_journal_entries_insert on public.erp_journal_entries for insert to authenticated
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+    and not exists (
+      select 1 from public.erp_accounting_periods p
+      where p.organization_id = erp_journal_entries.organization_id
+        and p.status = 'closed'
+        and erp_journal_entries.entry_date between p.start_date and p.end_date
+    )
+  );
+create policy erp_journal_entries_update_draft on public.erp_journal_entries for update to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (
+    status = 'draft'
+    and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+    and not exists (
+      select 1 from public.erp_accounting_periods p
+      where p.organization_id = erp_journal_entries.organization_id
+        and p.status = 'closed'
+        and erp_journal_entries.entry_date between p.start_date and p.end_date
+    )
+  );
+create policy erp_journal_entries_delete on public.erp_journal_entries for delete to authenticated
+  using (status = 'draft' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+-- Une ligne est soit un débit soit un crédit, jamais les deux.
+create table if not exists public.erp_journal_entry_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  entry_id uuid not null references public.erp_journal_entries(id) on delete cascade,
+  account_id uuid not null references public.erp_chart_of_accounts(id) on delete restrict,
+  debit numeric(14,2) not null default 0 check (debit >= 0),
+  credit numeric(14,2) not null default 0 check (credit >= 0),
+  label text,
+  check (debit = 0 or credit = 0)
+);
+create index if not exists idx_erp_journal_entry_lines_org on public.erp_journal_entry_lines(organization_id);
+create index if not exists idx_erp_journal_entry_lines_entry on public.erp_journal_entry_lines(entry_id);
+alter table public.erp_journal_entry_lines enable row level security;
+
+create policy erp_journal_entry_lines_select on public.erp_journal_entry_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_journal_entry_lines_write on public.erp_journal_entry_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+    and exists (select 1 from public.erp_journal_entries e where e.id = entry_id and e.status = 'draft')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+    and exists (select 1 from public.erp_journal_entries e where e.id = entry_id and e.status = 'draft')
+  );
+
+-- post_erp_journal_entry() : vérifie l'équilibre débit = crédit et la
+-- non-clôture de la période avant de passer l'écriture "posted" (immuable
+-- ensuite).
+create or replace function public.post_erp_journal_entry(
+  p_organization_id uuid,
+  p_entry_id uuid
+) returns public.erp_journal_entries
+language plpgsql security definer set search_path = public as $$
+declare
+  v_entry public.erp_journal_entries;
+  v_total_debit numeric(14,2);
+  v_total_credit numeric(14,2);
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','accountant']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_entry from public.erp_journal_entries
+    where id = p_entry_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Écriture introuvable.'; end if;
+  if v_entry.status <> 'draft' then raise exception 'Cette écriture a déjà été comptabilisée.'; end if;
+
+  if exists (
+    select 1 from public.erp_accounting_periods p
+    where p.organization_id = p_organization_id and p.status = 'closed'
+      and v_entry.entry_date between p.start_date and p.end_date
+  ) then
+    raise exception 'La période comptable de cette écriture est clôturée.';
+  end if;
+
+  select coalesce(sum(debit), 0), coalesce(sum(credit), 0) into v_total_debit, v_total_credit
+    from public.erp_journal_entry_lines where entry_id = p_entry_id;
+
+  if v_total_debit = 0 and v_total_credit = 0 then
+    raise exception 'Aucune ligne pour cette écriture.';
+  end if;
+  if v_total_debit <> v_total_credit then
+    raise exception 'Écriture déséquilibrée : débit (%) différent du crédit (%).', v_total_debit, v_total_credit;
+  end if;
+
+  update public.erp_journal_entries set status = 'posted', posted_at = now()
+    where id = p_entry_id returning * into v_entry;
+
+  return v_entry;
+end;
+$$;
+revoke all on function public.post_erp_journal_entry(uuid, uuid) from public;
+grant execute on function public.post_erp_journal_entry(uuid, uuid) to authenticated;
+
+create table if not exists public.erp_bank_reconciliations (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  cash_account_id uuid not null references public.erp_cash_accounts(id) on delete restrict,
+  statement_date date not null,
+  statement_balance numeric(14,2) not null default 0,
+  reconciled_balance numeric(14,2),
+  status text not null default 'in_progress' check (status in ('in_progress', 'completed')),
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+create index if not exists idx_erp_bank_reconciliations_org on public.erp_bank_reconciliations(organization_id);
+alter table public.erp_bank_reconciliations enable row level security;
+
+create policy erp_bank_reconciliations_select on public.erp_bank_reconciliations for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_bank_reconciliations_insert on public.erp_bank_reconciliations for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_bank_reconciliations_update on public.erp_bank_reconciliations for update to authenticated
+  using (status = 'in_progress' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (status = 'in_progress' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_bank_reconciliations_delete on public.erp_bank_reconciliations for delete to authenticated
+  using (status = 'in_progress' and public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+create table if not exists public.erp_bank_reconciliation_lines (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reconciliation_id uuid not null references public.erp_bank_reconciliations(id) on delete cascade,
+  cash_transaction_id uuid not null references public.erp_cash_transactions(id) on delete restrict,
+  unique (reconciliation_id, cash_transaction_id)
+);
+create index if not exists idx_erp_bank_reconciliation_lines_org on public.erp_bank_reconciliation_lines(organization_id);
+create index if not exists idx_erp_bank_reconciliation_lines_reconciliation on public.erp_bank_reconciliation_lines(reconciliation_id);
+alter table public.erp_bank_reconciliation_lines enable row level security;
+
+create policy erp_bank_reconciliation_lines_select on public.erp_bank_reconciliation_lines for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_bank_reconciliation_lines_write on public.erp_bank_reconciliation_lines for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+    and exists (select 1 from public.erp_bank_reconciliations r where r.id = reconciliation_id and r.status = 'in_progress')
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[])
+    and exists (select 1 from public.erp_bank_reconciliations r where r.id = reconciliation_id and r.status = 'in_progress')
+    and exists (
+      select 1 from public.erp_bank_reconciliations r
+      join public.erp_cash_transactions t on t.id = cash_transaction_id
+      where r.id = reconciliation_id and t.cash_account_id = r.cash_account_id
+    )
+  );
+
+-- complete_erp_bank_reconciliation() : recalcule reconciled_balance à
+-- partir des transactions pointées et passe le rapprochement "completed".
+create or replace function public.complete_erp_bank_reconciliation(
+  p_organization_id uuid,
+  p_reconciliation_id uuid
+) returns public.erp_bank_reconciliations
+language plpgsql security definer set search_path = public as $$
+declare
+  v_reconciliation public.erp_bank_reconciliations;
+  v_balance numeric(14,2);
+begin
+  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','accountant']::public.app_role[]) then
+    raise exception 'Accès refusé.';
+  end if;
+
+  select * into v_reconciliation from public.erp_bank_reconciliations
+    where id = p_reconciliation_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Rapprochement introuvable.'; end if;
+  if v_reconciliation.status <> 'in_progress' then raise exception 'Ce rapprochement a déjà été clôturé.'; end if;
+
+  select coalesce(sum(case when t.type in ('in', 'transfer_in') then t.amount else -t.amount end), 0)
+    into v_balance
+    from public.erp_bank_reconciliation_lines l
+    join public.erp_cash_transactions t on t.id = l.cash_transaction_id
+    where l.reconciliation_id = p_reconciliation_id;
+
+  update public.erp_bank_reconciliations
+    set status = 'completed', completed_at = now(), reconciled_balance = v_balance
+    where id = p_reconciliation_id returning * into v_reconciliation;
+
+  return v_reconciliation;
+end;
+$$;
+revoke all on function public.complete_erp_bank_reconciliation(uuid, uuid) from public;
+grant execute on function public.complete_erp_bank_reconciliation(uuid, uuid) to authenticated;
+
+-- =============== ZegERP — Module 7/10 : RH (migrations 056+057). Périmètre
+-- strict owner/manager/hr_manager (données personnelles sensibles) — pas
+-- d'accountant ni d'autre rôle métier. file_url texte simple en V1, pas
+-- encore raccroché au bucket erp-documents (module 8, non livré). ===============
+alter type public.app_role add value if not exists 'hr_manager';
+
+create table if not exists public.erp_departments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_departments_org on public.erp_departments(organization_id);
+alter table public.erp_departments enable row level security;
+
+create policy erp_departments_select on public.erp_departments for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+create policy erp_departments_write on public.erp_departments for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+
+create table if not exists public.erp_positions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  department_id uuid references public.erp_departments(id) on delete set null,
+  title text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_positions_org on public.erp_positions(organization_id);
+alter table public.erp_positions enable row level security;
+
+create policy erp_positions_select on public.erp_positions for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+create policy erp_positions_write on public.erp_positions for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+
+-- user_id optionnel : un employé n'a pas forcément de compte ZegOS.
+create table if not exists public.erp_employees (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  department_id uuid references public.erp_departments(id) on delete set null,
+  position_id uuid references public.erp_positions(id) on delete set null,
+  user_id uuid references auth.users(id) on delete set null,
+  first_name text not null,
+  last_name text not null,
+  email text,
+  phone text,
+  hire_date date,
+  termination_date date,
+  status text not null default 'active' check (status in ('active', 'on_leave', 'terminated')),
+  notes text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_employees_org on public.erp_employees(organization_id);
+create index if not exists idx_erp_employees_department on public.erp_employees(department_id);
+alter table public.erp_employees enable row level security;
+
+create policy erp_employees_select on public.erp_employees for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+create policy erp_employees_write on public.erp_employees for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+
+create table if not exists public.erp_attendance (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  employee_id uuid not null references public.erp_employees(id) on delete cascade,
+  date date not null,
+  check_in timestamptz,
+  check_out timestamptz,
+  status text not null default 'present' check (status in ('present', 'absent', 'late', 'half_day')),
+  notes text,
+  created_at timestamptz not null default now(),
+  unique (employee_id, date)
+);
+create index if not exists idx_erp_attendance_org on public.erp_attendance(organization_id);
+create index if not exists idx_erp_attendance_employee on public.erp_attendance(employee_id);
+alter table public.erp_attendance enable row level security;
+
+create policy erp_attendance_select on public.erp_attendance for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+create policy erp_attendance_write on public.erp_attendance for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+
+-- Pas de split créateur/approbateur (contrairement à erp_purchase_requests,
+-- module 2) : hr_manager porte une autorité managériale complète validée
+-- sur son périmètre.
+create table if not exists public.erp_leave_requests (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  employee_id uuid not null references public.erp_employees(id) on delete cascade,
+  leave_type text not null default 'paid' check (leave_type in ('paid', 'unpaid', 'sick', 'other')),
+  start_date date not null,
+  end_date date not null,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  reason text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  reviewed_by uuid references auth.users(id) on delete set null,
+  reviewed_at timestamptz,
+  check (end_date >= start_date)
+);
+create index if not exists idx_erp_leave_requests_org on public.erp_leave_requests(organization_id);
+create index if not exists idx_erp_leave_requests_employee on public.erp_leave_requests(employee_id);
+alter table public.erp_leave_requests enable row level security;
+
+create policy erp_leave_requests_select on public.erp_leave_requests for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+create policy erp_leave_requests_write on public.erp_leave_requests for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+
+create table if not exists public.erp_employee_documents (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  employee_id uuid not null references public.erp_employees(id) on delete cascade,
+  name text not null,
+  document_type text not null default 'other' check (document_type in ('contract', 'id_card', 'diploma', 'certificate', 'other')),
+  file_url text,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_employee_documents_org on public.erp_employee_documents(organization_id);
+create index if not exists idx_erp_employee_documents_employee on public.erp_employee_documents(employee_id);
+alter table public.erp_employee_documents enable row level security;
+
+create policy erp_employee_documents_select on public.erp_employee_documents for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+create policy erp_employee_documents_write on public.erp_employee_documents for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','hr_manager']::public.app_role[]));
+
+-- =============== ZegERP — Module 8/10 : Gestion documentaire (migration
+-- 058). Aucun rôle nouveau. RLS entité-scopée via erp_document_attachments
+-- (pas une liste de rôles à plat) : un document suit les droits de
+-- l'entité à laquelle il est rattaché. erp-documents est le premier bucket
+-- Storage PRIVÉ de ce dépôt (sensibilité du contenu — contrats, pièces
+-- d'identité employé) ; niveau storage grossier (toute l'organisation),
+-- nuance fine par entité dans les tables ci-dessous. ===============
+create table if not exists public.erp_contracts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  supplier_id uuid references public.erp_suppliers(id) on delete set null,
+  customer_id uuid references public.erp_customers(id) on delete set null,
+  employee_id uuid references public.erp_employees(id) on delete set null,
+  name text not null,
+  contract_type text not null default 'other' check (contract_type in ('supplier', 'customer', 'employee', 'lease', 'other')),
+  value numeric(14,2),
+  start_date date,
+  end_date date,
+  status text not null default 'active' check (status in ('active', 'expired', 'terminated')),
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_contracts_org on public.erp_contracts(organization_id);
+alter table public.erp_contracts enable row level security;
+
+create policy erp_contracts_select on public.erp_contracts for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_contracts_write on public.erp_contracts for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+
+-- Métadonnées seulement ; le fichier vit dans le bucket erp-documents.
+-- Policies après erp_document_attachments (dont elles dépendent).
+create table if not exists public.erp_documents (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  document_type text not null default 'other' check (document_type in ('contract', 'invoice', 'id_card', 'certificate', 'report', 'other')),
+  file_path text not null,
+  file_size bigint,
+  mime_type text,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_erp_documents_org on public.erp_documents(organization_id);
+alter table public.erp_documents enable row level security;
+
+-- Polymorphe : entity_type + entity_id, pas de FK stricte des deux côtés.
+create table if not exists public.erp_document_attachments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  document_id uuid not null references public.erp_documents(id) on delete cascade,
+  entity_type text not null check (entity_type in ('supplier', 'customer', 'employee', 'contract')),
+  entity_id uuid not null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (document_id, entity_type, entity_id)
+);
+create index if not exists idx_erp_document_attachments_org on public.erp_document_attachments(organization_id);
+create index if not exists idx_erp_document_attachments_entity on public.erp_document_attachments(entity_type, entity_id);
+create index if not exists idx_erp_document_attachments_document on public.erp_document_attachments(document_id);
+alter table public.erp_document_attachments enable row level security;
+
+create policy erp_document_attachments_select on public.erp_document_attachments for select to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or (entity_type = 'supplier' and public.has_any_role_in_organization(organization_id, array['accountant','buyer']::public.app_role[]))
+    or (entity_type = 'customer' and public.has_any_role_in_organization(organization_id, array['accountant','salesperson']::public.app_role[]))
+    or (entity_type = 'employee' and public.has_any_role_in_organization(organization_id, array['hr_manager']::public.app_role[]))
+    or (entity_type = 'contract' and public.has_any_role_in_organization(organization_id, array['accountant']::public.app_role[]))
+  );
+create policy erp_document_attachments_write on public.erp_document_attachments for all to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or (entity_type = 'supplier' and public.has_any_role_in_organization(organization_id, array['buyer']::public.app_role[]))
+    or (entity_type = 'customer' and public.has_any_role_in_organization(organization_id, array['salesperson']::public.app_role[]))
+    or (entity_type = 'employee' and public.has_any_role_in_organization(organization_id, array['hr_manager']::public.app_role[]))
+    or (entity_type = 'contract' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  )
+  with check (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or (entity_type = 'supplier' and public.has_any_role_in_organization(organization_id, array['buyer']::public.app_role[]))
+    or (entity_type = 'customer' and public.has_any_role_in_organization(organization_id, array['salesperson']::public.app_role[]))
+    or (entity_type = 'employee' and public.has_any_role_in_organization(organization_id, array['hr_manager']::public.app_role[]))
+    or (entity_type = 'contract' and public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
+  );
+
+-- erp_documents — policies (erp_document_attachments existe désormais).
+-- owner/manager voient/gèrent tout ; les autres rôles n'ont accès à un
+-- document que s'il est attaché à une entité de leur périmètre.
+create policy erp_documents_select on public.erp_documents for select to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or exists (
+      select 1 from public.erp_document_attachments a
+      where a.document_id = erp_documents.id
+        and (
+          (a.entity_type = 'supplier' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','buyer']::public.app_role[]))
+          or (a.entity_type = 'customer' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','salesperson']::public.app_role[]))
+          or (a.entity_type = 'employee' and public.has_any_role_in_organization(erp_documents.organization_id, array['hr_manager']::public.app_role[]))
+          or (a.entity_type = 'contract' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant']::public.app_role[]))
+        )
+    )
+  );
+create policy erp_documents_insert on public.erp_documents for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[]));
+create policy erp_documents_update on public.erp_documents for update to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or exists (
+      select 1 from public.erp_document_attachments a
+      where a.document_id = erp_documents.id
+        and (
+          (a.entity_type = 'supplier' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','buyer']::public.app_role[]))
+          or (a.entity_type = 'customer' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','salesperson']::public.app_role[]))
+          or (a.entity_type = 'employee' and public.has_any_role_in_organization(erp_documents.organization_id, array['hr_manager']::public.app_role[]))
+          or (a.entity_type = 'contract' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant']::public.app_role[]))
+        )
+    )
+  )
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[]));
+create policy erp_documents_delete on public.erp_documents for delete to authenticated
+  using (
+    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    or exists (
+      select 1 from public.erp_document_attachments a
+      where a.document_id = erp_documents.id
+        and (
+          (a.entity_type = 'supplier' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','buyer']::public.app_role[]))
+          or (a.entity_type = 'customer' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant','salesperson']::public.app_role[]))
+          or (a.entity_type = 'employee' and public.has_any_role_in_organization(erp_documents.organization_id, array['hr_manager']::public.app_role[]))
+          or (a.entity_type = 'contract' and public.has_any_role_in_organization(erp_documents.organization_id, array['accountant']::public.app_role[]))
+        )
+    )
+  );
+
+-- Bucket Storage erp-documents (PRIVÉ). Convention de chemin obligatoire :
+-- {organization_id}/{document_id}/{nom_fichier}.
+insert into storage.buckets (id, name, public)
+values ('erp-documents', 'erp-documents', false)
+on conflict (id) do nothing;
+
+create policy erp_documents_bucket_select on storage.objects for select to authenticated
+  using (
+    bucket_id = 'erp-documents'
+    and public.has_organization_access(((storage.foldername(name))[1])::uuid)
+  );
+create policy erp_documents_bucket_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  );
+create policy erp_documents_bucket_update on storage.objects for update to authenticated
+  using (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  )
+  with check (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  );
+create policy erp_documents_bucket_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'erp-documents'
+    and public.has_any_role_in_organization(((storage.foldername(name))[1])::uuid, array['owner','manager','accountant','buyer','salesperson','hr_manager']::public.app_role[])
+  );
+
+-- =============== ZegERP — Module 9/10 : Rapports & BI (migration 059).
+-- Aucun rôle nouveau. Vues standard (pas security definer) : héritent
+-- automatiquement de la RLS des tables sous-jacentes, aucune policy dédiée
+-- nécessaire sur les vues elles-mêmes. ===============
+create or replace view public.erp_v_stock_valuation as
+select
+  sl.organization_id,
+  sl.product_id,
+  p.name as product_name,
+  sl.warehouse_id,
+  w.name as warehouse_name,
+  sl.quantity,
+  p.cost,
+  sl.quantity * p.cost as valuation
+from public.erp_stock_levels sl
+join public.erp_products p on p.id = sl.product_id
+join public.erp_warehouses w on w.id = sl.warehouse_id;
+
+create or replace view public.erp_v_purchase_orders_summary as
+select
+  o.organization_id,
+  o.id as purchase_order_id,
+  o.supplier_id,
+  s.name as supplier_name,
+  o.reference,
+  o.status,
+  o.created_at,
+  coalesce(sum(l.quantity * l.unit_cost), 0) as total_amount,
+  coalesce(sum(l.received_quantity * l.unit_cost), 0) as received_amount
+from public.erp_purchase_orders o
+join public.erp_suppliers s on s.id = o.supplier_id
+left join public.erp_purchase_order_lines l on l.purchase_order_id = o.id
+group by o.organization_id, o.id, o.supplier_id, s.name, o.reference, o.status, o.created_at;
+
+-- Unifie commandes client et ventes comptoir, `channel` distingue l'origine.
+create or replace view public.erp_v_sales_summary as
+select
+  o.organization_id,
+  'sales_order'::text as channel,
+  o.id as sale_id,
+  o.customer_id,
+  c.name as customer_name,
+  o.reference,
+  o.status,
+  o.created_at,
+  coalesce(sum(l.quantity * l.unit_price), 0) as total_amount
+from public.erp_sales_orders o
+join public.erp_customers c on c.id = o.customer_id
+left join public.erp_sales_order_lines l on l.sales_order_id = o.id
+group by o.organization_id, o.id, o.customer_id, c.name, o.reference, o.status, o.created_at
+union all
+select
+  s.organization_id,
+  'pos'::text as channel,
+  s.id as sale_id,
+  s.customer_id,
+  c.name as customer_name,
+  s.reference,
+  s.status,
+  s.created_at,
+  s.total_amount
+from public.erp_pos_sales s
+left join public.erp_customers c on c.id = s.customer_id;
+
+create or replace view public.erp_v_cash_position as
+select
+  a.organization_id,
+  a.id as cash_account_id,
+  a.name,
+  a.type,
+  coalesce(b.balance, 0) as balance
+from public.erp_cash_accounts a
+left join public.erp_cash_account_balances b on b.cash_account_id = a.id;
+
+-- Seule vraie table du module : configuration de rapport sauvegardée,
+-- privée à son auteur (organization_id ET created_by = auth.uid()).
+create table if not exists public.erp_custom_reports (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  created_by uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  description text,
+  config jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_erp_custom_reports_org on public.erp_custom_reports(organization_id);
+create index if not exists idx_erp_custom_reports_author on public.erp_custom_reports(created_by);
+alter table public.erp_custom_reports enable row level security;
+
+create policy erp_custom_reports_select on public.erp_custom_reports for select to authenticated
+  using (public.has_organization_access(organization_id) and created_by = auth.uid());
+create policy erp_custom_reports_write on public.erp_custom_reports for all to authenticated
+  using (public.has_organization_access(organization_id) and created_by = auth.uid())
+  with check (public.has_organization_access(organization_id) and created_by = auth.uid());
+
+-- =============== ZegERP — Module 10/10 : Administration (migration 060).
+-- Aucun rôle nouveau, aucune table de rôles/permissions dédiée —
+-- organization_members.role reste la seule source de vérité. Seule
+-- addition : erp_settings (une ligne par organisation), champs limités à
+-- ce dont les modules déjà livrés ont besoin (dépôt par défaut, préfixes
+-- facture/devis, mois de début d'exercice fiscal). ===============
+create table if not exists public.erp_settings (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  default_warehouse_id uuid references public.erp_warehouses(id) on delete set null,
+  invoice_prefix text not null default 'FAC-',
+  quote_prefix text not null default 'DEV-',
+  fiscal_year_start_month smallint not null default 1 check (fiscal_year_start_month between 1 and 12),
+  updated_at timestamptz not null default now(),
+  unique (organization_id)
+);
+create index if not exists idx_erp_settings_org on public.erp_settings(organization_id);
+alter table public.erp_settings enable row level security;
+
+create policy erp_settings_select on public.erp_settings for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+create policy erp_settings_write on public.erp_settings for all to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
