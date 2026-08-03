@@ -1,5 +1,6 @@
 // Supabase data hooks — multi-tenant, always filtered by current organization_id.
 // RLS also enforces this server-side; the organization_id filter is belt + suspenders.
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -915,6 +916,56 @@ export function useCheckSubscriptionPayment() {
     mutationFn: async (paymentId: string) =>
       invokeFn<{ status: string }>("check-subscription-payment", { payment_id: paymentId }),
   });
+}
+
+// Filet de sécurité contre le paiement qui reste "pending" indéfiniment
+// (bug remonté : succès côté MoneyFusion mais aucune redirection/activation
+// automatique) — le mécanisme existant (polling actif sur /souscription/
+// confirmation, voir useSubscriptionPayment/useCheckSubscriptionPayment
+// ci-dessus) dépend entièrement du client qui reste sur cette page ;
+// si MoneyFusion ne redirige pas (flux Mobile Money résolu depuis le
+// téléphone, onglet fermé avant la résolution...), rien ne relance jamais
+// la vérification. Pas de pg_cron ici (infrastructure non confirmée
+// disponible sur ce projet, voir migration 011) : réutilise la même Edge
+// Function check-subscription-payment, déclenchée une seule fois par
+// paiement en attente à chaque chargement de l'organisation dans l'app —
+// n'importe quelle visite (pas seulement /app/abonnement) rattrape un
+// paiement resté bloqué. doneRef évite de la redéclencher en boucle sur
+// chaque re-render tant que l'organisation ne change pas.
+export function useReconcilePendingSubscriptionPayments(organizationId: string | undefined, onResolved?: () => void) {
+  const qc = useQueryClient();
+  const doneRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!organizationId || doneRef.current === organizationId) return;
+    doneRef.current = organizationId;
+
+    (async () => {
+      const { data: pending } = await supabase.from("subscription_payments")
+        .select("id").eq("organization_id", organizationId).eq("status", "pending")
+        .gte("created_at", new Date(Date.now() - 48 * 3600_000).toISOString());
+      if (!pending || pending.length === 0) return;
+
+      let resolved = false;
+      for (const p of pending) {
+        try {
+          const result = await invokeFn<{ status: string }>("check-subscription-payment", { payment_id: p.id });
+          if (result.status === "paid") resolved = true;
+        } catch {
+          // Silencieux : simple tentative de rattrapage en arrière-plan, pas
+          // une action déclenchée par l'utilisateur — le webhook ou la
+          // prochaine visite pourra encore résoudre le paiement.
+        }
+      }
+      qc.invalidateQueries({ queryKey: ["subscription_payments", organizationId] });
+      qc.invalidateQueries({ queryKey: ["account_subscription"] });
+      // organizations.plan/trial_ends_at (context OrganizationProvider, pas
+      // React Query) doit être rafraîchi explicitement par l'appelant —
+      // verifyAndApplyPayment les met à jour en base mais rien ne les relit
+      // automatiquement côté client tant que le contexte n'est pas rechargé.
+      if (resolved) onResolved?.();
+    })();
+  }, [organizationId, qc, onResolved]);
 }
 
 // Helper — generate a short unique ticket ref.

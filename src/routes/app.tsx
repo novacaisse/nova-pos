@@ -18,7 +18,7 @@ import { TrialBanner } from "@/components/app/TrialBanner";
 import { OnboardingFlow } from "@/components/app/OnboardingFlow";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
-import { useMyRole } from "@/lib/data/hooks";
+import { useMyRole, useReconcilePendingSubscriptionPayments } from "@/lib/data/hooks";
 
 export const Route = createFileRoute("/app")({
   // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
@@ -34,6 +34,14 @@ function AppLayout() {
   const { user, loading, signOut } = useAuth();
   const { organizations, currentOrganization, loading: shopLoading, error: shopError, refresh } = useOrganization();
   const { data: myRole } = useMyRole();
+
+  // Filet de sécurité : rattrape un paiement d'abonnement resté "pending"
+  // (voir useReconcilePendingSubscriptionPayments) à chaque chargement de
+  // l'organisation, pas seulement si l'utilisateur reste sur /souscription/
+  // confirmation — refresh() recharge organizations.plan/trial_ends_at dès
+  // qu'un paiement se résout, pour que la bannière d'essai et le reste de
+  // l'app cessent immédiatement de traiter l'organisation comme en essai.
+  useReconcilePendingSubscriptionPayments(currentOrganization?.id, refresh);
 
   // Auth guard côté client (SPA)
   useEffect(() => {
