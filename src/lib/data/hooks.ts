@@ -1561,21 +1561,28 @@ export function useProvisionOrganization() {
 // Transfert de stock entre boutiques d'un même compte : les catalogues
 // produits sont indépendants par boutique (organization_id), donc on fait
 // correspondre les lignes par SKU (ou, à défaut, par nom exact) dans la
-// boutique de destination — pas de création automatique de produit côté
-// destination si aucune correspondance n'est trouvée, on le signale à
-// l'appelant plutôt que de deviner. Crée un mouvement 'transfer' (sortie)
-// dans la boutique source et un mouvement 'in' (entrée) dans la boutique
-// de destination, tous deux traçables via la même référence.
+// boutique de destination. Si aucune correspondance n'existe, l'article est
+// désormais créé automatiquement côté destination avec tous ses attributs
+// (prix, coût, taxe, unité, image, seuil d'alerte, catégorie — recréée par
+// nom si elle n'existe pas déjà là-bas) plutôt que d'être simplement
+// signalé sans être transféré. Crée un mouvement 'transfer' (sortie) dans
+// la boutique source et un mouvement 'in' (entrée) dans la boutique de
+// destination, tous deux traçables via la même référence.
 export function useTransferStock() {
   const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       toOrganizationId: string;
       lines: { product_id: string; sku: string | null; name: string; quantity: number }[];
-    }): Promise<{ transferred: number; unmatched: string[] }> => {
+    }): Promise<{ transferred: number; created: string[] }> => {
       if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const linesToSend = input.lines.filter((l) => l.quantity > 0);
       if (linesToSend.length === 0) throw new Error("Aucune quantité à transférer.");
+
+      const { data: sourceProducts, error: srcErr } = await supabase.from("products")
+        .select("*, categories(name)").in("id", linesToSend.map((l) => l.product_id));
+      if (srcErr) throw srcErr;
+      const sourceById = new Map((sourceProducts ?? []).map((p: any) => [p.id, p]));
 
       const { data: destProducts, error: destErr } = await supabase.from("products")
         .select("id, sku, name").eq("organization_id", input.toOrganizationId) as {
@@ -1586,11 +1593,48 @@ export function useTransferStock() {
       const bySku = new Map((destProducts ?? []).filter((p) => p.sku).map((p) => [p.sku!.toLowerCase(), p]));
       const byName = new Map((destProducts ?? []).map((p) => [p.name.toLowerCase(), p]));
 
+      const { data: destCategories, error: catErr } = await supabase.from("categories")
+        .select("id, name").eq("organization_id", input.toOrganizationId);
+      if (catErr) throw catErr;
+      const destCategoryByName = new Map((destCategories ?? []).map((c) => [c.name.toLowerCase(), c.id]));
+
       const reference = newTicketRef("TR");
-      const outRows: any[] = []; const inRows: any[] = []; const unmatched: string[] = [];
+      const outRows: any[] = []; const inRows: any[] = []; const created: string[] = [];
       for (const l of linesToSend) {
-        const match = (l.sku && bySku.get(l.sku.toLowerCase())) ?? byName.get(l.name.toLowerCase());
-        if (!match) { unmatched.push(l.name); continue; }
+        let match: { id: string; sku: string | null; name: string } | undefined =
+          (l.sku ? bySku.get(l.sku.toLowerCase()) : undefined) ?? byName.get(l.name.toLowerCase());
+
+        if (!match) {
+          const src = sourceById.get(l.product_id);
+          if (!src) continue;
+
+          let destCategoryId: string | null = null;
+          const categoryName: string | undefined = src.categories?.name;
+          if (categoryName) {
+            destCategoryId = destCategoryByName.get(categoryName.toLowerCase()) ?? null;
+            if (!destCategoryId) {
+              const { data: newCat, error: catInsertErr } = await supabase.from("categories")
+                .insert({ organization_id: input.toOrganizationId, name: categoryName }).select().single();
+              if (catInsertErr) throw catInsertErr;
+              destCategoryId = newCat.id;
+              destCategoryByName.set(categoryName.toLowerCase(), newCat.id);
+            }
+          }
+
+          const { data: newProduct, error: prodInsertErr } = await supabase.from("products").insert({
+            organization_id: input.toOrganizationId, category_id: destCategoryId,
+            sku: src.sku, barcode: src.barcode, name: src.name, description: src.description,
+            price: src.price, cost: src.cost, tax_rate: src.tax_rate, unit: src.unit,
+            image_url: src.image_url, is_active: src.is_active, low_stock_threshold: src.low_stock_threshold,
+          }).select().single();
+          if (prodInsertErr) throw prodInsertErr;
+
+          match = { id: newProduct.id, sku: newProduct.sku, name: newProduct.name };
+          if (match.sku) bySku.set(match.sku.toLowerCase(), match);
+          byName.set(match.name.toLowerCase(), match);
+          created.push(l.name);
+        }
+
         outRows.push({
           organization_id: organizationId, product_id: l.product_id, type: "transfer", quantity: l.quantity,
           reason: `Transfert sortant (${reference})`, reference, created_by: user?.id,
@@ -1606,7 +1650,7 @@ export function useTransferStock() {
         const { error: e2 } = await supabase.from("stock_movements").insert(inRows);
         if (e2) throw e2;
       }
-      return { transferred: outRows.length, unmatched };
+      return { transferred: outRows.length, created };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["products", organizationId] });
