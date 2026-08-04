@@ -1068,6 +1068,183 @@ create policy notifications_tenant_all on public.notifications
   using (public.has_organization_access(organization_id))
   with check (public.has_organization_access(organization_id));
 
+-- =============== Rôles personnalisés (migration 063) — schéma +
+-- has_module_permission(). organization_members.role (l'enum app_role)
+-- reste la seule source de vérité pour qui est owner/manager (gestion de
+-- l'équipe elle-même, ci-dessus, jamais déléguée à un rôle personnalisé —
+-- risque d'escalade de privilèges). Les modules métier ci-dessous
+-- (produits, ventes, etc.) peuvent en revanche être gouvernés soit par le
+-- rôle de base (repli via default_role_permissions, comportement actuel
+-- inchangé), soit par un rôle personnalisé créé par le owner
+-- (organization_members.custom_role_id). Voir migration 063 pour le détail
+-- du modèle view/create/manage. ===============
+create table if not exists public.permission_modules (
+  key text primary key,
+  app_module text not null,
+  label text not null,
+  open_view boolean not null default false,
+  sort_order int not null default 0
+);
+insert into public.permission_modules (key, app_module, label, open_view, sort_order) values
+  ('produits',     'pos', 'Produits',      true,  1),
+  ('stock',        'pos', 'Stock',         true,  2),
+  ('fournisseurs', 'pos', 'Fournisseurs',  false, 3),
+  ('clients',      'pos', 'Clients',       false, 4),
+  ('ventes',       'pos', 'Ventes / POS',  false, 5),
+  ('devis',        'pos', 'Devis',         false, 6),
+  ('reservations', 'pos', 'Réservations',  false, 7),
+  ('depenses',     'pos', 'Dépenses',      false, 8),
+  ('rapports',     'pos', 'Rapports',      false, 9),
+  ('abonnement',   'pos', 'Abonnement',    false, 10),
+  ('parametres',   'pos', 'Paramètres',    true,  11)
+on conflict (key) do nothing;
+
+create table if not exists public.organization_roles (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  key text not null,
+  name text not null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (organization_id, key)
+);
+create index if not exists idx_organization_roles_org on public.organization_roles(organization_id);
+
+create table if not exists public.organization_role_permissions (
+  role_id uuid not null references public.organization_roles(id) on delete cascade,
+  module_key text not null references public.permission_modules(key),
+  can_view boolean not null default false,
+  can_create boolean not null default false,
+  can_manage boolean not null default false,
+  primary key (role_id, module_key)
+);
+
+alter table public.organization_members add column if not exists custom_role_id uuid references public.organization_roles(id) on delete set null;
+
+alter table public.organization_roles enable row level security;
+alter table public.organization_role_permissions enable row level security;
+
+create policy organization_roles_select on public.organization_roles for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+create policy organization_roles_write on public.organization_roles for all to authenticated
+  using (public.has_role_in_organization(organization_id, 'owner'))
+  with check (public.has_role_in_organization(organization_id, 'owner'));
+
+create policy organization_role_permissions_select on public.organization_role_permissions for select to authenticated
+  using (exists (
+    select 1 from public.organization_roles r
+    where r.id = organization_role_permissions.role_id
+      and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
+  ));
+create policy organization_role_permissions_write on public.organization_role_permissions for all to authenticated
+  using (exists (
+    select 1 from public.organization_roles r
+    where r.id = organization_role_permissions.role_id
+      and public.has_role_in_organization(r.organization_id, 'owner')
+  ))
+  with check (exists (
+    select 1 from public.organization_roles r
+    where r.id = organization_role_permissions.role_id
+      and public.has_role_in_organization(r.organization_id, 'owner')
+  ));
+
+create table if not exists public.default_role_permissions (
+  role public.app_role not null,
+  module_key text not null references public.permission_modules(key),
+  can_view boolean not null default false,
+  can_create boolean not null default false,
+  can_manage boolean not null default false,
+  primary key (role, module_key)
+);
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage)
+select r::public.app_role, m.key, true, true, true
+from unnest(array['owner','manager']) r, public.permission_modules m
+where m.app_module = 'pos'
+on conflict (role, module_key) do update set can_view = true, can_create = true, can_manage = true;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('cashier', 'clients', true, true, false),
+  ('cashier', 'ventes', true, true, false),
+  ('cashier', 'devis', true, true, false),
+  ('cashier', 'reservations', true, true, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('stock', 'produits', true, true, true),
+  ('stock', 'fournisseurs', true, true, false),
+  ('stock', 'stock', true, true, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('accountant', 'fournisseurs', true, false, false),
+  ('accountant', 'clients', true, false, false),
+  ('accountant', 'ventes', true, false, false),
+  ('accountant', 'devis', true, false, false),
+  ('accountant', 'reservations', true, false, false),
+  ('accountant', 'depenses', true, true, true),
+  ('accountant', 'rapports', true, false, false),
+  ('accountant', 'abonnement', true, false, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('owner', 'rapports', true, true, true),
+  ('manager', 'rapports', true, true, true)
+on conflict (role, module_key) do update set can_view = true, can_create = true, can_manage = true;
+
+create or replace function public.has_module_permission(_org_id uuid, _module_key text, _level text default 'view')
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare
+  v_custom_role_id uuid;
+  v_legacy_role public.app_role;
+  v_open_view boolean;
+  v_can boolean;
+begin
+  if not exists (
+    select 1 from public.organizations o where o.id = _org_id and not o.suspended
+  ) then
+    return false;
+  end if;
+
+  select custom_role_id, role into v_custom_role_id, v_legacy_role
+  from public.organization_members
+  where organization_id = _org_id and user_id = auth.uid();
+
+  if v_legacy_role is null then
+    return false;
+  end if;
+
+  if _level = 'view' then
+    select open_view into v_open_view from public.permission_modules where key = _module_key;
+    if coalesce(v_open_view, false) then
+      return true;
+    end if;
+  end if;
+
+  if v_custom_role_id is not null then
+    select case _level
+      when 'create' then can_create
+      when 'manage' then can_manage
+      else can_view
+    end into v_can
+    from public.organization_role_permissions
+    where role_id = v_custom_role_id and module_key = _module_key;
+    return coalesce(v_can, false);
+  end if;
+
+  select case _level
+    when 'create' then can_create
+    when 'manage' then can_manage
+    else can_view
+  end into v_can
+  from public.default_role_permissions
+  where role = v_legacy_role and module_key = _module_key;
+  return coalesce(v_can, false);
+end;
+$$;
+revoke all on function public.has_module_permission(uuid, text, text) from public;
+grant execute on function public.has_module_permission(uuid, text, text) to authenticated;
+
 -- Les 15 autres tables métier ont des policies différenciées par rôle
 -- (app_role) plutôt qu'un accès CRUD uniforme à tout membre de la
 -- boutique. Voir db/AUDIT-SECURITE.md pour la matrice de permissions
@@ -1079,14 +1256,14 @@ create policy categories_select on public.categories for select to authenticated
   using (public.has_organization_access(organization_id));
 drop policy if exists categories_write on public.categories;
 create policy categories_write on public.categories for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'produits', 'create'));
 drop policy if exists categories_update on public.categories;
 create policy categories_update on public.categories for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'produits', 'manage'))
+  with check (public.has_module_permission(organization_id, 'produits', 'manage'));
 drop policy if exists categories_delete on public.categories;
 create policy categories_delete on public.categories for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'produits', 'manage'));
 
 -- 2. products — lecture pour tous, écriture réservée à owner/manager/stock
 drop policy if exists products_select on public.products;
@@ -1094,75 +1271,93 @@ create policy products_select on public.products for select to authenticated
   using (public.has_organization_access(organization_id));
 drop policy if exists products_insert on public.products;
 create policy products_insert on public.products for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'produits', 'create'));
 drop policy if exists products_update on public.products;
 create policy products_update on public.products for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'produits', 'manage'))
+  with check (public.has_module_permission(organization_id, 'produits', 'manage'));
 drop policy if exists products_delete on public.products;
 create policy products_delete on public.products for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'produits', 'manage'));
 
 -- 3. suppliers — lecture owner/manager/stock/accountant, écriture owner/manager
 drop policy if exists suppliers_select on public.suppliers;
 create policy suppliers_select on public.suppliers for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'fournisseurs', 'view'));
 drop policy if exists suppliers_write on public.suppliers;
 create policy suppliers_write on public.suppliers for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'fournisseurs', 'create'));
 drop policy if exists suppliers_update on public.suppliers;
 create policy suppliers_update on public.suppliers for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'fournisseurs', 'manage'))
+  with check (public.has_module_permission(organization_id, 'fournisseurs', 'manage'));
 drop policy if exists suppliers_delete on public.suppliers;
 create policy suppliers_delete on public.suppliers for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'fournisseurs', 'manage'));
 
 -- 3bis. purchase_orders / purchase_order_items — même matrice que products
 -- (owner/manager/stock écrivent, accountant lit pour le suivi des coûts).
 drop policy if exists purchase_orders_select on public.purchase_orders;
 create policy purchase_orders_select on public.purchase_orders for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'fournisseurs', 'view'));
 drop policy if exists purchase_orders_insert on public.purchase_orders;
 create policy purchase_orders_insert on public.purchase_orders for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  with check (
+    public.has_module_permission(organization_id, 'fournisseurs', 'create')
+    or public.has_role_in_organization(organization_id, 'stock')
+  );
 drop policy if exists purchase_orders_update on public.purchase_orders;
 create policy purchase_orders_update on public.purchase_orders for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  using (
+    public.has_module_permission(organization_id, 'fournisseurs', 'manage')
+    or public.has_role_in_organization(organization_id, 'stock')
+  )
+  with check (
+    public.has_module_permission(organization_id, 'fournisseurs', 'manage')
+    or public.has_role_in_organization(organization_id, 'stock')
+  );
 drop policy if exists purchase_orders_delete on public.purchase_orders;
 create policy purchase_orders_delete on public.purchase_orders for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'fournisseurs', 'manage'));
 
 drop policy if exists purchase_order_items_select on public.purchase_order_items;
 create policy purchase_order_items_select on public.purchase_order_items for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'fournisseurs', 'view'));
 drop policy if exists purchase_order_items_insert on public.purchase_order_items;
 create policy purchase_order_items_insert on public.purchase_order_items for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  with check (
+    public.has_module_permission(organization_id, 'fournisseurs', 'create')
+    or public.has_role_in_organization(organization_id, 'stock')
+  );
 drop policy if exists purchase_order_items_update on public.purchase_order_items;
 create policy purchase_order_items_update on public.purchase_order_items for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  using (
+    public.has_module_permission(organization_id, 'fournisseurs', 'manage')
+    or public.has_role_in_organization(organization_id, 'stock')
+  )
+  with check (
+    public.has_module_permission(organization_id, 'fournisseurs', 'manage')
+    or public.has_role_in_organization(organization_id, 'stock')
+  );
 drop policy if exists purchase_order_items_delete on public.purchase_order_items;
 create policy purchase_order_items_delete on public.purchase_order_items for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'fournisseurs', 'manage'));
 
 -- 4. customers — lecture owner/manager/cashier/accountant, écriture (create/update)
 --    owner/manager/cashier, suppression réservée à owner/manager
 drop policy if exists customers_select on public.customers;
 create policy customers_select on public.customers for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'clients', 'view'));
 drop policy if exists customers_insert on public.customers;
 create policy customers_insert on public.customers for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'clients', 'create'));
 drop policy if exists customers_update on public.customers;
 create policy customers_update on public.customers for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'clients', 'create'))
+  with check (public.has_module_permission(organization_id, 'clients', 'create'));
 drop policy if exists customers_delete on public.customers;
 create policy customers_delete on public.customers for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'clients', 'manage'));
 
 -- 5. stock_levels — lecture pour tous ; AUCUNE écriture directe pour personne
 --    (y compris owner/manager) : mutée uniquement par le trigger
@@ -1180,11 +1375,11 @@ create policy stock_movements_select on public.stock_movements for select to aut
   using (public.has_organization_access(organization_id));
 drop policy if exists stock_movements_insert_full on public.stock_movements;
 create policy stock_movements_insert_full on public.stock_movements for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','stock']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'stock', 'create'));
 drop policy if exists stock_movements_insert_cashier on public.stock_movements;
 create policy stock_movements_insert_cashier on public.stock_movements for insert to authenticated
   with check (
-    public.has_role_in_organization(organization_id, 'cashier')
+    public.has_module_permission(organization_id, 'ventes', 'create')
     and type in ('sale','return')
   );
 
@@ -1192,115 +1387,116 @@ create policy stock_movements_insert_cashier on public.stock_movements for inser
 --    owner/manager/cashier, modification/suppression owner/manager
 drop policy if exists sales_select on public.sales;
 create policy sales_select on public.sales for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'ventes', 'view'));
 drop policy if exists sales_insert on public.sales;
 create policy sales_insert on public.sales for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'ventes', 'create'));
 drop policy if exists sales_update on public.sales;
 create policy sales_update on public.sales for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
--- delete : owner/manager toujours, + un cashier sur SES PROPRES ventes
--- encore 'draft' (nécessaire pour reprendre/jeter un ticket en attente
--- depuis la Caisse — migration 013, corrige un bug du Bloc 8).
+  using (public.has_module_permission(organization_id, 'ventes', 'manage'))
+  with check (public.has_module_permission(organization_id, 'ventes', 'manage'));
+-- delete : permission 'ventes.manage' toujours, + un cashier sur SES
+-- PROPRES ventes encore 'draft' (nécessaire pour reprendre/jeter un
+-- ticket en attente depuis la Caisse — migration 013, corrige un bug du
+-- Bloc 8 — carve-out préservé tel quel, migration 064).
 drop policy if exists sales_delete on public.sales;
 create policy sales_delete on public.sales for delete to authenticated
   using (
-    public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[])
+    public.has_module_permission(organization_id, 'ventes', 'manage')
     or (status = 'draft' and cashier_id = auth.uid() and public.has_role_in_organization(organization_id, 'cashier'))
   );
 
 -- 8. sale_items — même matrice que sales
 drop policy if exists sale_items_select on public.sale_items;
 create policy sale_items_select on public.sale_items for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'ventes', 'view'));
 drop policy if exists sale_items_insert on public.sale_items;
 create policy sale_items_insert on public.sale_items for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'ventes', 'create'));
 drop policy if exists sale_items_update on public.sale_items;
 create policy sale_items_update on public.sale_items for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'ventes', 'manage'))
+  with check (public.has_module_permission(organization_id, 'ventes', 'manage'));
 drop policy if exists sale_items_delete on public.sale_items;
 create policy sale_items_delete on public.sale_items for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'ventes', 'manage'));
 
 -- 9. payments — même logique que sales
 drop policy if exists payments_select on public.payments;
 create policy payments_select on public.payments for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'ventes', 'view'));
 drop policy if exists payments_insert on public.payments;
 create policy payments_insert on public.payments for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'ventes', 'create'));
 drop policy if exists payments_update on public.payments;
 create policy payments_update on public.payments for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'ventes', 'manage'))
+  with check (public.has_module_permission(organization_id, 'ventes', 'manage'));
 drop policy if exists payments_delete on public.payments;
 create policy payments_delete on public.payments for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'ventes', 'manage'));
 
 -- 10. quotes — lecture owner/manager/cashier/accountant, création
 --     owner/manager/cashier, modification/suppression owner/manager
 drop policy if exists quotes_select on public.quotes;
 create policy quotes_select on public.quotes for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'devis', 'view'));
 drop policy if exists quotes_insert on public.quotes;
 create policy quotes_insert on public.quotes for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'devis', 'create'));
 drop policy if exists quotes_update on public.quotes;
 create policy quotes_update on public.quotes for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'devis', 'manage'))
+  with check (public.has_module_permission(organization_id, 'devis', 'manage'));
 drop policy if exists quotes_delete on public.quotes;
 create policy quotes_delete on public.quotes for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'devis', 'manage'));
 
 -- 11. quote_items — même matrice que quotes
 drop policy if exists quote_items_select on public.quote_items;
 create policy quote_items_select on public.quote_items for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'devis', 'view'));
 drop policy if exists quote_items_insert on public.quote_items;
 create policy quote_items_insert on public.quote_items for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'devis', 'create'));
 drop policy if exists quote_items_update on public.quote_items;
 create policy quote_items_update on public.quote_items for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'devis', 'manage'))
+  with check (public.has_module_permission(organization_id, 'devis', 'manage'));
 drop policy if exists quote_items_delete on public.quote_items;
 create policy quote_items_delete on public.quote_items for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'devis', 'manage'));
 
 -- 12. expenses — réservées à owner/manager/accountant, jamais cashier ni stock
 drop policy if exists expenses_select on public.expenses;
 create policy expenses_select on public.expenses for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'depenses', 'view'));
 drop policy if exists expenses_insert on public.expenses;
 create policy expenses_insert on public.expenses for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'depenses', 'create'));
 drop policy if exists expenses_update on public.expenses;
 create policy expenses_update on public.expenses for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'depenses', 'manage'))
+  with check (public.has_module_permission(organization_id, 'depenses', 'manage'));
 drop policy if exists expenses_delete on public.expenses;
 create policy expenses_delete on public.expenses for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'depenses', 'manage'));
 
 -- 15. subscriptions — données de facturation : lecture owner/manager/
 --     accountant, écriture réservée à owner/manager
 drop policy if exists subscriptions_select on public.subscriptions;
 create policy subscriptions_select on public.subscriptions for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'abonnement', 'view'));
 drop policy if exists subscriptions_write on public.subscriptions;
 create policy subscriptions_write on public.subscriptions for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'abonnement', 'create'));
 drop policy if exists subscriptions_update on public.subscriptions;
 create policy subscriptions_update on public.subscriptions for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'abonnement', 'manage'))
+  with check (public.has_module_permission(organization_id, 'abonnement', 'manage'));
 drop policy if exists subscriptions_delete on public.subscriptions;
 create policy subscriptions_delete on public.subscriptions for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'abonnement', 'manage'));
 -- Super Admin : lecture cross-boutiques (Abonnements/Facturation).
 drop policy if exists subscriptions_select_admin on public.subscriptions;
 create policy subscriptions_select_admin on public.subscriptions for select to authenticated
@@ -1309,17 +1505,17 @@ create policy subscriptions_select_admin on public.subscriptions for select to a
 -- 15bis. subscription_payments — même matrice que subscriptions
 drop policy if exists subscription_payments_select on public.subscription_payments;
 create policy subscription_payments_select on public.subscription_payments for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'abonnement', 'view'));
 drop policy if exists subscription_payments_write on public.subscription_payments;
 create policy subscription_payments_write on public.subscription_payments for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'abonnement', 'create'));
 drop policy if exists subscription_payments_update on public.subscription_payments;
 create policy subscription_payments_update on public.subscription_payments for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'abonnement', 'manage'))
+  with check (public.has_module_permission(organization_id, 'abonnement', 'manage'));
 drop policy if exists subscription_payments_delete on public.subscription_payments;
 create policy subscription_payments_delete on public.subscription_payments for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'abonnement', 'manage'));
 -- Super Admin : lecture cross-boutiques (Abonnements/Facturation).
 drop policy if exists subscription_payments_select_admin on public.subscription_payments;
 create policy subscription_payments_select_admin on public.subscription_payments for select to authenticated
@@ -1331,14 +1527,14 @@ create policy shop_settings_select on public.organization_settings for select to
   using (public.has_organization_access(organization_id));
 drop policy if exists shop_settings_write on public.organization_settings;
 create policy shop_settings_write on public.organization_settings for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'parametres', 'create'));
 drop policy if exists shop_settings_update on public.organization_settings;
 create policy shop_settings_update on public.organization_settings for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'parametres', 'manage'))
+  with check (public.has_module_permission(organization_id, 'parametres', 'manage'));
 drop policy if exists shop_settings_delete on public.organization_settings;
 create policy shop_settings_delete on public.organization_settings for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'parametres', 'manage'));
 
 -- 17. plans — lecture publique des formules actives (anon inclus, /tarifs),
 -- gestion complète réservée au Super Admin.
@@ -6328,14 +6524,14 @@ create index if not exists idx_reservations_date on public.reservations(organiza
 alter table public.reservations enable row level security;
 
 create policy reservations_select on public.reservations for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'reservations', 'view'));
 create policy reservations_insert on public.reservations for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'reservations', 'create'));
 create policy reservations_update on public.reservations for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'reservations', 'manage'))
+  with check (public.has_module_permission(organization_id, 'reservations', 'manage'));
 create policy reservations_delete on public.reservations for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'reservations', 'manage'));
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
