@@ -1245,6 +1245,23 @@ $$;
 revoke all on function public.has_module_permission(uuid, text, text) from public;
 grant execute on function public.has_module_permission(uuid, text, text) to authenticated;
 
+-- Raccourci de confort pour l'UI (migration 065) : récupère en un seul
+-- appel les permissions de l'utilisateur courant sur tous les modules
+-- d'une organisation, plutôt que 33 appels scalaires à
+-- has_module_permission(). RLS reste la seule barrière réelle.
+create or replace function public.my_module_permissions(p_organization_id uuid)
+returns table (module_key text, can_view boolean, can_create boolean, can_manage boolean)
+language sql stable security definer set search_path = public as $$
+  select m.key,
+    public.has_module_permission(p_organization_id, m.key, 'view'),
+    public.has_module_permission(p_organization_id, m.key, 'create'),
+    public.has_module_permission(p_organization_id, m.key, 'manage')
+  from public.permission_modules m
+  where m.app_module = (select app_module from public.organizations where id = p_organization_id);
+$$;
+revoke all on function public.my_module_permissions(uuid) from public;
+grant execute on function public.my_module_permissions(uuid) to authenticated;
+
 -- Les 15 autres tables métier ont des policies différenciées par rôle
 -- (app_role) plutôt qu'un accès CRUD uniforme à tout membre de la
 -- boutique. Voir db/AUDIT-SECURITE.md pour la matrice de permissions
