@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
 import { useCurrentPlanModules } from "@/lib/data/accountHooks";
-import { useMyRole } from "@/lib/data/hooks";
+import { useMyRole, useMyModulePermissions } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { AppSwitcher } from "@/components/app/AppSwitcher";
 import { cn } from "@/lib/utils";
@@ -128,6 +128,22 @@ const ERP_MORE: Item[] = [
   { label: "Paramètres", to: "/app/erp/parametres", icon: Settings },
 ];
 
+// Rôles personnalisés (Équipe Phase B, migrations 063/064) — ZegCaisse
+// uniquement pour l'instant (cf. même carte dans AppSidebar.tsx).
+const POS_MODULE_FOR_URL: Record<string, string> = {
+  "/app/produits": "produits",
+  "/app/stock": "stock",
+  "/app/fournisseurs": "fournisseurs",
+  "/app/clients": "clients",
+  "/app/caisse": "ventes",
+  "/app/ventes": "ventes",
+  "/app/devis": "devis",
+  "/app/reservations": "reservations",
+  "/app/depenses": "depenses",
+  "/app/rapports": "rapports",
+  "/app/parametres": "parametres",
+};
+
 export function BottomNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -135,12 +151,20 @@ export function BottomNav() {
 
   const planModules = useCurrentPlanModules();
   const { data: myRole } = useMyRole();
+  const { data: myModulePerms } = useMyModulePermissions();
   const { currentOrganization } = useOrganization();
   const activeApps = currentOrganization?.active_apps ?? ["pos"];
   // Phase 4 : catalogue par app_module (avant, PLAN_MODULES ZegCaisse était
   // vérifié même côté ZegHotel, où aucun raccourci n'était donc jamais bridé).
   const isGatableModule = (to: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === to);
-  const included = (item: Item) => !planModules || !isGatableModule(item.to) || planModules.includes(item.to);
+  // Tant que myModulePerms n'a pas encore chargé, on ne masque rien ici.
+  const hasModulePermission = (to: string) => {
+    const key = POS_MODULE_FOR_URL[to];
+    if (!key || !myModulePerms) return true;
+    return myModulePerms.find((p) => p.module_key === key)?.can_view ?? false;
+  };
+  const included = (item: Item) =>
+    (!planModules || !isGatableModule(item.to) || planModules.includes(item.to)) && hasModulePermission(item.to);
 
   // ZegCaisse et ZegHôtel sont deux activités distinctes : quand les deux
   // sont actives, on ne mélange jamais leurs raccourcis — le menu affiché

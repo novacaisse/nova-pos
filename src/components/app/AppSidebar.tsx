@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useMyRole } from "@/lib/data/hooks";
+import { useMyRole, useMyModulePermissions } from "@/lib/data/hooks";
 import { getModulesForApp } from "@/lib/data/adminHooks";
 import { useCurrentPlanModules } from "@/lib/data/accountHooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -274,11 +274,30 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/erp/parametres": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
 };
 
+// Rôles personnalisés (Équipe Phase B, migrations 063/064) — ZegCaisse
+// uniquement pour l'instant (Phase D branchera Hotel/Resto/ERP). Reflète
+// les permissions RLS réelles (has_module_permission()) côté nav, en plus
+// de HIDDEN_FOR ci-dessus qui reste la garde des rôles hôtel/resto/erp.
+const POS_MODULE_FOR_URL: Record<string, string> = {
+  "/app/produits": "produits",
+  "/app/stock": "stock",
+  "/app/fournisseurs": "fournisseurs",
+  "/app/clients": "clients",
+  "/app/caisse": "ventes",
+  "/app/ventes": "ventes",
+  "/app/devis": "devis",
+  "/app/reservations": "reservations",
+  "/app/depenses": "depenses",
+  "/app/rapports": "rapports",
+  "/app/parametres": "parametres",
+};
+
 export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { data: myRole } = useMyRole();
+  const { data: myModulePerms } = useMyModulePermissions();
   const planModules = useCurrentPlanModules();
   const { currentOrganization } = useOrganization();
   const activeApps = currentOrganization?.active_apps ?? ["pos"];
@@ -302,9 +321,17 @@ export function AppSidebar() {
   // courant — avant ce correctif, PLAN_MODULES (ZegCaisse uniquement) était
   // vérifié même côté ZegHotel, où aucun module n'était donc jamais bridé.
   const isGatableModule = (url: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === url);
+  // Tant que myModulePerms n'a pas encore chargé, on ne masque rien ici —
+  // HIDDEN_FOR reste la garde immédiate, évite un flash "aucun menu".
+  const hasModulePermission = (url: string) => {
+    const key = POS_MODULE_FOR_URL[url];
+    if (!key || !myModulePerms) return true;
+    return myModulePerms.find((p) => p.module_key === key)?.can_view ?? false;
+  };
   const visible = (item: NavItem) =>
     (!myRole || !HIDDEN_FOR[item.url]?.includes(myRole))
-    && (!planModules || !isGatableModule(item.url) || planModules.includes(item.url));
+    && (!planModules || !isGatableModule(item.url) || planModules.includes(item.url))
+    && hasModulePermission(item.url);
 
   // Ferme automatiquement la sidebar sur mobile après un clic.
   const handleNavClick = () => {

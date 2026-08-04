@@ -1220,6 +1220,7 @@ export function useMyRole() {
 // fait deux requêtes et on fusionne côté client.
 export type ShopMember = {
   id: string; organization_id: string; user_id: string; role: AppRole; created_at: string;
+  custom_role_id: string | null;
   profile: { full_name: string | null; phone: string | null; avatar_url: string | null } | null;
 };
 
@@ -1283,6 +1284,142 @@ export function useRemoveMember() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
+  });
+}
+
+export function useUpdateMemberCustomRole() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ memberId, customRoleId }: { memberId: string; customRoleId: string | null }) => {
+      const { error } = await supabase.from("organization_members").update({ custom_role_id: customRoleId }).eq("id", memberId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
+  });
+}
+
+// ============ RÔLES PERSONNALISÉS (organization_roles + permissions par module) ============
+// Le propriétaire peut créer ses propres rôles, avec des droits par module
+// (view/create/manage) réellement vérifiés en RLS via has_module_permission()
+// (migrations 063/064) — pas seulement un masquage côté UI. organization_members
+// reste toujours géré owner-only (voir migration 063, risque d'escalade de
+// privilèges), jamais via ce système.
+export type PermissionModule = { key: string; app_module: string; label: string; open_view: boolean; sort_order: number };
+export type OrganizationRole = { id: string; organization_id: string; key: string; name: string; created_at: string };
+export type OrganizationRolePermission = { role_id: string; module_key: string; can_view: boolean; can_create: boolean; can_manage: boolean };
+export type MyModulePermission = { module_key: string; can_view: boolean; can_create: boolean; can_manage: boolean };
+
+export function usePermissionModules(appModule: string) {
+  return useQuery({
+    queryKey: ["permission_modules", appModule],
+    queryFn: async (): Promise<PermissionModule[]> => {
+      const { data, error } = await supabase.from("permission_modules")
+        .select("*").eq("app_module", appModule).order("sort_order");
+      if (error) throw error;
+      return data as PermissionModule[];
+    },
+  });
+}
+
+export function useOrganizationRoles() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["organization_roles", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<OrganizationRole[]> => {
+      const { data, error } = await supabase.from("organization_roles")
+        .select("*").eq("organization_id", organizationId!).order("created_at");
+      if (error) throw error;
+      return data as OrganizationRole[];
+    },
+  });
+}
+
+export function useOrganizationRolePermissions(roleId: string | null) {
+  return useQuery({
+    queryKey: ["organization_role_permissions", roleId],
+    enabled: !!roleId,
+    queryFn: async (): Promise<OrganizationRolePermission[]> => {
+      const { data, error } = await supabase.from("organization_role_permissions")
+        .select("*").eq("role_id", roleId!);
+      if (error) throw error;
+      return data as OrganizationRolePermission[];
+    },
+  });
+}
+
+// slug simple à partir du nom saisi (organization_roles.key, unique par
+// organisation) — suffixe aléatoire en cas de collision plutôt qu'une erreur
+// opaque remontée à l'utilisateur.
+function slugifyRoleKey(name: string) {
+  const base = name.trim().toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return (base || "role") + "_" + Math.random().toString(36).slice(2, 6);
+}
+
+export function useUpsertOrganizationRole() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id?: string; name: string }) => {
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      if (input.id) {
+        const { data, error } = await supabase.from("organization_roles")
+          .update({ name: input.name }).eq("id", input.id).select().single();
+        if (error) throw error;
+        return data as OrganizationRole;
+      }
+      const { data, error } = await supabase.from("organization_roles")
+        .insert({ organization_id: organizationId, name: input.name, key: slugifyRoleKey(input.name) })
+        .select().single();
+      if (error) throw error;
+      return data as OrganizationRole;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_roles", organizationId] }),
+  });
+}
+
+export function useDeleteOrganizationRole() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (roleId: string) => {
+      const { error } = await supabase.from("organization_roles").delete().eq("id", roleId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["organization_roles", organizationId] });
+      qc.invalidateQueries({ queryKey: ["organization_members", organizationId] });
+    },
+  });
+}
+
+export function useUpsertRolePermissions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ roleId, rows }: { roleId: string; rows: Omit<OrganizationRolePermission, "role_id">[] }) => {
+      const { error } = await supabase.from("organization_role_permissions")
+        .upsert(rows.map((r) => ({ role_id: roleId, ...r })));
+      if (error) throw error;
+    },
+    onSuccess: (_data, { roleId }) => qc.invalidateQueries({ queryKey: ["organization_role_permissions", roleId] }),
+  });
+}
+
+// Permissions réelles (RLS) de l'utilisateur courant sur chaque module —
+// utilisé pour le garde-fou de nav (masquer un module inaccessible), jamais
+// comme source de vérité de sécurité (la RLS l'est déjà, ceci ne fait que la
+// refléter côté UI pour éviter d'afficher des écrans vides/interdits).
+export function useMyModulePermissions() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["my_module_permissions", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<MyModulePermission[]> => {
+      const { data, error } = await supabase.rpc("my_module_permissions", { p_organization_id: organizationId! });
+      if (error) throw error;
+      return data as MyModulePermission[];
+    },
+    staleTime: 60_000,
   });
 }
 
