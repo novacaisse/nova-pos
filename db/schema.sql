@@ -1096,7 +1096,20 @@ insert into public.permission_modules (key, app_module, label, open_view, sort_o
   ('depenses',     'pos', 'Dépenses',      false, 8),
   ('rapports',     'pos', 'Rapports',      false, 9),
   ('abonnement',   'pos', 'Abonnement',    false, 10),
-  ('parametres',   'pos', 'Paramètres',    true,  11)
+  ('parametres',   'pos', 'Paramètres',    true,  11),
+  -- Modules ZegHotel (migration 066, Phase D-1)
+  ('hotel_reservations', 'hotel', 'Réservations',     false, 1),
+  ('hotel_folios',       'hotel', 'Notes de séjour',  false, 2),
+  ('hotel_payments',     'hotel', 'Paiements séjour', false, 3),
+  ('hotel_rooms',        'hotel', 'Chambres',         true,  4),
+  ('hotel_housekeeping', 'hotel', 'Housekeeping',     false, 5),
+  ('hotel_maintenance',  'hotel', 'Maintenance',      true,  6),
+  ('hotel_clients',      'hotel', 'Clients',          false, 7),
+  ('hotel_corporate',    'hotel', 'Comptes entreprise', false, 8),
+  ('hotel_pos_interne',  'hotel', 'Point de vente interne', false, 9),
+  ('hotel_rapports',     'hotel', 'Rapports',         false, 10),
+  ('hotel_canaux',       'hotel', 'Canaux de distribution', false, 11),
+  ('hotel_parametres',   'hotel', 'Paramètres',       true,  12)
 on conflict (key) do nothing;
 
 create table if not exists public.organization_roles (
@@ -1191,6 +1204,39 @@ insert into public.default_role_permissions (role, module_key, can_view, can_cre
   ('owner', 'rapports', true, true, true),
   ('manager', 'rapports', true, true, true)
 on conflict (role, module_key) do update set can_view = true, can_create = true, can_manage = true;
+
+-- ZegHotel (migration 066, Phase D-1) — owner/manager : accès complet.
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage)
+select r::public.app_role, m.key, true, true, true
+from unnest(array['owner','manager']) r, public.permission_modules m
+where m.app_module = 'hotel'
+on conflict (role, module_key) do update set can_view = true, can_create = true, can_manage = true;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('front_desk', 'hotel_reservations', true, true, true),
+  ('front_desk', 'hotel_folios', true, true, true),
+  ('front_desk', 'hotel_payments', true, true, false),
+  ('front_desk', 'hotel_housekeeping', true, true, true),
+  ('front_desk', 'hotel_maintenance', true, true, false),
+  ('front_desk', 'hotel_clients', true, true, true),
+  ('front_desk', 'hotel_corporate', true, false, false),
+  ('front_desk', 'hotel_pos_interne', true, true, false),
+  ('front_desk', 'hotel_rapports', true, false, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('housekeeping', 'hotel_housekeeping', true, false, true),
+  ('housekeeping', 'hotel_maintenance', true, true, true)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('accountant', 'hotel_reservations', true, false, false),
+  ('accountant', 'hotel_folios', true, false, false),
+  ('accountant', 'hotel_payments', true, false, false),
+  ('accountant', 'hotel_corporate', true, false, false),
+  ('accountant', 'hotel_maintenance', true, false, false),
+  ('accountant', 'hotel_rapports', true, false, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
 
 create or replace function public.has_module_permission(_org_id uuid, _module_key text, _level text default 'view')
 returns boolean language plpgsql stable security definer set search_path = public as $$
@@ -2063,8 +2109,8 @@ create policy hotel_room_types_select on public.hotel_room_types for select to a
   using (public.has_organization_access(organization_id));
 drop policy if exists hotel_room_types_write on public.hotel_room_types;
 create policy hotel_room_types_write on public.hotel_room_types for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_rooms', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_rooms', 'manage'));
 
 -- =============== rooms ===============
 create table if not exists public.hotel_rooms (
@@ -2095,11 +2141,13 @@ create policy hotel_rooms_select on public.hotel_rooms for select to authenticat
   using (public.has_organization_access(organization_id));
 drop policy if exists hotel_rooms_insert on public.hotel_rooms;
 create policy hotel_rooms_insert on public.hotel_rooms for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'hotel_rooms', 'create'));
+-- Carve-out préservé (migration 067) : housekeeping peut changer le statut
+-- d'une chambre même sans permission 'manage' sur le module.
 drop policy if exists hotel_rooms_update on public.hotel_rooms;
 create policy hotel_rooms_update on public.hotel_rooms for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_rooms', 'manage') or public.has_role_in_organization(organization_id, 'housekeeping'))
+  with check (public.has_module_permission(organization_id, 'hotel_rooms', 'manage') or public.has_role_in_organization(organization_id, 'housekeeping'));
 drop policy if exists hotel_rooms_delete on public.hotel_rooms;
 create policy hotel_rooms_delete on public.hotel_rooms for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
@@ -2127,8 +2175,8 @@ create policy hotel_rate_plans_select on public.hotel_rate_plans for select to a
   using (public.has_organization_access(organization_id));
 drop policy if exists hotel_rate_plans_write on public.hotel_rate_plans;
 create policy hotel_rate_plans_write on public.hotel_rate_plans for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'));
 
 -- =============== seasonal_rates ===============
 create table if not exists public.hotel_seasonal_rates (
@@ -2151,8 +2199,8 @@ create policy hotel_seasonal_rates_select on public.hotel_seasonal_rates for sel
   using (public.has_organization_access(organization_id));
 drop policy if exists hotel_seasonal_rates_write on public.hotel_seasonal_rates;
 create policy hotel_seasonal_rates_write on public.hotel_seasonal_rates for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'));
 
 -- =============== rate_restrictions ===============
 create table if not exists public.hotel_rate_restrictions (
@@ -2174,8 +2222,8 @@ create policy hotel_rate_restrictions_select on public.hotel_rate_restrictions f
   using (public.has_organization_access(organization_id));
 drop policy if exists hotel_rate_restrictions_write on public.hotel_rate_restrictions;
 create policy hotel_rate_restrictions_write on public.hotel_rate_restrictions for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'));
 
 -- =============== corporate_accounts ===============
 create table if not exists public.hotel_corporate_accounts (
@@ -2196,11 +2244,11 @@ alter table public.hotel_corporate_accounts enable row level security;
 -- négocié, conditions de facturation) réservée à owner/manager.
 drop policy if exists hotel_corporate_select on public.hotel_corporate_accounts;
 create policy hotel_corporate_select on public.hotel_corporate_accounts for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_corporate', 'view'));
 drop policy if exists hotel_corporate_write on public.hotel_corporate_accounts;
 create policy hotel_corporate_write on public.hotel_corporate_accounts for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_corporate', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_corporate', 'manage'));
 
 -- =============== hotel_settings ===============
 create table if not exists public.hotel_settings (
@@ -2223,8 +2271,8 @@ create policy hotel_settings_select on public.hotel_settings for select to authe
   using (public.has_organization_access(organization_id));
 drop policy if exists hotel_settings_write on public.hotel_settings;
 create policy hotel_settings_write on public.hotel_settings for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_parametres', 'manage'));
 
 -- =============== channels (structure seule, hors scope V1) ===============
 -- Aucune logique de synchronisation — juste la table pour ne pas avoir à
@@ -2245,8 +2293,8 @@ create index if not exists idx_hotel_channels_org on public.hotel_channels(organ
 alter table public.hotel_channels enable row level security;
 drop policy if exists hotel_channels_all on public.hotel_channels;
 create policy hotel_channels_all on public.hotel_channels for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_canaux', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_canaux', 'manage'));
 
 -- Migration 020h — ZegHotel, étape 3/4 : clients, réservations et
 -- attribution des chambres, avec protection anti-double-réservation au
@@ -2282,11 +2330,11 @@ alter table public.hotel_guests enable row level security;
 -- compris via un appel API direct (masquage fait en SQL, pas côté client).
 drop policy if exists hotel_guests_select on public.hotel_guests;
 create policy hotel_guests_select on public.hotel_guests for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_clients', 'view'));
 drop policy if exists hotel_guests_write on public.hotel_guests;
 create policy hotel_guests_write on public.hotel_guests for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_clients', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_clients', 'manage'));
 
 create or replace function public.hotel_guest_contact(_organization_id uuid)
 returns table (
@@ -2348,16 +2396,18 @@ create index if not exists idx_hotel_reservations_dates on public.hotel_reservat
 alter table public.hotel_reservations enable row level security;
 drop policy if exists hotel_reservations_select on public.hotel_reservations;
 create policy hotel_reservations_select on public.hotel_reservations for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_reservations', 'view'));
 drop policy if exists hotel_reservations_insert on public.hotel_reservations;
 create policy hotel_reservations_insert on public.hotel_reservations for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'hotel_reservations', 'create'));
 drop policy if exists hotel_reservations_update on public.hotel_reservations;
 create policy hotel_reservations_update on public.hotel_reservations for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_reservations', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_reservations', 'manage'));
 -- Suppression définitive (hors annulation, qui est un changement de
--- statut) réservée à owner/manager — conserve l'historique par défaut.
+-- statut) réservée à owner/manager — conserve l'historique par défaut ;
+-- carve-out préservé (migration 067), jamais délégable à un rôle
+-- personnalisé même avec 'manage' accordé sur ce module.
 drop policy if exists hotel_reservations_delete on public.hotel_reservations;
 create policy hotel_reservations_delete on public.hotel_reservations for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
@@ -2413,11 +2463,11 @@ create index if not exists idx_hotel_resv_rooms_room on public.hotel_reservation
 alter table public.hotel_reservation_rooms enable row level security;
 drop policy if exists hotel_resv_rooms_select on public.hotel_reservation_rooms;
 create policy hotel_resv_rooms_select on public.hotel_reservation_rooms for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_reservations', 'view'));
 drop policy if exists hotel_resv_rooms_write on public.hotel_reservation_rooms;
 create policy hotel_resv_rooms_write on public.hotel_reservation_rooms for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_reservations', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_reservations', 'manage'));
 
 -- Remplit automatiquement check_in/check_out/status/billing_unit/
 -- check_in_at/check_out_at à l'insertion depuis la réservation parente —
@@ -2551,11 +2601,11 @@ create index if not exists idx_hotel_folios_org on public.hotel_folios(organizat
 alter table public.hotel_folios enable row level security;
 drop policy if exists hotel_folios_select on public.hotel_folios;
 create policy hotel_folios_select on public.hotel_folios for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_folios', 'view'));
 drop policy if exists hotel_folios_write on public.hotel_folios;
 create policy hotel_folios_write on public.hotel_folios for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_folios', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_folios', 'manage'));
 
 -- =============== 1. Calcul du tarif (seasonal override + rate plan %) ===============
 create or replace function public.hotel_compute_room_rate(
@@ -2781,11 +2831,11 @@ create index if not exists idx_hotel_folio_charges_folio on public.hotel_folio_c
 alter table public.hotel_folio_charges enable row level security;
 drop policy if exists hotel_folio_charges_select on public.hotel_folio_charges;
 create policy hotel_folio_charges_select on public.hotel_folio_charges for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_folios', 'view'));
 drop policy if exists hotel_folio_charges_write on public.hotel_folio_charges;
 create policy hotel_folio_charges_write on public.hotel_folio_charges for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_folios', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_folios', 'manage'));
 
 -- ZegHotel Phase 2 (migration 029) : module Clients (/app/hotel/clients) —
 -- vue CRM des hotel_guests indépendante d'une réservation particulière.
@@ -2825,6 +2875,10 @@ grant execute on function public.hotel_guest_summary(uuid) to authenticated;
 -- "vendre un produit du catalogue contre une note ouverte", pas un accès
 -- large à stock_movements. Le garde-fou anti-survente
 -- (apply_stock_movement(), migration 026) s'applique normalement.
+-- Autorisation branchée sur has_module_permission() (migration 067, module
+-- 'hotel_pos_interne') plutôt qu'une liste de rôles en dur — la seule
+-- fonction hôtel qui accordait un accès métier via un check de rôle
+-- explicite, migrée pour respecter "permission réellement appliquée".
 create or replace function public.post_hotel_pos_charge(
   p_organization_id uuid,
   p_folio_id uuid,
@@ -2837,7 +2891,7 @@ declare
   v_quantity numeric(14,3);
   v_folio public.hotel_folios;
 begin
-  if not public.has_any_role_in_organization(p_organization_id, array['owner', 'manager', 'front_desk']::public.app_role[]) then
+  if not public.has_module_permission(p_organization_id, 'hotel_pos_interne', 'create') then
     raise exception 'Accès refusé.';
   end if;
 
@@ -2892,20 +2946,21 @@ create index if not exists idx_hotel_payments_folio on public.hotel_payments(fol
 alter table public.hotel_payments enable row level security;
 drop policy if exists hotel_payments_select on public.hotel_payments;
 create policy hotel_payments_select on public.hotel_payments for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_payments', 'view'));
 drop policy if exists hotel_payments_insert on public.hotel_payments;
 create policy hotel_payments_insert on public.hotel_payments for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'hotel_payments', 'create'));
 -- Modifier/supprimer un paiement déjà enregistré est réservé à
 -- owner/manager (intégrité financière — un front_desk qui se trompe
--- doit faire corriger par son responsable, pas éditer directement).
+-- doit faire corriger par son responsable, pas éditer directement) —
+-- default_role_permissions n'accorde 'manage' sur ce module qu'à eux.
 drop policy if exists hotel_payments_update on public.hotel_payments;
 create policy hotel_payments_update on public.hotel_payments for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_payments', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_payments', 'manage'));
 drop policy if exists hotel_payments_delete on public.hotel_payments;
 create policy hotel_payments_delete on public.hotel_payments for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_payments', 'manage'));
 
 -- Migration 020j — ZegHotel, étape finale : tâches de ménage et
 -- incidents de maintenance. À exécuter après 020f/020g/020h/020i.
@@ -2931,14 +2986,17 @@ alter table public.hotel_housekeeping_tasks enable row level security;
 -- le statut de ses tâches, jamais n'en crée ni n'en supprime.
 drop policy if exists hotel_housekeeping_select on public.hotel_housekeeping_tasks;
 create policy hotel_housekeeping_select on public.hotel_housekeeping_tasks for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_housekeeping', 'view'));
 drop policy if exists hotel_housekeeping_insert on public.hotel_housekeeping_tasks;
 create policy hotel_housekeeping_insert on public.hotel_housekeeping_tasks for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'hotel_housekeeping', 'create'));
 drop policy if exists hotel_housekeeping_update on public.hotel_housekeeping_tasks;
 create policy hotel_housekeeping_update on public.hotel_housekeeping_tasks for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_housekeeping', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_housekeeping', 'manage'));
+-- Carve-out préservé (migration 067) : suppression d'une tâche reste
+-- owner/manager, même pour front_desk/housekeeping qui peuvent la
+-- créer/modifier.
 drop policy if exists hotel_housekeeping_delete on public.hotel_housekeeping_tasks;
 create policy hotel_housekeeping_delete on public.hotel_housekeeping_tasks for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
@@ -2965,14 +3023,16 @@ alter table public.hotel_maintenance_tickets enable row level security;
 -- avec un technicien).
 drop policy if exists hotel_maintenance_select on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_select on public.hotel_maintenance_tickets for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_maintenance', 'view'));
 drop policy if exists hotel_maintenance_insert on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_insert on public.hotel_maintenance_tickets for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','front_desk','housekeeping','accountant']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'hotel_maintenance', 'create'));
 drop policy if exists hotel_maintenance_update on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_update on public.hotel_maintenance_tickets for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','housekeeping']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'hotel_maintenance', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_maintenance', 'manage'));
+-- Carve-out préservé (migration 067) : suppression d'un ticket reste
+-- owner/manager, même pour housekeeping qui peut le créer/modifier.
 drop policy if exists hotel_maintenance_delete on public.hotel_maintenance_tickets;
 create policy hotel_maintenance_delete on public.hotel_maintenance_tickets for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));

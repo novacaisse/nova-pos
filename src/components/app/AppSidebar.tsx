@@ -291,6 +291,20 @@ const POS_MODULE_FOR_URL: Record<string, string> = {
   "/app/rapports": "rapports",
   "/app/parametres": "parametres",
 };
+// Idem ZegHotel (Équipe Phase D-1, migrations 066/067).
+const HOTEL_MODULE_FOR_URL: Record<string, string> = {
+  "/app/hotel/reservations": "hotel_reservations",
+  "/app/hotel/rooms": "hotel_rooms",
+  "/app/hotel/housekeeping": "hotel_housekeeping",
+  "/app/hotel/maintenance": "hotel_maintenance",
+  "/app/hotel/clients": "hotel_clients",
+  "/app/hotel/corporate": "hotel_corporate",
+  "/app/hotel/pos-interne": "hotel_pos_interne",
+  "/app/hotel/rapports": "hotel_rapports",
+  "/app/hotel/canaux": "hotel_canaux",
+  "/app/hotel/parametres": "hotel_parametres",
+};
+const MODULE_FOR_URL: Record<string, string> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL };
 
 export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
@@ -324,7 +338,7 @@ export function AppSidebar() {
   // Tant que myModulePerms n'a pas encore chargé, on ne masque rien ici —
   // HIDDEN_FOR reste la garde immédiate, évite un flash "aucun menu".
   const hasModulePermission = (url: string) => {
-    const key = POS_MODULE_FOR_URL[url];
+    const key = MODULE_FOR_URL[url];
     if (!key || !myModulePerms) return true;
     return myModulePerms.find((p) => p.module_key === key)?.can_view ?? false;
   };

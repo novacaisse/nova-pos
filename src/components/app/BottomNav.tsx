@@ -143,6 +143,20 @@ const POS_MODULE_FOR_URL: Record<string, string> = {
   "/app/rapports": "rapports",
   "/app/parametres": "parametres",
 };
+// Idem ZegHotel (Équipe Phase D-1, migrations 066/067).
+const HOTEL_MODULE_FOR_URL: Record<string, string> = {
+  "/app/hotel/reservations": "hotel_reservations",
+  "/app/hotel/rooms": "hotel_rooms",
+  "/app/hotel/housekeeping": "hotel_housekeeping",
+  "/app/hotel/maintenance": "hotel_maintenance",
+  "/app/hotel/clients": "hotel_clients",
+  "/app/hotel/corporate": "hotel_corporate",
+  "/app/hotel/pos-interne": "hotel_pos_interne",
+  "/app/hotel/rapports": "hotel_rapports",
+  "/app/hotel/canaux": "hotel_canaux",
+  "/app/hotel/parametres": "hotel_parametres",
+};
+const MODULE_FOR_URL: Record<string, string> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL };
 
 export function BottomNav() {
   const [open, setOpen] = useState(false);
@@ -159,7 +173,7 @@ export function BottomNav() {
   const isGatableModule = (to: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === to);
   // Tant que myModulePerms n'a pas encore chargé, on ne masque rien ici.
   const hasModulePermission = (to: string) => {
-    const key = POS_MODULE_FOR_URL[to];
+    const key = MODULE_FOR_URL[to];
     if (!key || !myModulePerms) return true;
     return myModulePerms.find((p) => p.module_key === key)?.can_view ?? false;
   };

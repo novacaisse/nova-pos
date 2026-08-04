@@ -73,9 +73,14 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
           <StatCard label="Rôles distincts" value={String(roleCounts)} icon={<Shield className="h-5 w-5" />} accent="accent" />
         </div>
 
-        {showPermissionsMatrix && (
+{/* La matrice statique PERMISSIONS_MATRIX (onglet "perms") est spécifique
+    ZegCaisse (voir permissionsMatrix.ts) — gardée derrière
+    showPermissionsMatrix seul. L'onglet "Rôles personnalisés", lui, doit
+    s'afficher dès qu'une app fournit customRolesAppModule, même si elle
+    n'a pas (encore) cette matrice statique (cas ZegHotel). */}
+        {(showPermissionsMatrix || customRolesAppModule) && (
           <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
-            {(["members", "perms", ...(customRolesAppModule ? (["roles"] as const) : [])] as const).map((t) => (
+            {(["members", ...(showPermissionsMatrix ? (["perms"] as const) : []), ...(customRolesAppModule ? (["roles"] as const) : [])] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={cn("flex-1 rounded-lg px-3 py-2 text-sm font-medium", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
                 {t === "members" ? "Membres" : t === "perms" ? "Permissions" : "Rôles personnalisés"}
