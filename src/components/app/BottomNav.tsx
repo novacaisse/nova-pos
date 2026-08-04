@@ -156,7 +156,17 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   "/app/hotel/canaux": "hotel_canaux",
   "/app/hotel/parametres": "hotel_parametres",
 };
-const MODULE_FOR_URL: Record<string, string> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL };
+// Idem ZegResto (Équipe Phase D-2, migrations 068/069).
+const RESTO_MODULE_FOR_URL: Record<string, string> = {
+  "/app/resto/salle": "resto_salle",
+  "/app/resto/commandes": "resto_commandes",
+  "/app/resto/cuisine": "resto_cuisine",
+  "/app/resto/menu": "resto_menu",
+  "/app/resto/reservations": "resto_reservations",
+  "/app/resto/rapports": "resto_rapports",
+  "/app/resto/parametres": "resto_parametres",
+};
+const MODULE_FOR_URL: Record<string, string> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL, ...RESTO_MODULE_FOR_URL };
 
 export function BottomNav() {
   const [open, setOpen] = useState(false);

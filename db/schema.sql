@@ -1109,7 +1109,19 @@ insert into public.permission_modules (key, app_module, label, open_view, sort_o
   ('hotel_pos_interne',  'hotel', 'Point de vente interne', false, 9),
   ('hotel_rapports',     'hotel', 'Rapports',         false, 10),
   ('hotel_canaux',       'hotel', 'Canaux de distribution', false, 11),
-  ('hotel_parametres',   'hotel', 'Paramètres',       true,  12)
+  ('hotel_parametres',   'hotel', 'Paramètres',       true,  12),
+  -- Modules ZegResto (migration 068, Phase D-2)
+  ('resto_salle',        'resto', 'Salle',                true,  1),
+  ('resto_commandes',    'resto', 'Commandes',            true,  2),
+  ('resto_cuisine',      'resto', 'Cuisine (KDS)',        true,  3),
+  ('resto_menu',         'resto', 'Menu',                 true,  4),
+  ('resto_recettes',     'resto', 'Recettes',             false, 5),
+  ('resto_reservations', 'resto', 'Réservations',         false, 6),
+  ('resto_facturation',  'resto', 'Facturation',          false, 7),
+  ('resto_paiements',    'resto', 'Paiements',            false, 8),
+  ('resto_fidelite',     'resto', 'Fidélité',             false, 9),
+  ('resto_rapports',     'resto', 'Rapports',             false, 10),
+  ('resto_parametres',   'resto', 'Paramètres',           true,  11)
 on conflict (key) do nothing;
 
 create table if not exists public.organization_roles (
@@ -1236,6 +1248,34 @@ insert into public.default_role_permissions (role, module_key, can_view, can_cre
   ('accountant', 'hotel_corporate', true, false, false),
   ('accountant', 'hotel_maintenance', true, false, false),
   ('accountant', 'hotel_rapports', true, false, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+-- ZegResto (migration 068, Phase D-2) — owner/manager : accès complet.
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage)
+select r::public.app_role, m.key, true, true, true
+from unnest(array['owner','manager']) r, public.permission_modules m
+where m.app_module = 'resto'
+on conflict (role, module_key) do update set can_view = true, can_create = true, can_manage = true;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('accountant', 'resto_recettes', true, false, false),
+  ('accountant', 'resto_reservations', true, false, false),
+  ('accountant', 'resto_facturation', true, false, false),
+  ('accountant', 'resto_paiements', true, false, false),
+  ('accountant', 'resto_fidelite', true, false, false),
+  ('accountant', 'resto_rapports', true, false, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('server', 'resto_commandes', true, true, true),
+  ('server', 'resto_reservations', true, true, true),
+  ('server', 'resto_facturation', true, true, true),
+  ('server', 'resto_paiements', true, true, false),
+  ('server', 'resto_fidelite', true, true, false)
+on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
+
+insert into public.default_role_permissions (role, module_key, can_view, can_create, can_manage) values
+  ('cook', 'resto_cuisine', true, false, true)
 on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
 
 create or replace function public.has_module_permission(_org_id uuid, _module_key text, _level text default 'view')
@@ -3064,8 +3104,8 @@ alter table public.resto_zones enable row level security;
 create policy resto_zones_select on public.resto_zones for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_zones_write on public.resto_zones for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_salle', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_salle', 'manage'));
 
 create table if not exists public.resto_tables (
   id uuid primary key default gen_random_uuid(),
@@ -3090,10 +3130,12 @@ alter table public.resto_tables enable row level security;
 create policy resto_tables_select on public.resto_tables for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_tables_insert on public.resto_tables for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'resto_salle', 'manage'));
+-- Carve-out préservé (migration 069) : server peut changer le statut d'une
+-- table même sans permission 'manage' sur le module.
 create policy resto_tables_update on public.resto_tables for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_salle', 'manage') or public.has_role_in_organization(organization_id, 'server'))
+  with check (public.has_module_permission(organization_id, 'resto_salle', 'manage') or public.has_role_in_organization(organization_id, 'server'));
 create policy resto_tables_delete on public.resto_tables for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
@@ -3110,8 +3152,8 @@ alter table public.resto_menu_categories enable row level security;
 create policy resto_menu_categories_select on public.resto_menu_categories for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_menu_categories_write on public.resto_menu_categories for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_menu', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_menu', 'manage'));
 
 -- station : préparé pour un futur routage KDS multi-poste (grill/froid/
 -- pâtisserie...), non exploité en V1 — le KDS (Phase 2) reste un flux
@@ -3137,8 +3179,8 @@ alter table public.resto_menu_items enable row level security;
 create policy resto_menu_items_select on public.resto_menu_items for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_menu_items_write on public.resto_menu_items for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_menu', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_menu', 'manage'));
 
 create table if not exists public.resto_modifiers (
   id uuid primary key default gen_random_uuid(),
@@ -3152,8 +3194,8 @@ alter table public.resto_modifiers enable row level security;
 create policy resto_modifiers_select on public.resto_modifiers for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_modifiers_write on public.resto_modifiers for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_menu', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_menu', 'manage'));
 
 create table if not exists public.resto_modifier_options (
   id uuid primary key default gen_random_uuid(),
@@ -3179,12 +3221,12 @@ create policy resto_modifier_options_write on public.resto_modifier_options for 
   using (exists (
     select 1 from public.resto_modifiers m
     where m.id = modifier_id
-      and public.has_any_role_in_organization(m.organization_id, array['owner','manager']::public.app_role[])
+      and public.has_module_permission(m.organization_id, 'resto_menu', 'manage')
   ))
   with check (exists (
     select 1 from public.resto_modifiers m
     where m.id = modifier_id
-      and public.has_any_role_in_organization(m.organization_id, array['owner','manager']::public.app_role[])
+      and public.has_module_permission(m.organization_id, 'resto_menu', 'manage')
   ));
 
 create table if not exists public.resto_menu_item_modifiers (
@@ -3204,12 +3246,12 @@ create policy resto_menu_item_modifiers_write on public.resto_menu_item_modifier
   using (exists (
     select 1 from public.resto_menu_items i
     where i.id = menu_item_id
-      and public.has_any_role_in_organization(i.organization_id, array['owner','manager']::public.app_role[])
+      and public.has_module_permission(i.organization_id, 'resto_menu', 'manage')
   ))
   with check (exists (
     select 1 from public.resto_menu_items i
     where i.id = menu_item_id
-      and public.has_any_role_in_organization(i.organization_id, array['owner','manager']::public.app_role[])
+      and public.has_module_permission(i.organization_id, 'resto_menu', 'manage')
   ));
 
 -- Migration 038 — ZegResto, étape 4/7 : Commandes + KDS (cuisine), flux
@@ -3232,10 +3274,10 @@ alter table public.resto_orders enable row level security;
 create policy resto_orders_select on public.resto_orders for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_orders_insert on public.resto_orders for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'resto_commandes', 'create'));
 create policy resto_orders_update on public.resto_orders for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_commandes', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_commandes', 'manage'));
 create policy resto_orders_delete on public.resto_orders for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
@@ -3262,10 +3304,10 @@ alter table public.resto_order_courses enable row level security;
 create policy resto_order_courses_select on public.resto_order_courses for select to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
 create policy resto_order_courses_insert on public.resto_order_courses for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'resto_commandes', 'create'));
 create policy resto_order_courses_update on public.resto_order_courses for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_commandes', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_commandes', 'manage'));
 create policy resto_order_courses_delete on public.resto_order_courses for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
@@ -3305,8 +3347,8 @@ create policy resto_order_items_select on public.resto_order_items for select to
 create policy resto_order_items_insert on public.resto_order_items for insert to authenticated
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 create policy resto_order_items_update on public.resto_order_items for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_commandes', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_commandes', 'manage'));
 create policy resto_order_items_delete on public.resto_order_items for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
@@ -3333,8 +3375,8 @@ create policy resto_kitchen_tickets_insert on public.resto_kitchen_tickets for i
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 -- update inclut cook : c'est lui qui fait avancer le ticket depuis le KDS.
 create policy resto_kitchen_tickets_update on public.resto_kitchen_tickets for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cook']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_cuisine', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_cuisine', 'manage'));
 create policy resto_kitchen_tickets_delete on public.resto_kitchen_tickets for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
@@ -3387,7 +3429,7 @@ declare
   v_recipe_id uuid;
   v_ingredient record;
 begin
-  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+  if not public.has_module_permission(p_organization_id, 'resto_commandes', 'create') then
     raise exception 'Accès refusé.';
   end if;
   if p_quantite is null or p_quantite <= 0 then
@@ -3472,7 +3514,7 @@ declare
   v_item_count integer;
   v_existing_ticket public.resto_kitchen_tickets;
 begin
-  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+  if not public.has_module_permission(p_organization_id, 'resto_commandes', 'manage') then
     raise exception 'Accès refusé.';
   end if;
 
@@ -3518,17 +3560,23 @@ create or replace function public.mark_resto_order_item_statut(
 ) returns public.resto_order_items
 language plpgsql security definer set search_path = public as $$
 declare
-  v_roles public.app_role[];
+  v_allowed boolean;
   v_item public.resto_order_items;
 begin
   if p_statut not in ('pret', 'servie') then
     raise exception 'Statut invalide.';
   end if;
-  v_roles := case when p_statut = 'pret'
-    then array['owner','manager','server','cook']::public.app_role[]
-    else array['owner','manager','server']::public.app_role[]
-  end;
-  if not public.has_any_role_in_organization(p_organization_id, v_roles) then
+  -- 'pret' : accessible à qui a 'manage' sur resto_cuisine (cook) OU sur
+  -- resto_commandes (server) — reproduit l'union owner/manager/server/cook
+  -- d'origine (migration 069). 'servie' : seulement resto_commandes.manage
+  -- (owner/manager/server) — cook en est exclu, comme avant.
+  if p_statut = 'pret' then
+    v_allowed := public.has_module_permission(p_organization_id, 'resto_cuisine', 'manage')
+      or public.has_module_permission(p_organization_id, 'resto_commandes', 'manage');
+  else
+    v_allowed := public.has_module_permission(p_organization_id, 'resto_commandes', 'manage');
+  end if;
+  if not v_allowed then
     raise exception 'Accès refusé.';
   end if;
 
@@ -3567,12 +3615,12 @@ create index if not exists idx_resto_reservations_date on public.resto_reservati
 alter table public.resto_reservations enable row level security;
 
 create policy resto_reservations_select on public.resto_reservations for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_reservations', 'view'));
 create policy resto_reservations_insert on public.resto_reservations for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'resto_reservations', 'create'));
 create policy resto_reservations_update on public.resto_reservations for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_reservations', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_reservations', 'manage'));
 create policy resto_reservations_delete on public.resto_reservations for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
@@ -3651,10 +3699,10 @@ create index if not exists idx_resto_recipes_org on public.resto_recipes(organiz
 alter table public.resto_recipes enable row level security;
 
 create policy resto_recipes_select on public.resto_recipes for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_recettes', 'view'));
 create policy resto_recipes_write on public.resto_recipes for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_recettes', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_recettes', 'manage'));
 
 create table if not exists public.resto_recipe_ingredients (
   id uuid primary key default gen_random_uuid(),
@@ -3671,18 +3719,18 @@ create policy resto_recipe_ingredients_select on public.resto_recipe_ingredients
   using (exists (
     select 1 from public.resto_recipes r
     where r.id = recipe_id
-      and public.has_any_role_in_organization(r.organization_id, array['owner','manager','accountant']::public.app_role[])
+      and public.has_module_permission(r.organization_id, 'resto_recettes', 'view')
   ));
 create policy resto_recipe_ingredients_write on public.resto_recipe_ingredients for all to authenticated
   using (exists (
     select 1 from public.resto_recipes r
     where r.id = recipe_id
-      and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
+      and public.has_module_permission(r.organization_id, 'resto_recettes', 'manage')
   ))
   with check (exists (
     select 1 from public.resto_recipes r
     where r.id = recipe_id
-      and public.has_any_role_in_organization(r.organization_id, array['owner','manager']::public.app_role[])
+      and public.has_module_permission(r.organization_id, 'resto_recettes', 'manage')
   ));
 
 -- resto_settings (migration 044) : une ligne par organisation, créée à la
@@ -3724,8 +3772,8 @@ alter table public.resto_settings enable row level security;
 create policy resto_settings_select on public.resto_settings for select to authenticated
   using (public.has_organization_access(organization_id));
 create policy resto_settings_write on public.resto_settings for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_parametres', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_parametres', 'manage'));
 
 -- resto_loyalty_accounts (migration 045) : identité indépendante de
 -- ZegResto, clé = numéro de téléphone — PAS de FK vers public.customers
@@ -3746,14 +3794,14 @@ create index if not exists idx_resto_loyalty_accounts_org on public.resto_loyalt
 alter table public.resto_loyalty_accounts enable row level security;
 
 create policy resto_loyalty_accounts_select on public.resto_loyalty_accounts for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_fidelite', 'view'));
 -- INSERT limité à points_balance = 0 : tout crédit de points passe
 -- exclusivement par les RPC security definer (apply_resto_bill_loyalty(),
 -- add_resto_bill_payment()), jamais par une écriture directe.
 create policy resto_loyalty_accounts_insert on public.resto_loyalty_accounts for insert to authenticated
   with check (
     points_balance = 0
-    and public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[])
+    and public.has_module_permission(organization_id, 'resto_fidelite', 'create')
   );
 -- UPDATE direct réservé à owner/manager (correction nom/téléphone) —
 -- server n'a aucun accès UPDATE direct : RLS ne masque que des lignes,
@@ -3761,10 +3809,10 @@ create policy resto_loyalty_accounts_insert on public.resto_loyalty_accounts for
 -- accès UPDATE, même pour "juste le nom", l'exposerait aussi à modifier
 -- points_balance directement.
 create policy resto_loyalty_accounts_update on public.resto_loyalty_accounts for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_fidelite', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_fidelite', 'manage'));
 create policy resto_loyalty_accounts_delete on public.resto_loyalty_accounts for delete to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_fidelite', 'manage'));
 
 -- Migration 041 — ZegResto : Facturation (notes, partage, paiements).
 -- Comme pour resto_order_items/resto_kitchen_tickets, organization_id est
@@ -3795,12 +3843,12 @@ create index if not exists idx_resto_bills_org on public.resto_bills(organizatio
 alter table public.resto_bills enable row level security;
 
 create policy resto_bills_select on public.resto_bills for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_facturation', 'view'));
 create policy resto_bills_insert on public.resto_bills for insert to authenticated
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  with check (public.has_module_permission(organization_id, 'resto_facturation', 'create'));
 create policy resto_bills_update on public.resto_bills for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_facturation', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_facturation', 'manage'));
 create policy resto_bills_delete on public.resto_bills for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
@@ -3824,7 +3872,7 @@ create index if not exists idx_resto_loyalty_transactions_bill on public.resto_l
 alter table public.resto_loyalty_transactions enable row level security;
 
 create policy resto_loyalty_transactions_select on public.resto_loyalty_transactions for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_fidelite', 'view'));
 
 -- Un split par "convive" (mode égal : montant réparti par create_resto_bill() ;
 -- mode détaillé : montant recalculé depuis resto_bill_split_items par
@@ -3843,10 +3891,10 @@ create index if not exists idx_resto_bill_splits_bill on public.resto_bill_split
 alter table public.resto_bill_splits enable row level security;
 
 create policy resto_bill_splits_select on public.resto_bill_splits for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_facturation', 'view'));
 create policy resto_bill_splits_write on public.resto_bill_splits for all to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_facturation', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_facturation', 'manage'));
 
 -- Mode détaillé uniquement — peuplée uniquement par set_resto_bill_split_items()
 -- (aucune policy insert/update/delete to authenticated : jamais d'écriture
@@ -3865,7 +3913,7 @@ create index if not exists idx_resto_bill_split_items_bill on public.resto_bill_
 alter table public.resto_bill_split_items enable row level security;
 
 create policy resto_bill_split_items_select on public.resto_bill_split_items for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_facturation', 'view'));
 
 create table if not exists public.resto_bill_payments (
   id uuid primary key default gen_random_uuid(),
@@ -3882,12 +3930,12 @@ create index if not exists idx_resto_bill_payments_bill on public.resto_bill_pay
 alter table public.resto_bill_payments enable row level security;
 
 create policy resto_bill_payments_select on public.resto_bill_payments for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_paiements', 'view'));
 -- Pas de policy insert : les paiements ne sont enregistrés que via
 -- add_resto_bill_payment() (security definer plus bas).
 create policy resto_bill_payments_update on public.resto_bill_payments for update to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
-  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_paiements', 'manage'))
+  with check (public.has_module_permission(organization_id, 'resto_paiements', 'manage'));
 
 create or replace function public.create_resto_bill(
   p_organization_id uuid,
@@ -3902,7 +3950,7 @@ declare
   v_part numeric(14,2);
   i integer;
 begin
-  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+  if not public.has_module_permission(p_organization_id, 'resto_facturation', 'create') then
     raise exception 'Accès refusé.';
   end if;
   select coalesce(sum(prix_unitaire * quantite), 0) into v_total
@@ -3938,7 +3986,7 @@ declare
 begin
   select * into v_bill from public.resto_bills where id = p_bill_id;
   if not found then raise exception 'Note introuvable.'; end if;
-  if not public.has_any_role_in_organization(v_bill.organization_id, array['owner','manager','server']::public.app_role[]) then
+  if not public.has_module_permission(v_bill.organization_id, 'resto_facturation', 'manage') then
     raise exception 'Accès refusé.';
   end if;
 
@@ -3989,7 +4037,7 @@ begin
 
   select * into v_bill from public.resto_bills where id = p_bill_id for update;
   if not found then raise exception 'Note introuvable.'; end if;
-  if not public.has_any_role_in_organization(v_bill.organization_id, array['owner','manager','server']::public.app_role[]) then
+  if not public.has_module_permission(v_bill.organization_id, 'resto_paiements', 'create') then
     raise exception 'Accès refusé.';
   end if;
   if v_bill.statut = 'payee' then raise exception 'Cette note est déjà réglée.'; end if;
@@ -4060,7 +4108,7 @@ declare
   v_discount numeric(14,2) := 0;
   v_phone text;
 begin
-  if not public.has_any_role_in_organization(p_organization_id, array['owner','manager','server']::public.app_role[]) then
+  if not public.has_module_permission(p_organization_id, 'resto_fidelite', 'create') then
     raise exception 'Accès refusé.';
   end if;
   v_phone := nullif(trim(p_telephone), '');
