@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Phone, Mail, MapPin, X, Star, CreditCard, Edit3, Trash2, Save, Receipt, Loader2 } from "lucide-react";
+import { Search, Plus, Phone, Mail, MapPin, X, Wallet, CreditCard, Edit3, Trash2, Save, Receipt, Loader2, Banknote, Smartphone } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
-  useCustomers, useUpsertCustomer, useDeleteCustomer, useCustomerSales, useMyRole,
-  useFormatMoney, type Customer,
+  useCustomers, useUpsertCustomer, useDeleteCustomer, useCustomerSales, useAddSalePayment, useSales, useMyRole,
+  useFormatMoney, isRevenueSale, type Customer, type Sale,
 } from "@/lib/data/hooks";
 import { cn, selectOnFocus } from "@/lib/utils";
 
@@ -29,6 +29,23 @@ function ClientsPage() {
   const { data: myRole } = useMyRole();
   const canDelete = myRole !== "cashier"; // cashier a SIU sur customers, pas D
 
+  // Montants réels calculés depuis les ventes (pas credit_balance, un champ
+  // manuel jamais synchronisé automatiquement par aucune vente/paiement —
+  // vérifié dans schema.sql, aucun trigger ne le met à jour). isRevenueSale
+  // exclut brouillons/annulées, comme partout ailleurs dans l'app (Rapports).
+  const { data: allSales = [] } = useSales({ limit: 3000 });
+  const byCustomer = useMemo(() => {
+    const map = new Map<string, { purchases: number; due: number }>();
+    for (const s of allSales) {
+      if (!s.customer_id || !isRevenueSale(s)) continue;
+      const cur = map.get(s.customer_id) ?? { purchases: 0, due: 0 };
+      cur.purchases += Number(s.total);
+      cur.due += Math.max(0, Number(s.total) - Number(s.paid));
+      map.set(s.customer_id, cur);
+    }
+    return map;
+  }, [allSales]);
+
   const list = useMemo(() => customers.filter((c) => {
     if (!query.trim()) return true;
     const q = query.toLowerCase();
@@ -37,8 +54,8 @@ function ClientsPage() {
       || (c.email ?? "").toLowerCase().includes(q);
   }), [customers, query]);
 
-  const totalCredit = customers.reduce((s, c) => s + Number(c.credit_balance || 0), 0);
-  const totalPoints = customers.reduce((s, c) => s + (c.loyalty_points || 0), 0);
+  const totalPurchases = [...byCustomer.values()].reduce((s, v) => s + v.purchases, 0);
+  const totalDue = [...byCustomer.values()].reduce((s, v) => s + v.due, 0);
 
   return (
     <div>
@@ -55,8 +72,8 @@ function ClientsPage() {
       <div className="space-y-4 p-5 sm:p-8">
         <div className="grid gap-3 sm:grid-cols-3">
           <StatCard label="Clients" value={String(customers.length)} accent="primary" />
-          <StatCard label="Points fidélité" value={String(totalPoints)} icon={<Star className="h-5 w-5" />} accent="accent" />
-          <StatCard label="Créances totales" value={formatXOF(totalCredit)} icon={<CreditCard className="h-5 w-5" />} accent="destructive" />
+          <StatCard label="Total achats" value={formatXOF(totalPurchases)} icon={<Wallet className="h-5 w-5" />} accent="accent" />
+          <StatCard label="Total dû" value={formatXOF(totalDue)} icon={<CreditCard className="h-5 w-5" />} accent="destructive" />
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-3">
@@ -76,29 +93,32 @@ function ClientsPage() {
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {list.map((c) => (
-              <div key={c.id} className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-elegant">
-                <div className="flex items-start gap-3">
-                  <button onClick={() => setSelected(c)} className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-primary to-primary-glow text-sm font-bold text-primary-foreground">
-                    {c.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                  </button>
-                  <button onClick={() => setSelected(c)} className="min-w-0 flex-1 text-left">
-                    <div className="truncate font-semibold">{c.name}</div>
-                    <div className="text-xs text-muted-foreground">{c.phone ?? c.email ?? "—"}</div>
-                  </button>
-                  <div className="flex gap-1">
-                    <button onClick={() => setEdit(c)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
-                    {canDelete && (
-                      <button onClick={() => setDel(c)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
-                    )}
+            {list.map((c) => {
+              const stats = byCustomer.get(c.id);
+              return (
+                <div key={c.id} className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-elegant">
+                  <div className="flex items-start gap-3">
+                    <button onClick={() => setSelected(c)} className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-primary to-primary-glow text-sm font-bold text-primary-foreground">
+                      {c.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                    </button>
+                    <button onClick={() => setSelected(c)} className="min-w-0 flex-1 text-left">
+                      <div className="truncate font-semibold">{c.name}</div>
+                      <div className="text-xs text-muted-foreground">{c.phone ?? c.email ?? "—"}</div>
+                    </button>
+                    <div className="flex gap-1">
+                      <button onClick={() => setEdit(c)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
+                      {canDelete && (
+                        <button onClick={() => setDel(c)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 text-center">
+                    <div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Achats</div><div className="tabular text-sm font-bold">{formatXOF(stats?.purchases ?? 0)}</div></div>
+                    <div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Dû</div><div className={cn("tabular text-sm font-bold", (stats?.due ?? 0) > 0 ? "text-destructive" : "text-muted-foreground")}>{formatXOF(stats?.due ?? 0)}</div></div>
                   </div>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 text-center">
-                  <div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Points</div><div className="tabular text-sm font-bold text-accent-foreground">{c.loyalty_points}</div></div>
-                  <div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Crédit</div><div className={cn("tabular text-sm font-bold", Number(c.credit_balance) > 0 ? "text-destructive" : "text-muted-foreground")}>{formatXOF(Number(c.credit_balance))}</div></div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -143,6 +163,10 @@ const PAY_METHOD_LABEL: Record<string, string> = {
 function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const formatXOF = useFormatMoney();
   const { data: sales = [], isLoading } = useCustomerSales(customer.id);
+  const [payingSale, setPayingSale] = useState<Sale | null>(null);
+  const revenueSales = useMemo(() => sales.filter(isRevenueSale), [sales]);
+  const totalPurchases = revenueSales.reduce((s, x) => s + Number(x.total), 0);
+  const totalDue = revenueSales.reduce((s, x) => s + Math.max(0, Number(x.total) - Number(x.paid)), 0);
 
   return (
     <Overlay onClose={onClose}>
@@ -182,13 +206,13 @@ function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClos
 
         <div className="mt-4 grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-border bg-card p-3 text-center">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Points fidélité</div>
-            <div className="tabular mt-1 text-lg font-bold text-accent-foreground">{customer.loyalty_points}</div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total achats</div>
+            <div className="tabular mt-1 text-lg font-bold">{formatXOF(totalPurchases)}</div>
           </div>
           <div className="rounded-xl border border-border bg-card p-3 text-center">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Crédit dû</div>
-            <div className={cn("tabular mt-1 text-lg font-bold", Number(customer.credit_balance) > 0 ? "text-destructive" : "text-muted-foreground")}>
-              {formatXOF(Number(customer.credit_balance))}
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total dû</div>
+            <div className={cn("tabular mt-1 text-lg font-bold", totalDue > 0 ? "text-destructive" : "text-muted-foreground")}>
+              {formatXOF(totalDue)}
             </div>
           </div>
         </div>
@@ -231,15 +255,81 @@ function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClos
                     </span>
                     <span className="tabular font-bold text-foreground">{formatXOF(Number(s.total))}</span>
                   </div>
-                  {Number(s.paid) < Number(s.total) && (
-                    <div className="mt-1 text-[11px] font-semibold text-destructive">
-                      Payé {formatXOF(Number(s.paid))} / {formatXOF(Number(s.total))}
+                  {isRevenueSale(s) && Number(s.paid) < Number(s.total) && (
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold text-destructive">
+                        Payé {formatXOF(Number(s.paid))} / {formatXOF(Number(s.total))}
+                      </div>
+                      <button onClick={() => setPayingSale(s)}
+                        className="rounded-lg bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground hover:opacity-90">
+                        Payer
+                      </button>
                     </div>
                   )}
                 </div>
               ))}
             </div>
           )}
+        </div>
+      </div>
+      {payingSale && <QuickPaymentDialog sale={payingSale} onClose={() => setPayingSale(null)} />}
+    </Overlay>
+  );
+}
+
+// Paiement rapide sur une vente à crédit/avance/acompte, sans quitter la
+// fiche client — réutilise add_sale_payment (RPC atomique, migration 024),
+// même circuit que la Caisse et le module Réservations.
+function QuickPaymentDialog({ sale, onClose }: { sale: Sale; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
+  const due = Math.max(0, Number(sale.total) - Number(sale.paid));
+  const [amount, setAmount] = useState(due);
+  const [method, setMethod] = useState<"cash" | "mobile_money" | "card">("cash");
+  const [error, setError] = useState<string | null>(null);
+  const addPayment = useAddSalePayment();
+
+  const submit = async () => {
+    setError(null);
+    try {
+      await addPayment.mutateAsync({ sale, amount, method });
+      onClose();
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur inconnue");
+    }
+  };
+
+  return (
+    <Overlay onClose={onClose} w="max-w-sm">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="font-display text-lg font-bold">Paiement — {sale.reference}</div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="space-y-3 p-5">
+        <div className="rounded-xl bg-muted px-4 py-2 text-sm">
+          Reste à payer : <span className="tabular font-bold">{formatXOF(due)}</span>
+        </div>
+        <label className="block">
+          <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Montant reçu</div>
+          <input type="number" min={0} max={due} value={amount}
+            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+            className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary" />
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          {([{ k: "cash", label: "Espèces", icon: Banknote }, { k: "mobile_money", label: "Mobile", icon: Smartphone }, { k: "card", label: "Carte", icon: CreditCard }] as const).map((m) => (
+            <button key={m.k} onClick={() => setMethod(m.k)}
+              className={cn("flex flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-xs font-semibold",
+                method === m.k ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground")}>
+              <m.icon className="h-4 w-4" /> {m.label}
+            </button>
+          ))}
+        </div>
+        {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
+          <button onClick={submit} disabled={amount <= 0 || amount > due || addPayment.isPending}
+            className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+            {addPayment.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Encaisser
+          </button>
         </div>
       </div>
     </Overlay>
@@ -260,8 +350,7 @@ function CustomerDialog({ initial, onClose, onSave }: { initial: Partial<Custome
         <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Téléphone</div><input value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inp} /></label>
         <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Email</div><input value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inp} /></label>
         <label className="sm:col-span-2"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Adresse</div><input value={form.address ?? ""} onChange={(e) => setForm({ ...form, address: e.target.value })} className={inp} /></label>
-        <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Points fidélité</div><input type="number" onFocus={selectOnFocus} value={form.loyalty_points ?? 0} onChange={(e) => setForm({ ...form, loyalty_points: Number(e.target.value) || 0 })} className={inp} /></label>
-        <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Crédit dû (F)</div><input type="number" onFocus={selectOnFocus} value={form.credit_balance ?? 0} onChange={(e) => setForm({ ...form, credit_balance: Number(e.target.value) || 0 })} className={inp} /></label>
+        <label className="sm:col-span-2"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Solde initial (F) — reporté avant ce système, optionnel</div><input type="number" onFocus={selectOnFocus} value={form.credit_balance ?? 0} onChange={(e) => setForm({ ...form, credit_balance: Number(e.target.value) || 0 })} className={inp} /></label>
         <label className="sm:col-span-2"><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Notes</div><textarea rows={2} value={form.notes ?? ""} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full rounded-xl border border-border bg-background p-3 text-sm" /></label>
         <div className="flex gap-2 pt-1 sm:col-span-2">
           <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
