@@ -1,21 +1,22 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Search, Plus, Minus, Trash2, Percent, Pause, Banknote, Smartphone, CreditCard,
   UserPlus, ScanLine, X, Maximize2, Minimize2, RotateCcw, Printer, Check, Loader2,
-  Package, ShoppingCart, ChevronUp,
+  Package, ShoppingCart, ChevronUp, History, Download, CalendarRange, CalendarCheck, AlertTriangle,
 } from "lucide-react";
 import { cn, selectOnFocus } from "@/lib/utils";
 import {
   useCategories, useProducts, useCustomers, useUpsertCustomer,
   useCreateSale, useShopSettings, useProfile, DEFAULT_TICKET_CONFIG, useFormatMoney, newTicketRef,
   useHoldTickets, useSaveHoldTicket, useDeleteHoldTicket, useMyRole, useTeamPermissions,
-  type HoldTicket, type ProductWithStock, type Customer,
+  useSales, useAddSalePayment, isRevenueSale,
+  type HoldTicket, type ProductWithStock, type Customer, type Sale,
 } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
-import { THERMAL_CSS } from "@/lib/printDoc";
+import { THERMAL_CSS, renderA4Document, openPrintWindow } from "@/lib/printDoc";
 
 export const Route = createFileRoute("/app/caisse")({
   validateSearch: (search: Record<string, unknown>): { holdId?: string } => ({
@@ -35,7 +36,30 @@ type Line = {
   quantity: number;
   discount_pct?: number;
   image_url?: string | null;
+  sku?: string | null;
 };
+
+// Bip synthétisé (WebAudio) plutôt qu'un fichier audio à charger — retour
+// sonore à chaque article ajouté au panier. Silencieux si l'API n'est pas
+// disponible (permissions navigateur, contexte non interactif).
+function playAddToCartBeep() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.12);
+    osc.onended = () => ctx.close();
+  } catch {
+    // Audio non disponible — silencieux, ne doit jamais bloquer l'ajout au panier.
+  }
+}
 
 type Receipt = {
   ticket: string; at: Date; lines: Line[];
@@ -92,6 +116,10 @@ function CaissePage() {
   const [customer, setCustomer] = useState<Customer | undefined>();
   const [showCustomer, setShowCustomer] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [cartExpanded, setCartExpanded] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [showRecentSales, setShowRecentSales] = useState(false);
+  const [showDailyExport, setShowDailyExport] = useState(false);
 
   useEffect(() => {
     document.body.classList.toggle("pos-fullscreen", fullscreen);
@@ -117,6 +145,7 @@ function CaissePage() {
   const itemsCount = cart.reduce((s, l) => s + l.quantity, 0);
 
   function addProduct(p: ProductWithStock) {
+    playAddToCartBeep();
     setCart((c) => {
       const idx = c.findIndex((l) => l.product_id === p.id);
       if (idx >= 0) {
@@ -124,7 +153,7 @@ function CaissePage() {
         copy[idx] = { ...copy[idx], quantity: copy[idx].quantity + 1 };
         return copy;
       }
-      return [...c, { product_id: p.id, name: p.name, unit_price: Number(p.price), quantity: 1, image_url: p.image_url }];
+      return [...c, { product_id: p.id, name: p.name, unit_price: Number(p.price), quantity: 1, image_url: p.image_url, sku: p.sku }];
     });
   }
   const updateQty = (id: string, delta: number) =>
@@ -156,6 +185,7 @@ function CaissePage() {
       product_id: it.product_id ?? "", name: it.name, unit_price: Number(it.unit_price), quantity: it.quantity,
       discount_pct: it.discount > 0 ? Math.round((Number(it.discount) / (it.quantity * Number(it.unit_price))) * 100) : undefined,
       image_url: products.find((p) => p.id === it.product_id)?.image_url,
+      sku: products.find((p) => p.id === it.product_id)?.sku,
     }));
     setCart(lines);
     setDiscountMode("amount");
@@ -199,7 +229,9 @@ function CaissePage() {
   }
 
   return (
-    <div className={cn("grid gap-0", "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px]", fullscreen ? "h-screen" : "h-[calc(100vh-4rem)]")}>
+    <div className={cn("grid gap-0", "grid-cols-1",
+      cartExpanded ? "lg:grid-cols-[minmax(0,1fr)_640px]" : "lg:grid-cols-[minmax(0,1fr)_420px]",
+      fullscreen ? "h-screen" : "h-[calc(100vh-4rem)]")}>
       <div className="flex border-b border-border bg-card p-1.5 lg:hidden">
         <button onClick={() => setMobileView("products")}
           className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-colors",
@@ -229,7 +261,8 @@ function CaissePage() {
                 placeholder="Chercher un produit, un SKU, scanner…"
                 className="h-12 w-full rounded-xl border border-border bg-background pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
             </div>
-            <button className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary hover:bg-primary/15" aria-label="Scanner">
+            <button onClick={() => setShowScanner(true)}
+              className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary hover:bg-primary/15" aria-label="Scanner">
               <ScanLine className="h-5 w-5" />
             </button>
             <button onClick={() => setFullscreen((f) => !f)}
@@ -238,12 +271,28 @@ function CaissePage() {
             </button>
           </div>
 
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            <CategoryPill active={categoryId === "all"} onClick={() => setCategoryId("all")} label="Tout" count={products.length} />
-            {categories.map((c) => (
-              <CategoryPill key={c.id} active={categoryId === c.id} onClick={() => setCategoryId(c.id)} label={c.name}
-                count={products.filter((p) => p.category_id === c.id).length} />
-            ))}
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              <CategoryPill active={categoryId === "all"} onClick={() => setCategoryId("all")} label="Tout" count={products.length} />
+              {categories.map((c) => (
+                <CategoryPill key={c.id} active={categoryId === c.id} onClick={() => setCategoryId(c.id)} label={c.name}
+                  count={products.filter((p) => p.category_id === c.id).length} />
+              ))}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button onClick={() => setShowRecentSales(true)} title="Ventes récentes"
+                className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold hover:bg-muted">
+                <History className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Ventes récentes</span>
+              </button>
+              <button onClick={() => setShowDailyExport(true)} title="Vente du jour"
+                className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold hover:bg-muted">
+                <CalendarRange className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Vente du jour</span>
+              </button>
+              <Link to="/app/reservations" title="Réservations"
+                className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold hover:bg-muted">
+                <CalendarCheck className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Réservations</span>
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -286,6 +335,9 @@ function CaissePage() {
             </div>
           </div>
           <div className="flex items-center gap-1.5">
+            <IconBtn label={cartExpanded ? "Réduire le panier" : "Agrandir le panier"} onClick={() => setCartExpanded((v) => !v)}>
+              {cartExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </IconBtn>
             <IconBtn label="Tickets en attente" onClick={() => setShowHolds(true)}>
               <div className="relative">
                 <Pause className="h-4 w-4" />
@@ -327,7 +379,10 @@ function CaissePage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-semibold">{l.name}</div>
-                          <div className="tabular text-xs text-muted-foreground">{formatXOF(l.unit_price)} × {l.quantity}{dp ? ` · -${dp}%` : ""}</div>
+                          <div className="tabular text-xs text-muted-foreground">
+                            {l.sku && <span className="font-mono">{l.sku} · </span>}
+                            {formatXOF(l.unit_price)} × {l.quantity}{dp ? ` · -${dp}%` : ""}
+                          </div>
                         </div>
                         <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
                           <button onClick={() => updateQty(l.product_id, -1)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-background"><Minus className="h-3.5 w-3.5" /></button>
@@ -431,6 +486,19 @@ function CaissePage() {
         {receipt && (
           <ReceiptDialog receipt={receipt} onClose={() => { setReceipt(null); clearCart(); }} />
         )}
+        {showScanner && (
+          <BarcodeScannerDialog onClose={() => setShowScanner(false)} onDetect={(code) => {
+            const p = products.find((pr) => pr.barcode === code || pr.sku === code);
+            if (p) { addProduct(p); setShowScanner(false); }
+            else alert(`Aucun produit ne correspond au code « ${code} ».`);
+          }} />
+        )}
+        {showRecentSales && (
+          <RecentSalesDialog onClose={() => setShowRecentSales(false)} />
+        )}
+        {showDailyExport && (
+          <DailyExportDialog onClose={() => setShowDailyExport(false)} />
+        )}
       </AnimatePresence>
     </div>
   );
@@ -451,26 +519,35 @@ function CategoryPill({ label, active, onClick, count }: { label: string; active
 
 function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () => void }) {
   const formatXOF = useFormatMoney();
-  const low = product.stock <= product.low_stock_threshold;
+  const outOfStock = product.stock <= 0;
+  const low = !outOfStock && product.stock <= product.low_stock_threshold;
   return (
     <motion.button whileTap={{ scale: 0.96 }} onClick={onAdd}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card text-left transition-all hover:border-primary/40 hover:shadow-elegant">
+      className={cn("group flex flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all hover:shadow-elegant",
+        outOfStock ? "border-destructive/50 hover:border-destructive" : "border-border hover:border-primary/40")}>
       <div className="relative grid aspect-square place-items-center bg-gradient-to-br from-muted to-background text-5xl sm:text-6xl">
         {product.image_url ? (
-          <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" />
+          <img src={product.image_url} alt={product.name} className={cn("h-full w-full object-cover", outOfStock && "opacity-50 grayscale")} />
         ) : (
-          <span>📦</span>
+          <span className={outOfStock ? "opacity-50 grayscale" : ""}>📦</span>
         )}
-        {low && <span className="absolute right-2 top-2 rounded-full bg-warning/90 px-2 py-0.5 text-[10px] font-bold text-warning-foreground">Stock {product.stock}</span>}
+        {outOfStock ? (
+          <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-destructive px-2 py-0.5 text-[10px] font-bold text-destructive-foreground">
+            <AlertTriangle className="h-3 w-3" /> Rupture
+          </span>
+        ) : low ? (
+          <span className="absolute right-2 top-2 rounded-full bg-warning/90 px-2 py-0.5 text-[10px] font-bold text-warning-foreground">Stock {product.stock}</span>
+        ) : null}
         <span className="absolute bottom-2 right-2 grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-elegant transition-opacity group-hover:opacity-100">
           <Plus className="h-4 w-4" />
         </span>
       </div>
       <div className="min-w-0 px-3 py-2.5">
         <div className="truncate text-sm font-semibold">{product.name}</div>
+        {product.sku && <div className="truncate font-mono text-[10px] text-muted-foreground">{product.sku}</div>}
         <div className="mt-0.5 flex items-center justify-between">
           <span className="tabular text-sm font-bold text-primary">{formatXOF(Number(product.price))}</span>
-          <span className={cn("tabular text-[10px] font-bold uppercase tracking-wider", low ? "text-warning" : "text-muted-foreground")}>
+          <span className={cn("tabular text-[10px] font-bold uppercase tracking-wider", outOfStock ? "text-destructive" : low ? "text-warning" : "text-muted-foreground")}>
             Stock {product.stock}
           </span>
         </div>
@@ -763,6 +840,9 @@ const RECEIPT_PAY_LABEL: Record<PaymentMethod, string> = {
 
 function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => void }) {
   const formatXOF = useFormatMoney();
+  // Monnaie rendue : uniquement pour un paiement total (avance/acompte ne
+  // rendent jamais de monnaie, ils laissent un solde dû au client).
+  const changeReturned = receipt.type === "total" ? Math.max(0, receipt.received - receipt.total) : 0;
   const { currentOrganization } = useOrganization();
   const { data: settings } = useShopSettings();
   const { data: profile } = useProfile();
@@ -818,6 +898,7 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
         <div className="row flex justify-between text-sm b font-bold"><span>TOTAL</span><span>{formatXOF(receipt.total)}</span></div>
         <div className="row flex justify-between text-xs"><span>Mode de paiement</span><span>{RECEIPT_PAY_LABEL[receipt.method]}</span></div>
         <div className="row flex justify-between text-xs"><span>Payé ({receipt.type})</span><span>{formatXOF(receipt.paidNow)}</span></div>
+        {changeReturned > 0 && <div className="row flex justify-between text-xs"><span>Monnaie rendue</span><span>{formatXOF(changeReturned)}</span></div>}
         {receipt.due > 0 && <div className="row flex justify-between text-xs" style={{ color: "#b91c1c" }}><span>Solde dû</span><span>{formatXOF(receipt.due)}</span></div>}
         <hr className="my-2 border-dashed" />
         <div className="center mt-2 text-center text-xs italic">{thanks}</div>
@@ -828,6 +909,323 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
         <button onClick={print} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:opacity-90">
           <Printer className="h-4 w-4" /> Imprimer le reçu
         </button>
+      </div>
+    </DialogShell>
+  );
+}
+
+/* ============ Scanner code-barres (BarcodeDetector natif) ============ */
+// Le bouton scanner n'avait jusqu'ici aucun gestionnaire — remplacé par un
+// vrai scan caméra via l'API native BarcodeDetector (Chrome/Edge/Android,
+// couvre l'immense majorité du matériel POS/mobile visé ici). Pas de
+// nouvelle dépendance npm ajoutée pour ça : sur un navigateur qui ne
+// supporte pas l'API (Safari/iOS notamment), un message clair oriente vers
+// la recherche texte plutôt que de planter silencieusement.
+function BarcodeScannerDialog({ onClose, onDetect }: { onClose: () => void; onDetect: (code: string) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const supported = typeof window !== "undefined" && "BarcodeDetector" in window;
+
+  useEffect(() => {
+    if (!supported) return;
+    let stream: MediaStream | null = null;
+    let raf = 0;
+    let stopped = false;
+    const detector = new (window as any).BarcodeDetector({
+      formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
+    });
+
+    const tick = async () => {
+      if (stopped || !videoRef.current) return;
+      try {
+        const codes = await detector.detect(videoRef.current);
+        if (codes.length > 0) {
+          stopped = true;
+          onDetect(codes[0].rawValue);
+          return;
+        }
+      } catch {
+        // Frame pas encore prête ou erreur ponctuelle de décodage — on continue.
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        raf = requestAnimationFrame(tick);
+      } catch (e: any) {
+        setError(e?.message ?? "Impossible d'accéder à la caméra.");
+      }
+    })();
+
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, [supported, onDetect]);
+
+  return (
+    <DialogShell onClose={onClose} maxWidth="max-w-sm">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="font-display text-lg font-bold">Scanner un code-barres</div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="p-5">
+        {!supported ? (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">
+            Le scan par caméra n'est pas pris en charge par ce navigateur. Utilisez la recherche par nom, SKU ou code-barres à la place.
+          </div>
+        ) : error ? (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">{error}</div>
+        ) : (
+          <div className="relative overflow-hidden rounded-xl bg-black">
+            <video ref={videoRef} muted playsInline className="w-full" />
+            <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-primary/80" />
+          </div>
+        )}
+        <p className="mt-3 text-center text-xs text-muted-foreground">Visez le code-barres du produit avec la caméra.</p>
+      </div>
+    </DialogShell>
+  );
+}
+
+/* ============ Ventes récentes + paiement des ventes non soldées ============ */
+const RECENT_SALE_STATUS_LABEL: Record<Sale["status"], string> = {
+  draft: "Brouillon", completed: "Finalisée", refunded: "Remboursée",
+  partially_refunded: "Remb. partiel", cancelled: "Annulée",
+};
+function RecentSalesDialog({ onClose }: { onClose: () => void }) {
+  const formatXOF = useFormatMoney();
+  const { data: sales = [], isLoading } = useSales({ limit: 40 });
+  const [payingSale, setPayingSale] = useState<Sale | null>(null);
+  const visible = sales.filter(isRevenueSale);
+
+  return (
+    <DialogShell onClose={onClose} maxWidth="max-w-lg">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Ventes récentes</div>
+          <div className="font-display text-lg font-bold">{visible.length} vente{visible.length > 1 ? "s" : ""}</div>
+        </div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="max-h-[60vh] overflow-y-auto p-3">
+        {isLoading ? (
+          <div className="grid place-items-center py-12"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+        ) : visible.length === 0 ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-foreground">Aucune vente pour l'instant.</div>
+        ) : visible.map((s) => {
+          const due = Math.max(0, Number(s.total) - Number(s.paid));
+          return (
+            <div key={s.id} className="mb-2 flex items-center gap-3 rounded-xl border border-border p-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold">{s.customers?.name ?? "Comptoir"} · {s.reference}</div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {new Date(s.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold">{RECENT_SALE_STATUS_LABEL[s.status]}</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="tabular text-sm font-bold">{formatXOF(Number(s.total))}</div>
+                {due > 0 && <div className="tabular text-xs font-semibold text-destructive">Dû {formatXOF(due)}</div>}
+              </div>
+              {due > 0 && (
+                <button onClick={() => setPayingSale(s)} className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:opacity-90">
+                  Solder
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {payingSale && (
+        <AddSalePaymentDialog sale={payingSale} onClose={() => setPayingSale(null)} />
+      )}
+    </DialogShell>
+  );
+}
+function AddSalePaymentDialog({ sale, onClose }: { sale: Sale; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
+  const due = Math.max(0, Number(sale.total) - Number(sale.paid));
+  const [amount, setAmount] = useState(due);
+  const [method, setMethod] = useState<PaymentMethod>("cash");
+  const [error, setError] = useState<string | null>(null);
+  const addPayment = useAddSalePayment();
+
+  const submit = async () => {
+    setError(null);
+    try {
+      await addPayment.mutateAsync({ sale, amount, method });
+      onClose();
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur inconnue");
+    }
+  };
+
+  return (
+    <DialogShell onClose={onClose} maxWidth="max-w-sm">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="font-display text-lg font-bold">Paiement complémentaire</div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="space-y-3 p-5">
+        <div className="rounded-xl bg-muted px-4 py-2 text-sm">
+          Reste à payer : <span className="tabular font-bold">{formatXOF(due)}</span>
+        </div>
+        <label className="block">
+          <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Montant reçu</div>
+          <input type="number" onFocus={selectOnFocus} min={0} max={due} value={amount}
+            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+            className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary" />
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          <PayPill active={method === "cash"} onClick={() => setMethod("cash")} icon={<Banknote className="h-4 w-4" />} label="Espèces" />
+          <PayPill active={method === "mobile_money"} onClick={() => setMethod("mobile_money")} icon={<Smartphone className="h-4 w-4" />} label="Mobile" />
+          <PayPill active={method === "card"} onClick={() => setMethod("card")} icon={<CreditCard className="h-4 w-4" />} label="Carte" />
+        </div>
+        {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
+          <button onClick={submit} disabled={amount <= 0 || amount > due || addPayment.isPending}
+            className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+            {addPayment.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Encaisser
+          </button>
+        </div>
+      </div>
+    </DialogShell>
+  );
+}
+
+/* ============ Vente du jour — impression/export avec sélection de dates ============ */
+function downloadFile(name: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+function DailyExportDialog({ onClose }: { onClose: () => void }) {
+  const formatXOF = useFormatMoney();
+  const { currentOrganization } = useOrganization();
+  const { data: settings } = useShopSettings();
+  const today = new Date().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const range = { from: `${from}T00:00:00.000Z`, to: `${to}T23:59:59.999Z` };
+  const { data: sales = [], isLoading } = useSales({ from: range.from, to: range.to, limit: 2000 });
+  const revenueSales = useMemo(() => sales.filter(isRevenueSale), [sales]);
+
+  const lines = useMemo(() => {
+    const agg = new Map<string, { name: string; qty: number; total: number }>();
+    for (const s of revenueSales) {
+      for (const it of s.sale_items) {
+        const key = it.product_id ?? `manuel:${it.name}`;
+        const cur = agg.get(key) ?? { name: it.name, qty: 0, total: 0 };
+        cur.qty += it.quantity;
+        cur.total += it.total;
+        agg.set(key, cur);
+      }
+    }
+    return [...agg.values()].sort((a, b) => b.total - a.total);
+  }, [revenueSales]);
+  const grandTotal = revenueSales.reduce((s, x) => s + Number(x.total), 0);
+  const periodLabel = from === to ? new Date(from).toLocaleDateString("fr-FR") : `${new Date(from).toLocaleDateString("fr-FR")} → ${new Date(to).toLocaleDateString("fr-FR")}`;
+
+  const exportCsv = () => {
+    const rows = [
+      ["Vente de la période", periodLabel].join(","),
+      "",
+      ["Article", "Quantité", "Montant"].join(","),
+      ...lines.map((l) => [l.name, l.qty, l.total].join(",")),
+      "",
+      ["Total", "", grandTotal].join(","),
+    ].join("\n");
+    downloadFile(`vente-${from}-${to}.csv`, rows, "text/csv");
+  };
+
+  const printSummary = () => {
+    const bodyHtml = `
+      <div class="doc-parties">
+        <div class="block"><h2>Période</h2><div class="name">${periodLabel}</div></div>
+        <div class="block" style="text-align:right"><h2>Ventes</h2><div class="name">${revenueSales.length}</div></div>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>Article</th><th class="num">Qté</th><th class="num">Montant</th></tr></thead>
+        <tbody>${lines.map((l) => `<tr><td>${l.name}</td><td class="num">${l.qty}</td><td class="num">${formatXOF(l.total)}</td></tr>`).join("")}</tbody>
+        <tfoot><tr><td colspan="2"><strong>Total</strong></td><td class="num"><strong>${formatXOF(grandTotal)}</strong></td></tr></tfoot>
+      </table>`;
+    const html = renderA4Document({
+      docTitle: `Vente — ${periodLabel}`,
+      docDate: new Date().toLocaleString("fr-FR"),
+      shop: {
+        shopName: currentOrganization?.name ?? "Organisation",
+        logoUrl: currentOrganization?.logo_url,
+        address: settings?.data.address,
+        phone: settings?.data.phone,
+        ifu: settings?.data.ifu,
+      },
+      bodyHtml,
+    });
+    openPrintWindow(html);
+  };
+
+  return (
+    <DialogShell onClose={onClose} maxWidth="max-w-lg">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="font-display text-lg font-bold">Vente de la période</div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="space-y-3 p-5">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Du</span>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 rounded-lg border border-border bg-background px-2 text-sm" />
+          <span className="text-muted-foreground">au</span>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 rounded-lg border border-border bg-background px-2 text-sm" />
+        </div>
+        <div className="max-h-64 overflow-y-auto rounded-xl border border-border">
+          {isLoading ? (
+            <div className="grid place-items-center py-10"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          ) : lines.length === 0 ? (
+            <div className="grid place-items-center py-10 text-sm text-muted-foreground">Aucune vente sur cette période.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40">
+                <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <th className="px-3 py-2">Article</th>
+                  <th className="px-3 py-2 text-right">Qté</th>
+                  <th className="px-3 py-2 text-right">Montant</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((l, i) => (
+                  <tr key={i} className="border-t border-border/60">
+                    <td className="px-3 py-2">{l.name}</td>
+                    <td className="tabular px-3 py-2 text-right">{l.qty}</td>
+                    <td className="tabular px-3 py-2 text-right font-semibold">{formatXOF(l.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="flex items-center justify-between rounded-xl bg-muted p-3">
+          <span className="text-sm font-semibold">Montant total</span>
+          <span className="tabular text-lg font-black">{formatXOF(grandTotal)}</span>
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={exportCsv} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-semibold hover:bg-muted">
+            <Download className="h-4 w-4" /> Excel
+          </button>
+          <button onClick={printSummary} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:opacity-90">
+            <Printer className="h-4 w-4" /> Imprimer
+          </button>
+        </div>
       </div>
     </DialogShell>
   );

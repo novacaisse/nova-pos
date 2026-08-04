@@ -10,7 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 // inutile côté UI — bug remonté sur l'impersonation, même défaut présent
 // sur create-team-member.
 export async function invokeFn<T = any>(name: string, body?: unknown): Promise<T> {
-  const { data, error } = await supabase.functions.invoke(name, { body });
+  const { data, error } = await supabase.functions.invoke(name, { body: body as any });
   if (error) {
     let message = error.message;
     const ctx = (error as any)?.context;

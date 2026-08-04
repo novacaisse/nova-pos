@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Store, Coins, Receipt, ArrowLeftRight, Save, Plus, FileText, Loader2,
-  Trash2, Search,
+  Trash2, Search, Download,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { PageSkeleton } from "@/components/app/PageSkeleton";
@@ -12,6 +12,7 @@ import { AddOrganizationDialog, CURRENCIES } from "@/components/app/AddOrganizat
 import {
   useShopSettings, useUpdateShopSettings, useUpdateShop, useMyRole, useSubscription,
   useProvisionOrganization, useTransferStock, useProducts,
+  useCustomers, useSuppliers, useExpenses,
   DEFAULT_TICKET_CONFIG, useFormatMoney, type TicketConfig, type TaxRate, type ProductWithStock, type Subscription,
 } from "@/lib/data/hooks";
 import { getTrialInfo } from "@/lib/trial";
@@ -51,7 +52,7 @@ export const Route = createFileRoute("/app/parametres")({
 
 function ParametresPage() {
   const { openAdd } = Route.useSearch();
-  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer">("shop");
+  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer" | "export">("shop");
   const { organizations, currentOrganization } = useOrganization();
   const { data: settings, isLoading: settingsLoading } = useShopSettings();
   const { data: currentSubscription } = useSubscription();
@@ -132,6 +133,7 @@ function ParametresPage() {
               { k: "taxes", label: "Taxes", icon: Receipt },
               { k: "ticket", label: "Ticket de caisse", icon: FileText },
               { k: "transfer", label: "Transfert de stock", icon: ArrowLeftRight },
+              { k: "export", label: "Export / Sauvegarde", icon: Download },
             ] as const).map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
                 className={cn("flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -305,6 +307,8 @@ function ParametresPage() {
           {tab === "transfer" && (
             <TransferPanel organizations={organizations} currentOrganizationId={currentOrganization.id} currentOrganizationName={currentOrganization.name} canManage={canManage} />
           )}
+
+          {tab === "export" && <ExportPanel organizationName={currentOrganization.name} />}
         </div>
       </div>
 
@@ -330,6 +334,92 @@ function Field({ label, value, onChange, className, defaultValue, disabled }: { 
   );
 }
 
+function downloadFile(name: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Échappe une valeur pour un champ CSV (virgule/guillemet/retour à la ligne) —
+// les exports existants (rapports, vente du jour) ne le faisaient pas encore,
+// risque réel ici vu que noms de produits/clients/libellés de dépense sont du
+// texte libre pouvant contenir des virgules.
+function csvCell(v: unknown): string {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function toCsv(headers: string[], rows: unknown[][]): string {
+  return [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\n");
+}
+
+function ExportPanel({ organizationName }: { organizationName: string }) {
+  const { data: products = [], isLoading: productsLoading } = useProducts();
+  const { data: customers = [], isLoading: customersLoading } = useCustomers();
+  const { data: suppliers = [], isLoading: suppliersLoading } = useSuppliers();
+  const { data: expenses = [], isLoading: expensesLoading } = useExpenses();
+  const today = new Date().toISOString().slice(0, 10);
+  const slug = organizationName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "boutique";
+
+  const exports = [
+    {
+      key: "products", label: "Produits", loading: productsLoading, count: products.length,
+      run: () => toCsv(
+        ["Nom", "SKU", "Code-barres", "Prix", "Coût", "Taxe (%)", "Stock", "Seuil alerte", "Actif"],
+        products.map((p) => [p.name, p.sku ?? "", p.barcode ?? "", p.price, p.cost, p.tax_rate, p.stock, p.low_stock_threshold, p.is_active ? "oui" : "non"]),
+      ),
+    },
+    {
+      key: "customers", label: "Clients", loading: customersLoading, count: customers.length,
+      run: () => toCsv(
+        ["Nom", "Téléphone", "Email", "Adresse", "Points fidélité", "Solde crédit", "Notes"],
+        customers.map((c) => [c.name, c.phone ?? "", c.email ?? "", c.address ?? "", c.loyalty_points, c.credit_balance, c.notes ?? ""]),
+      ),
+    },
+    {
+      key: "suppliers", label: "Fournisseurs", loading: suppliersLoading, count: suppliers.length,
+      run: () => toCsv(
+        ["Nom", "Contact", "Téléphone", "Email", "Adresse", "Notes"],
+        suppliers.map((s) => [s.name, s.contact ?? "", s.phone ?? "", s.email ?? "", s.address ?? "", s.notes ?? ""]),
+      ),
+    },
+    {
+      key: "expenses", label: "Dépenses", loading: expensesLoading, count: expenses.length,
+      run: () => toCsv(
+        ["Date", "Catégorie", "Libellé", "Montant", "Méthode", "Notes"],
+        expenses.map((e) => [e.paid_at.slice(0, 10), e.category ?? "", e.label, e.amount, e.method ?? "", e.notes ?? ""]),
+      ),
+    },
+  ] as const;
+
+  const download = (exp: (typeof exports)[number]) => {
+    downloadFile(`${slug}-${exp.key}-${today}.csv`, exp.run(), "text/csv");
+  };
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-6">
+      <h2 className="mb-1 font-display text-lg font-bold">Export / Sauvegarde des données</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Exportez vos données en CSV (compatible Excel/Sheets) pour une sauvegarde, une analyse externe ou une migration.
+        Chaque export ne contient que les données de « {organizationName} ».
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {exports.map((exp) => (
+          <button key={exp.key} onClick={() => download(exp)} disabled={exp.loading || exp.count === 0}
+            className="flex items-center justify-between rounded-xl border border-border p-3 text-left text-sm hover:border-primary/40 hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50">
+            <div>
+              <div className="font-semibold">{exp.label}</div>
+              <div className="text-xs text-muted-foreground">{exp.loading ? "Chargement…" : `${exp.count} ligne${exp.count > 1 ? "s" : ""}`}</div>
+            </div>
+            <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type TransferOrganization = { id: string; name: string };
 
 function TransferPanel({ organizations, currentOrganizationId, currentOrganizationName, canManage }: {
@@ -342,7 +432,7 @@ function TransferPanel({ organizations, currentOrganizationId, currentOrganizati
   const [toOrganizationId, setToOrganizationId] = useState(otherOrganizations[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [qty, setQty] = useState<Record<string, number>>({});
-  const [result, setResult] = useState<{ transferred: number; unmatched: string[] } | null>(null);
+  const [result, setResult] = useState<{ transferred: number; created: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
@@ -381,8 +471,8 @@ function TransferPanel({ organizations, currentOrganizationId, currentOrganizati
       <h2 className="mb-1 font-display text-lg font-bold">Transfert de stock entre organisations</h2>
       <p className="mb-4 text-xs text-muted-foreground">
         Envoie du stock de « {currentOrganizationName} » vers une autre organisation. La correspondance des produits se fait par
-        SKU (ou par nom si le SKU est vide) : un article introuvable dans le catalogue de destination sera signalé,
-        pas transféré automatiquement.
+        SKU (ou par nom si le SKU est vide) : un article introuvable dans le catalogue de destination y est
+        automatiquement créé avec les mêmes prix, coût, taxe, unité et catégorie (recréée par nom si besoin) avant le transfert.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
@@ -423,9 +513,9 @@ function TransferPanel({ organizations, currentOrganizationId, currentOrganizati
       {result && (
         <div className="mt-4 rounded-xl border border-success/40 bg-success/10 p-3 text-xs text-success">
           {result.transferred} article{result.transferred > 1 ? "s" : ""} transféré{result.transferred > 1 ? "s" : ""}.
-          {result.unmatched.length > 0 && (
-            <div className="mt-1 text-warning-foreground">
-              Non transféré (aucune correspondance dans l'organisation de destination) : {result.unmatched.join(", ")}
+          {result.created.length > 0 && (
+            <div className="mt-1">
+              Créé{result.created.length > 1 ? "s" : ""} dans le catalogue de destination : {result.created.join(", ")}
             </div>
           )}
         </div>

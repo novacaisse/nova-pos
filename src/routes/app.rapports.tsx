@@ -1,14 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package, Truck, FileSpreadsheet, FileText as FileIcon, Loader2 } from "lucide-react";
+import { Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package, Truck, Banknote, FileSpreadsheet, FileText as FileIcon, Loader2 } from "lucide-react";
 import {
   startOfDay, endOfDay, startOfWeek, startOfMonth, endOfMonth,
   startOfYear, endOfYear, subMonths, subYears,
 } from "date-fns";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PageSkeleton } from "@/components/app/PageSkeleton";
-import { useSales, useProducts, useSuppliers, useShopSettings, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
+import { useSales, useProducts, useSuppliers, useExpenses, useShopSettings, useFormatMoney, isRevenueSale } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,7 @@ const REPORTS = [
   { id: "customers", label: "Meilleurs clients", icon: Users },
   { id: "suppliers", label: "Fournisseurs", icon: Truck },
   { id: "margin", label: "Marge réelle", icon: TrendingUp },
+  { id: "expenses", label: "Dépenses", icon: Banknote },
   { id: "peak", label: "Heures & jours de pointe", icon: Clock },
 ] as const;
 type ReportId = (typeof REPORTS)[number]["id"];
@@ -104,6 +105,19 @@ function RapportsPage() {
   const sales = useMemo(() => allSales.filter(isRevenueSale), [allSales]);
   const { data: products = [] } = useProducts();
   const { data: suppliers = [] } = useSuppliers();
+  const { data: allExpenses = [] } = useExpenses();
+
+  // Mêmes bornes que le tableau de bord (app.index.tsx) — paid_at est une
+  // date simple, comparée en timestamp comme les ventes de la période.
+  const expensesInRange = useMemo(() => {
+    const fromT = new Date(range.from).getTime();
+    const toT = new Date(range.to).getTime();
+    return allExpenses.filter((e) => {
+      const t = new Date(e.paid_at).getTime();
+      return t >= fromT && t <= toT;
+    });
+  }, [allExpenses, range.from, range.to]);
+  const expensesTotal = expensesInRange.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   const costById = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.cost])), [products]);
   const supplierByProductId = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.supplier_id])), [products]);
@@ -168,6 +182,18 @@ function RapportsPage() {
     return [...agg.values()].sort((a, b) => b.ca - a.ca).slice(0, 8);
   }, [sales]);
 
+  const expensesByCategory = useMemo(() => {
+    const agg = new Map<string, { name: string; qty: number; total: number }>();
+    for (const e of expensesInRange) {
+      const key = e.category?.trim() || "Sans catégorie";
+      const cur = agg.get(key) ?? { name: key, qty: 0, total: 0 };
+      cur.qty += 1;
+      cur.total += Number(e.amount || 0);
+      agg.set(key, cur);
+    }
+    return [...agg.values()].sort((a, b) => b.total - a.total);
+  }, [expensesInRange]);
+
   const peakHours = useMemo(() => {
     const counts = Array.from({ length: 24 }, () => 0);
     for (const sale of sales) counts[new Date(sale.created_at).getHours()]++;
@@ -192,8 +218,9 @@ function RapportsPage() {
     if (report === "customers") return topCustomers.map((c) => ({ label: c.name, qty: c.qty, ca: c.ca, margin: "—" }));
     if (report === "suppliers") return topSuppliers.map((s) => ({ label: s.name, qty: s.qty, ca: s.ca, margin: `${s.marginPct.toFixed(0)}%` }));
     if (report === "sales") return salesByDay.map((d) => ({ label: new Date(d.date).toLocaleDateString("fr-FR"), qty: d.qty, ca: d.ca, margin: "—" }));
+    if (report === "expenses") return expensesByCategory.map((e) => ({ label: e.name, qty: e.qty, ca: e.total, margin: "—" }));
     return [];
-  }, [report, topProductsByCa, worstMarginProducts, topCustomers, topSuppliers, salesByDay]);
+  }, [report, topProductsByCa, worstMarginProducts, topCustomers, topSuppliers, salesByDay, expensesByCategory]);
 
   const exportCsv = () => {
     const rows = [
@@ -280,6 +307,8 @@ function RapportsPage() {
                 <StatCard label={`CA · ${range.label}`} value={formatXOF(ca)} accent="primary" />
                 <StatCard label="Marge réelle (coût actuel)" value={`${marginPct.toFixed(1)}%`} accent="success" />
                 <StatCard label="Ticket moyen" value={formatXOF(Math.round(ticketMoyen))} accent="accent" />
+                <StatCard label="Dépenses" value={formatXOF(expensesTotal)} hint={`${expensesInRange.length} sur la période`} accent="destructive" />
+                <StatCard label="Résultat net" value={formatXOF(ca - expensesTotal)} hint="CA − dépenses" accent={ca - expensesTotal >= 0 ? "success" : "destructive"} />
               </div>
 
               <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
@@ -321,9 +350,9 @@ function RapportsPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/40">
                         <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          <th className="px-3 py-2">{report === "sales" ? "Jour" : report === "customers" ? "Client" : report === "suppliers" ? "Fournisseur" : "Produit"}</th>
+                          <th className="px-3 py-2">{report === "sales" ? "Jour" : report === "customers" ? "Client" : report === "suppliers" ? "Fournisseur" : report === "expenses" ? "Catégorie" : "Produit"}</th>
                           <th className="px-3 py-2 text-right">{report === "customers" ? "Achats" : "Qté"}</th>
-                          <th className="px-3 py-2 text-right">CA</th>
+                          <th className="px-3 py-2 text-right">{report === "expenses" ? "Montant" : "CA"}</th>
                           <th className="px-3 py-2 text-right">Marge</th>
                         </tr>
                       </thead>

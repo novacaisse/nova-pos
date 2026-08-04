@@ -4,12 +4,14 @@
 // partagent la même table organization_members (un compte, un rôle) mais
 // n'exposent jamais le même écran ni la même liste de rôles à choisir.
 import { useEffect, useState } from "react";
-import { Plus, Shield, UserCog, X, Trash2, Loader2, Save } from "lucide-react";
+import { Plus, Shield, UserCog, X, Trash2, Loader2, Save, Pencil, ShieldCheck } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import {
   useShopMembers, useCreateTeamMember, useUpdateMemberRole, useRemoveMember, useMyRole,
   useShopSettings, useUpdateShopSettings, useTeamPermissions, DEFAULT_TEAM_PERMISSIONS,
-  type ShopMember, type TeamPermissions,
+  useUpdateMemberCustomRole, usePermissionModules, useOrganizationRoles, useOrganizationRolePermissions,
+  useUpsertOrganizationRole, useDeleteOrganizationRole, useUpsertRolePermissions,
+  type ShopMember, type TeamPermissions, type OrganizationRole, type OrganizationRolePermission,
 } from "@/lib/data/hooks";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useAccountMemberLimit } from "@/lib/data/accountHooks";
@@ -24,16 +26,23 @@ function initials(name: string | null | undefined) {
   return src.slice(0, 2).toUpperCase();
 }
 
-export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsMatrix }: {
+export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsMatrix, customRolesAppModule }: {
   roles: AppRole[]; defaultRole: AppRole; title: string; subtitle: string; showPermissionsMatrix: boolean;
+  // "pos" pour ZegCaisse (seule app branchée pour l'instant — Phase D
+  // ajoutera hotel/resto/erp) : fait apparaître l'onglet "Rôles
+  // personnalisés" et le sélecteur de rôle personnalisé par membre.
+  // Omis = comportement strictement inchangé (ZegHotel aujourd'hui).
+  customRolesAppModule?: string;
 }) {
-  const [tab, setTab] = useState<"members" | "perms">("members");
+  const [tab, setTab] = useState<"members" | "perms" | "roles">("members");
   const { user } = useAuth();
   const { data: myRole } = useMyRole();
   const { data: members = [], isLoading } = useShopMembers();
   const updateRole = useUpdateMemberRole();
+  const updateCustomRole = useUpdateMemberCustomRole();
   const removeMember = useRemoveMember();
   const [inviting, setInviting] = useState(false);
+  const { data: customRoles = [] } = useOrganizationRoles();
 
   const isOwner = myRole === "owner";
   const roleCounts = new Set(members.map((m) => m.role)).size;
@@ -64,12 +73,17 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
           <StatCard label="Rôles distincts" value={String(roleCounts)} icon={<Shield className="h-5 w-5" />} accent="accent" />
         </div>
 
-        {showPermissionsMatrix && (
+{/* La matrice statique PERMISSIONS_MATRIX (onglet "perms") est spécifique
+    ZegCaisse (voir permissionsMatrix.ts) — gardée derrière
+    showPermissionsMatrix seul. L'onglet "Rôles personnalisés", lui, doit
+    s'afficher dès qu'une app fournit customRolesAppModule, même si elle
+    n'a pas (encore) cette matrice statique (cas ZegHotel). */}
+        {(showPermissionsMatrix || customRolesAppModule) && (
           <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
-            {(["members", "perms"] as const).map((t) => (
+            {(["members", ...(showPermissionsMatrix ? (["perms"] as const) : []), ...(customRolesAppModule ? (["roles"] as const) : [])] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={cn("flex-1 rounded-lg px-3 py-2 text-sm font-medium", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-                {t === "members" ? "Membres" : "Permissions"}
+                {t === "members" ? "Membres" : t === "perms" ? "Permissions" : "Rôles personnalisés"}
               </button>
             ))}
           </div>
@@ -83,7 +97,8 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
               <table className="w-full text-sm">
                 <thead className="bg-muted/40">
                   <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    <th className="px-4 py-3">Membre</th><th className="px-4 py-3">Rôle</th>
+                    <th className="px-4 py-3">Membre</th><th className="px-4 py-3">Rôle de base</th>
+                    {customRolesAppModule && <th className="px-4 py-3">Rôle personnalisé</th>}
                     <th className="px-4 py-3">Téléphone</th><th className="px-4 py-3">Membre depuis</th>
                     <th className="px-4 py-3"></th>
                   </tr>
@@ -91,7 +106,9 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
                 <tbody>
                   {members.map((m) => (
                     <MemberRow key={m.id} member={m} isOwner={isOwner} isSelf={m.user_id === user?.id} roles={roles}
+                      customRoles={customRolesAppModule ? customRoles : undefined}
                       onRoleChange={(role) => updateRole.mutate({ memberId: m.id, role })}
+                      onCustomRoleChange={(customRoleId) => updateCustomRole.mutate({ memberId: m.id, customRoleId })}
                       onRemove={() => {
                         if (confirm("Retirer ce membre de l'équipe ? Son accès à l'organisation sera coupé immédiatement.")) {
                           removeMember.mutate(m.id);
@@ -104,6 +121,8 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
             )}
           </div>
         )}
+
+        {tab === "roles" && customRolesAppModule && <CustomRolesPanel isOwner={isOwner} appModule={customRolesAppModule} />}
 
         {showPermissionsMatrix && tab === "perms" && (
           <div className="space-y-4">
@@ -204,9 +223,10 @@ function TogglesPanel({ isOwner }: { isOwner: boolean }) {
   );
 }
 
-function MemberRow({ member, isOwner, isSelf, roles, onRoleChange, onRemove }: {
+function MemberRow({ member, isOwner, isSelf, roles, customRoles, onRoleChange, onCustomRoleChange, onRemove }: {
   member: ShopMember; isOwner: boolean; isSelf: boolean; roles: AppRole[];
-  onRoleChange: (role: AppRole) => void; onRemove: () => void;
+  customRoles?: OrganizationRole[];
+  onRoleChange: (role: AppRole) => void; onCustomRoleChange?: (customRoleId: string | null) => void; onRemove: () => void;
 }) {
   // Un membre garde un seul rôle (organization_members.role) partagé entre
   // ZegCaisse et ZegHotel — mais chaque page Équipe ne propose que les
@@ -247,6 +267,21 @@ function MemberRow({ member, isOwner, isSelf, roles, onRoleChange, onRemove }: {
           </span>
         )}
       </td>
+      {customRoles && (
+        <td className="px-4 py-3">
+          {isOwner && !isSelf ? (
+            <select value={member.custom_role_id ?? ""} onChange={(e) => onCustomRoleChange?.(e.target.value || null)}
+              className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
+              <option value="">— Rôle de base uniquement —</option>
+              {customRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {customRoles.find((r) => r.id === member.custom_role_id)?.name ?? "—"}
+            </span>
+          )}
+        </td>
+      )}
       <td className="px-4 py-3 text-xs text-muted-foreground">{member.profile?.phone || "—"}</td>
       <td className="px-4 py-3 text-xs text-muted-foreground">{new Date(member.created_at).toLocaleDateString("fr-FR")}</td>
       <td className="px-4 py-3 text-right">
@@ -257,6 +292,169 @@ function MemberRow({ member, isOwner, isSelf, roles, onRoleChange, onRemove }: {
         )}
       </td>
     </tr>
+  );
+}
+
+// Rôles personnalisés — permissions réellement vérifiées en RLS
+// (has_module_permission(), migrations 063/064), jamais un simple
+// masquage côté UI. Modèle à 3 niveaux par module : view (lecture),
+// create (création), manage (modification + suppression).
+function CustomRolesPanel({ isOwner, appModule }: { isOwner: boolean; appModule: string }) {
+  const { data: roles = [], isLoading } = useOrganizationRoles();
+  const deleteRole = useDeleteOrganizationRole();
+  const [editing, setEditing] = useState<OrganizationRole | "new" | null>(null);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-sm font-semibold">Rôles personnalisés</div>
+          {isOwner && (
+            <button onClick={() => setEditing("new")}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90">
+              <Plus className="h-3.5 w-3.5" /> Créer un rôle
+            </button>
+          )}
+        </div>
+        <p className="mb-4 text-xs text-muted-foreground">
+          En plus des rôles de base ci-dessus, créez des rôles sur mesure avec des droits précis par module — lecture,
+          création, modification/suppression. Ces droits sont appliqués directement par la base de données, pas
+          seulement affichés à l'écran.
+        </p>
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+        ) : roles.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            Aucun rôle personnalisé pour l'instant.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {roles.map((r) => (
+              <div key={r.id} className="flex items-center justify-between rounded-xl border border-border p-3">
+                <div className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="h-4 w-4 text-primary" /> {r.name}</div>
+                {isOwner && (
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setEditing(r)} className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => {
+                      if (confirm(`Supprimer le rôle "${r.name}" ? Les membres qui l'ont se retrouveront sur leur rôle de base.`)) {
+                        deleteRole.mutate(r.id);
+                      }
+                    }} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {editing && <RoleEditorModal appModule={appModule} role={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+type PermLevel = "can_view" | "can_create" | "can_manage";
+const PERM_LEVEL_LABEL: Record<PermLevel, string> = { can_view: "Voir", can_create: "Créer", can_manage: "Modifier / Supprimer" };
+
+function RoleEditorModal({ appModule, role, onClose }: { appModule: string; role: OrganizationRole | null; onClose: () => void }) {
+  const { data: modules = [] } = usePermissionModules(appModule);
+  const { data: existingPerms = [] } = useOrganizationRolePermissions(role?.id ?? null);
+  const upsertRole = useUpsertOrganizationRole();
+  const upsertPerms = useUpsertRolePermissions();
+  const [name, setName] = useState(role?.name ?? "");
+  const [grid, setGrid] = useState<Record<string, Record<PermLevel, boolean>>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const next: Record<string, Record<PermLevel, boolean>> = {};
+    for (const m of modules) {
+      const existing = existingPerms.find((p) => p.module_key === m.key);
+      next[m.key] = {
+        can_view: existing?.can_view ?? m.open_view,
+        can_create: existing?.can_create ?? false,
+        can_manage: existing?.can_manage ?? false,
+      };
+    }
+    setGrid(next);
+  }, [modules, existingPerms]);
+
+  const toggle = (moduleKey: string, level: PermLevel, openView: boolean) => {
+    if (level === "can_view" && openView) return; // lecture déjà ouverte à tous — pas modifiable
+    setGrid((g) => ({ ...g, [moduleKey]: { ...g[moduleKey], [level]: !g[moduleKey]?.[level] } }));
+  };
+
+  const save = async () => {
+    setError(null);
+    if (!name.trim()) { setError("Le nom du rôle est requis."); return; }
+    try {
+      const saved = await upsertRole.mutateAsync({ id: role?.id, name: name.trim() });
+      const rows = modules.map((m) => ({ module_key: m.key, ...grid[m.key] }));
+      await upsertPerms.mutateAsync({ roleId: saved.id, rows });
+      onClose();
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur inconnue");
+    }
+  };
+
+  const saving = upsertRole.isPending || upsertPerms.isPending;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-2xl overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="font-display text-lg font-bold">{role ? "Modifier le rôle" : "Créer un rôle"}</div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="max-h-[75vh] space-y-4 overflow-y-auto p-5">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom du rôle *</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. Réceptionniste, Responsable rayon…"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+          </label>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40">
+                <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <th className="px-3 py-2">Module</th>
+                  {(["can_view", "can_create", "can_manage"] as PermLevel[]).map((l) => (
+                    <th key={l} className="px-3 py-2 text-center">{PERM_LEVEL_LABEL[l]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {modules.map((m) => (
+                  <tr key={m.key} className="border-t border-border/60">
+                    <td className="px-3 py-2 font-medium">{m.label}</td>
+                    {(["can_view", "can_create", "can_manage"] as PermLevel[]).map((l) => {
+                      const lockedOpen = l === "can_view" && m.open_view;
+                      return (
+                        <td key={l} className="px-3 py-2 text-center">
+                          <input type="checkbox" checked={grid[m.key]?.[l] ?? false} disabled={lockedOpen}
+                            onChange={() => toggle(m.key, l, m.open_view)}
+                            title={lockedOpen ? "Lecture déjà ouverte à tous les membres" : undefined}
+                            className="h-4 w-4 accent-primary disabled:opacity-50" />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
+            <button onClick={save} disabled={saving}
+              className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

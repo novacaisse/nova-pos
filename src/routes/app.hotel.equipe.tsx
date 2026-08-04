@@ -9,6 +9,7 @@ export const Route = createFileRoute("/app/hotel/equipe")({
       title="Équipe"
       subtitle="Utilisateurs et rôles ZegHotel"
       showPermissionsMatrix={false}
+      customRolesAppModule="hotel"
     />
   ),
 });

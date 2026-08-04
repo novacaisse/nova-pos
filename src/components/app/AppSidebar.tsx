@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useMyRole } from "@/lib/data/hooks";
+import { useMyRole, useMyModulePermissions } from "@/lib/data/hooks";
 import { getModulesForApp } from "@/lib/data/adminHooks";
 import { useCurrentPlanModules } from "@/lib/data/accountHooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -105,6 +105,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Point de vente", url: "/app/caisse", icon: "ScanBarcode", badge: "F1" },
     { title: "Ventes", url: "/app/ventes", icon: "Receipt" },
     { title: "Devis", url: "/app/devis", icon: "FileText" },
+    { title: "Réservations", url: "/app/reservations", icon: "CalendarRange" },
     { title: "Clients", url: "/app/clients", icon: "Users" },
   ],
   catalogue: [
@@ -185,6 +186,7 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/caisse": ["stock", "front_desk", "housekeeping"],
   "/app/ventes": ["stock", "front_desk", "housekeeping"],
   "/app/devis": ["stock", "front_desk", "housekeeping"],
+  "/app/reservations": ["stock", "front_desk", "housekeeping"],
   "/app/clients": ["stock", "front_desk", "housekeeping"],
   "/app/produits": ["front_desk", "housekeeping"],
   "/app/stock": ["front_desk", "housekeeping"],
@@ -272,11 +274,72 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/erp/parametres": ["buyer", "salesperson", "hr_manager", "stock", "cashier"],
 };
 
+// Rôles personnalisés (Équipe Phase B, migrations 063/064) — ZegCaisse
+// uniquement pour l'instant (Phase D branchera Hotel/Resto/ERP). Reflète
+// les permissions RLS réelles (has_module_permission()) côté nav, en plus
+// de HIDDEN_FOR ci-dessus qui reste la garde des rôles hôtel/resto/erp.
+const POS_MODULE_FOR_URL: Record<string, string> = {
+  "/app/produits": "produits",
+  "/app/stock": "stock",
+  "/app/fournisseurs": "fournisseurs",
+  "/app/clients": "clients",
+  "/app/caisse": "ventes",
+  "/app/ventes": "ventes",
+  "/app/devis": "devis",
+  "/app/reservations": "reservations",
+  "/app/depenses": "depenses",
+  "/app/rapports": "rapports",
+  "/app/parametres": "parametres",
+};
+// Idem ZegHotel (Équipe Phase D-1, migrations 066/067).
+const HOTEL_MODULE_FOR_URL: Record<string, string> = {
+  "/app/hotel/reservations": "hotel_reservations",
+  "/app/hotel/rooms": "hotel_rooms",
+  "/app/hotel/housekeeping": "hotel_housekeeping",
+  "/app/hotel/maintenance": "hotel_maintenance",
+  "/app/hotel/clients": "hotel_clients",
+  "/app/hotel/corporate": "hotel_corporate",
+  "/app/hotel/pos-interne": "hotel_pos_interne",
+  "/app/hotel/rapports": "hotel_rapports",
+  "/app/hotel/canaux": "hotel_canaux",
+  "/app/hotel/parametres": "hotel_parametres",
+};
+// Idem ZegResto (Équipe Phase D-2, migrations 068/069).
+const RESTO_MODULE_FOR_URL: Record<string, string> = {
+  "/app/resto/salle": "resto_salle",
+  "/app/resto/commandes": "resto_commandes",
+  "/app/resto/cuisine": "resto_cuisine",
+  "/app/resto/menu": "resto_menu",
+  "/app/resto/reservations": "resto_reservations",
+  "/app/resto/rapports": "resto_rapports",
+  "/app/resto/parametres": "resto_parametres",
+};
+// Idem ZegERP (Équipe Phase D-3, migrations 070/071) — plusieurs pages
+// regroupent des tables aux permissions réellement différentes (Achats
+// mélange buyer et stock, Ventes mélange salesperson et stock, Documents
+// est entièrement transversal) : un tableau de clés = visible si le membre
+// a can_view sur AU MOINS un des modules listés (OR), pas leur ET.
+const ERP_MODULE_FOR_URL: Record<string, string | string[]> = {
+  "/app/erp/produits": "erp_produits",
+  "/app/erp/stock": "erp_stock",
+  "/app/erp/achats": ["erp_achats", "erp_factures_fournisseurs", "erp_receptions"],
+  "/app/erp/ventes": ["erp_ventes", "erp_facturation_ventes", "erp_retours_clients"],
+  "/app/erp/pos": "erp_pos",
+  "/app/erp/finance": "erp_finance",
+  "/app/erp/comptabilite": "erp_comptabilite",
+  "/app/erp/rh": "erp_rh",
+  "/app/erp/documents": ["erp_documents", "erp_achats", "erp_ventes", "erp_rh"],
+  "/app/erp/rapports": "erp_rapports",
+  "/app/erp/parametres": "erp_parametres",
+};
+const MODULE_FOR_URL: Record<string, string | string[]> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL, ...RESTO_MODULE_FOR_URL, ...ERP_MODULE_FOR_URL };
+
 export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { data: myRole } = useMyRole();
+  const { data: myModulePerms } = useMyModulePermissions();
   const planModules = useCurrentPlanModules();
   const { currentOrganization } = useOrganization();
   const activeApps = currentOrganization?.active_apps ?? ["pos"];
@@ -300,9 +363,18 @@ export function AppSidebar() {
   // courant — avant ce correctif, PLAN_MODULES (ZegCaisse uniquement) était
   // vérifié même côté ZegHotel, où aucun module n'était donc jamais bridé.
   const isGatableModule = (url: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === url);
+  // Tant que myModulePerms n'a pas encore chargé, on ne masque rien ici —
+  // HIDDEN_FOR reste la garde immédiate, évite un flash "aucun menu".
+  const hasModulePermission = (url: string) => {
+    const key = MODULE_FOR_URL[url];
+    if (!key || !myModulePerms) return true;
+    const keys = Array.isArray(key) ? key : [key];
+    return keys.some((k) => myModulePerms.find((p) => p.module_key === k)?.can_view);
+  };
   const visible = (item: NavItem) =>
     (!myRole || !HIDDEN_FOR[item.url]?.includes(myRole))
-    && (!planModules || !isGatableModule(item.url) || planModules.includes(item.url));
+    && (!planModules || !isGatableModule(item.url) || planModules.includes(item.url))
+    && hasModulePermission(item.url);
 
   // Ferme automatiquement la sidebar sur mobile après un clic.
   const handleNavClick = () => {

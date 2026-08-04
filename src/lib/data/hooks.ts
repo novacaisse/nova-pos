@@ -1,5 +1,6 @@
 // Supabase data hooks — multi-tenant, always filtered by current organization_id.
 // RLS also enforces this server-side; the organization_id filter is belt + suspenders.
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
@@ -196,6 +197,95 @@ export function useDeleteProduct() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["products", organizationId] }),
+  });
+}
+
+export type BulkImportProductRow = {
+  name: string; sku?: string | null; barcode?: string | null; category_name?: string | null;
+  price: number; cost?: number; unit?: string | null; low_stock_threshold?: number; stock?: number;
+};
+// Import en masse (CSV, "Excel" au sens où le fichier vient d'un tableur —
+// voir app.produits.index.tsx pour le parsing) : une ligne par produit,
+// une catégorie retrouvée/créée par nom (jamais par id, le fichier ne
+// connaît que des noms), un produit retrouvé par SKU s'il existe déjà
+// (mise à jour du catalogue, jamais du stock — le stock existant n'est
+// touché que pour un produit réellement nouveau, via le même mécanisme
+// "stock initial" que la création manuelle dans useUpsertProduct).
+// Boucle séquentielle plutôt qu'un upsert(...).select() en un seul appel :
+// plus lent sur un très gros fichier, mais chaque ligne réussit ou échoue
+// indépendamment (une erreur de ligne n'annule jamais tout l'import), et
+// le rattachement stock initial → produit fraîchement créé reste sans
+// ambiguïté (pas de réappariement fragile après un upsert en lot).
+export function useBulkImportProducts() {
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (rows: BulkImportProductRow[]) => {
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const { data: existingCats } = await supabase.from("categories").select("id, name").eq("organization_id", organizationId);
+      const catByName = new Map<string, string>((existingCats ?? []).map((c) => [c.name.toLowerCase(), c.id]));
+
+      let created = 0, updated = 0;
+      const errors: { row: number; message: string }[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        try {
+          if (!r.name?.trim()) throw new Error("Nom manquant");
+          if (!(r.price >= 0)) throw new Error("Prix invalide");
+
+          let categoryId: string | null = null;
+          const catName = r.category_name?.trim();
+          if (catName) {
+            const key = catName.toLowerCase();
+            if (!catByName.has(key)) {
+              const { data: newCat, error: catErr } = await supabase.from("categories")
+                .insert({ organization_id: organizationId, name: catName, color: "#0891b2" }).select("id").single();
+              if (catErr) throw catErr;
+              catByName.set(key, newCat.id);
+            }
+            categoryId = catByName.get(key)!;
+          }
+
+          const sku = r.sku?.trim() || null;
+          let existingId: string | null = null;
+          if (sku) {
+            const { data: existing } = await supabase.from("products").select("id")
+              .eq("organization_id", organizationId).eq("sku", sku).maybeSingle();
+            existingId = existing?.id ?? null;
+          }
+
+          const payload = {
+            organization_id: organizationId, name: r.name.trim(), sku, barcode: r.barcode?.trim() || null,
+            category_id: categoryId, price: r.price, cost: r.cost ?? 0,
+            unit: r.unit?.trim() || "pcs", low_stock_threshold: r.low_stock_threshold ?? 5,
+          };
+
+          if (existingId) {
+            const { error } = await supabase.from("products").update(payload).eq("id", existingId);
+            if (error) throw error;
+            updated++;
+          } else {
+            const { data: inserted, error } = await supabase.from("products").insert(payload).select("id").single();
+            if (error) throw error;
+            created++;
+            if (r.stock && r.stock > 0) {
+              await supabase.from("stock_movements").insert({
+                organization_id: organizationId, product_id: inserted.id, type: "in",
+                quantity: r.stock, reason: "Import en masse", created_by: user?.id,
+              });
+            }
+          }
+        } catch (e: any) {
+          errors.push({ row: i + 1, message: e?.message ?? "Erreur inconnue" });
+        }
+      }
+      return { created, updated, errors };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["categories", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
+    },
   });
 }
 
@@ -489,6 +579,23 @@ export function useStockMovements(limit = 100) {
     },
   });
 }
+// Historique entrées/sorties d'un seul produit (popup détail produit) —
+// useStockMovements ci-dessus ne filtre que par organisation, pas par
+// produit.
+export function useProductStockMovements(productId: string | null) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["stock_movements", organizationId, "product", productId],
+    enabled: !!organizationId && !!productId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("stock_movements")
+        .select("*").eq("organization_id", organizationId!).eq("product_id", productId!)
+        .order("created_at", { ascending: false }).limit(100);
+      if (error) throw error;
+      return (data ?? []) as StockMovement[];
+    },
+  });
+}
 export function useCreateStockMovement() {
   const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
@@ -634,6 +741,67 @@ export function useAddSalePayment() {
   });
 }
 
+// ============ RÉSERVATIONS (migration 062) ============
+// Pas une vente : ne bouge jamais le stock avant d'être honorée (contrairement
+// à un ticket en attente, qui EST une vraie ligne `sales` en 'draft',
+// éphémère) — table dédiée, items en jsonb (pas de ventilation TVA par
+// ligne ni de mouvement de stock nécessaire avant d'honorer la réservation).
+export type ReservationStatus = "pending" | "fulfilled" | "cancelled";
+export type ReservationItem = { product_id: string | null; name: string; quantity: number; unit_price: number };
+export type Reservation = {
+  id: string; organization_id: string; reference: string;
+  customer_id: string | null; customer_name: string; customer_phone: string | null;
+  items: ReservationItem[]; total: number; deposit: number;
+  reservation_date: string; status: ReservationStatus; notes: string | null;
+  created_at: string; updated_at: string;
+};
+export function useReservations() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["reservations", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<Reservation[]> => {
+      const { data, error } = await supabase.from("reservations")
+        .select("*").eq("organization_id", organizationId!).order("reservation_date", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Reservation[];
+    },
+  });
+}
+export function useUpsertReservation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (r: Partial<Reservation> & { customer_name: string; items: ReservationItem[]; total: number; reservation_date: string }) => {
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("reservations")
+        .upsert({ ...r, organization_id: organizationId, updated_at: new Date().toISOString() }).select().single();
+      if (error) throw error;
+      return data as Reservation;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reservations", organizationId] }),
+  });
+}
+export function useUpdateReservationStatus() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: ReservationStatus }) => {
+      const { error } = await supabase.from("reservations").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reservations", organizationId] }),
+  });
+}
+export function useDeleteReservation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("reservations").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reservations", organizationId] }),
+  });
+}
+
 // ============ TICKETS EN ATTENTE (Caisse) ============
 // Persistés comme de vraies lignes `sales` (status: 'draft', déjà prévu
 // dans l'enum sale_status) au lieu d'un state React perdu au reload. Le
@@ -763,6 +931,10 @@ export function useUpsertQuote() {
       valid_until?: string | null;
       notes?: string | null;
       status?: QuoteStatus;
+      // Remise globale du devis (montant, en %/fixe déjà résolu côté appelant
+      // — voir QuoteEditor) — prioritaire sur la somme des remises par
+      // ligne si fournie, même principe que sales.discount pour une vente.
+      discount?: number;
       items: { product_id: string | null; name: string; quantity: number; unit_price: number; discount?: number; tax_rate?: number }[];
     }) => {
       if (!organizationId) throw new Error("Aucune boutique sélectionnée");
@@ -772,14 +944,15 @@ export function useUpsertQuote() {
       });
       const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
       const itemsDiscount = items.reduce((s, i) => s + (i.discount ?? 0), 0);
-      const total = Math.max(0, subtotal - itemsDiscount);
+      const quoteDiscount = input.discount ?? itemsDiscount;
+      const total = Math.max(0, subtotal - quoteDiscount);
 
       const payload = {
         organization_id: organizationId,
         reference: input.reference ?? newTicketRef("DEV"),
         customer_id: input.customer_id ?? null,
         status: input.status ?? "draft",
-        subtotal, discount: itemsDiscount, tax: 0, total,
+        subtotal, discount: quoteDiscount, tax: 0, total,
         valid_until: input.valid_until ?? null,
         notes: input.notes ?? null,
       };
@@ -917,6 +1090,56 @@ export function useCheckSubscriptionPayment() {
   });
 }
 
+// Filet de sécurité contre le paiement qui reste "pending" indéfiniment
+// (bug remonté : succès côté MoneyFusion mais aucune redirection/activation
+// automatique) — le mécanisme existant (polling actif sur /souscription/
+// confirmation, voir useSubscriptionPayment/useCheckSubscriptionPayment
+// ci-dessus) dépend entièrement du client qui reste sur cette page ;
+// si MoneyFusion ne redirige pas (flux Mobile Money résolu depuis le
+// téléphone, onglet fermé avant la résolution...), rien ne relance jamais
+// la vérification. Pas de pg_cron ici (infrastructure non confirmée
+// disponible sur ce projet, voir migration 011) : réutilise la même Edge
+// Function check-subscription-payment, déclenchée une seule fois par
+// paiement en attente à chaque chargement de l'organisation dans l'app —
+// n'importe quelle visite (pas seulement /app/abonnement) rattrape un
+// paiement resté bloqué. doneRef évite de la redéclencher en boucle sur
+// chaque re-render tant que l'organisation ne change pas.
+export function useReconcilePendingSubscriptionPayments(organizationId: string | undefined, onResolved?: () => void) {
+  const qc = useQueryClient();
+  const doneRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!organizationId || doneRef.current === organizationId) return;
+    doneRef.current = organizationId;
+
+    (async () => {
+      const { data: pending } = await supabase.from("subscription_payments")
+        .select("id").eq("organization_id", organizationId).eq("status", "pending")
+        .gte("created_at", new Date(Date.now() - 48 * 3600_000).toISOString());
+      if (!pending || pending.length === 0) return;
+
+      let resolved = false;
+      for (const p of pending) {
+        try {
+          const result = await invokeFn<{ status: string }>("check-subscription-payment", { payment_id: p.id });
+          if (result.status === "paid") resolved = true;
+        } catch {
+          // Silencieux : simple tentative de rattrapage en arrière-plan, pas
+          // une action déclenchée par l'utilisateur — le webhook ou la
+          // prochaine visite pourra encore résoudre le paiement.
+        }
+      }
+      qc.invalidateQueries({ queryKey: ["subscription_payments", organizationId] });
+      qc.invalidateQueries({ queryKey: ["account_subscription"] });
+      // organizations.plan/trial_ends_at (context OrganizationProvider, pas
+      // React Query) doit être rafraîchi explicitement par l'appelant —
+      // verifyAndApplyPayment les met à jour en base mais rien ne les relit
+      // automatiquement côté client tant que le contexte n'est pas rechargé.
+      if (resolved) onResolved?.();
+    })();
+  }, [organizationId, qc, onResolved]);
+}
+
 // Helper — generate a short unique ticket ref.
 export function newTicketRef(prefix = "T") {
   const d = new Date();
@@ -997,6 +1220,7 @@ export function useMyRole() {
 // fait deux requêtes et on fusionne côté client.
 export type ShopMember = {
   id: string; organization_id: string; user_id: string; role: AppRole; created_at: string;
+  custom_role_id: string | null;
   profile: { full_name: string | null; phone: string | null; avatar_url: string | null } | null;
 };
 
@@ -1060,6 +1284,142 @@ export function useRemoveMember() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
+  });
+}
+
+export function useUpdateMemberCustomRole() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ memberId, customRoleId }: { memberId: string; customRoleId: string | null }) => {
+      const { error } = await supabase.from("organization_members").update({ custom_role_id: customRoleId }).eq("id", memberId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
+  });
+}
+
+// ============ RÔLES PERSONNALISÉS (organization_roles + permissions par module) ============
+// Le propriétaire peut créer ses propres rôles, avec des droits par module
+// (view/create/manage) réellement vérifiés en RLS via has_module_permission()
+// (migrations 063/064) — pas seulement un masquage côté UI. organization_members
+// reste toujours géré owner-only (voir migration 063, risque d'escalade de
+// privilèges), jamais via ce système.
+export type PermissionModule = { key: string; app_module: string; label: string; open_view: boolean; sort_order: number };
+export type OrganizationRole = { id: string; organization_id: string; key: string; name: string; created_at: string };
+export type OrganizationRolePermission = { role_id: string; module_key: string; can_view: boolean; can_create: boolean; can_manage: boolean };
+export type MyModulePermission = { module_key: string; can_view: boolean; can_create: boolean; can_manage: boolean };
+
+export function usePermissionModules(appModule: string) {
+  return useQuery({
+    queryKey: ["permission_modules", appModule],
+    queryFn: async (): Promise<PermissionModule[]> => {
+      const { data, error } = await supabase.from("permission_modules")
+        .select("*").eq("app_module", appModule).order("sort_order");
+      if (error) throw error;
+      return data as PermissionModule[];
+    },
+  });
+}
+
+export function useOrganizationRoles() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["organization_roles", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<OrganizationRole[]> => {
+      const { data, error } = await supabase.from("organization_roles")
+        .select("*").eq("organization_id", organizationId!).order("created_at");
+      if (error) throw error;
+      return data as OrganizationRole[];
+    },
+  });
+}
+
+export function useOrganizationRolePermissions(roleId: string | null) {
+  return useQuery({
+    queryKey: ["organization_role_permissions", roleId],
+    enabled: !!roleId,
+    queryFn: async (): Promise<OrganizationRolePermission[]> => {
+      const { data, error } = await supabase.from("organization_role_permissions")
+        .select("*").eq("role_id", roleId!);
+      if (error) throw error;
+      return data as OrganizationRolePermission[];
+    },
+  });
+}
+
+// slug simple à partir du nom saisi (organization_roles.key, unique par
+// organisation) — suffixe aléatoire en cas de collision plutôt qu'une erreur
+// opaque remontée à l'utilisateur.
+function slugifyRoleKey(name: string) {
+  const base = name.trim().toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return (base || "role") + "_" + Math.random().toString(36).slice(2, 6);
+}
+
+export function useUpsertOrganizationRole() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id?: string; name: string }) => {
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      if (input.id) {
+        const { data, error } = await supabase.from("organization_roles")
+          .update({ name: input.name }).eq("id", input.id).select().single();
+        if (error) throw error;
+        return data as OrganizationRole;
+      }
+      const { data, error } = await supabase.from("organization_roles")
+        .insert({ organization_id: organizationId, name: input.name, key: slugifyRoleKey(input.name) })
+        .select().single();
+      if (error) throw error;
+      return data as OrganizationRole;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_roles", organizationId] }),
+  });
+}
+
+export function useDeleteOrganizationRole() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (roleId: string) => {
+      const { error } = await supabase.from("organization_roles").delete().eq("id", roleId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["organization_roles", organizationId] });
+      qc.invalidateQueries({ queryKey: ["organization_members", organizationId] });
+    },
+  });
+}
+
+export function useUpsertRolePermissions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ roleId, rows }: { roleId: string; rows: Omit<OrganizationRolePermission, "role_id">[] }) => {
+      const { error } = await supabase.from("organization_role_permissions")
+        .upsert(rows.map((r) => ({ role_id: roleId, ...r })));
+      if (error) throw error;
+    },
+    onSuccess: (_data, { roleId }) => qc.invalidateQueries({ queryKey: ["organization_role_permissions", roleId] }),
+  });
+}
+
+// Permissions réelles (RLS) de l'utilisateur courant sur chaque module —
+// utilisé pour le garde-fou de nav (masquer un module inaccessible), jamais
+// comme source de vérité de sécurité (la RLS l'est déjà, ceci ne fait que la
+// refléter côté UI pour éviter d'afficher des écrans vides/interdits).
+export function useMyModulePermissions() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["my_module_permissions", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<MyModulePermission[]> => {
+      const { data, error } = await supabase.rpc("my_module_permissions", { p_organization_id: organizationId! });
+      if (error) throw error;
+      return data as MyModulePermission[];
+    },
+    staleTime: 60_000,
   });
 }
 
@@ -1201,21 +1561,28 @@ export function useProvisionOrganization() {
 // Transfert de stock entre boutiques d'un même compte : les catalogues
 // produits sont indépendants par boutique (organization_id), donc on fait
 // correspondre les lignes par SKU (ou, à défaut, par nom exact) dans la
-// boutique de destination — pas de création automatique de produit côté
-// destination si aucune correspondance n'est trouvée, on le signale à
-// l'appelant plutôt que de deviner. Crée un mouvement 'transfer' (sortie)
-// dans la boutique source et un mouvement 'in' (entrée) dans la boutique
-// de destination, tous deux traçables via la même référence.
+// boutique de destination. Si aucune correspondance n'existe, l'article est
+// désormais créé automatiquement côté destination avec tous ses attributs
+// (prix, coût, taxe, unité, image, seuil d'alerte, catégorie — recréée par
+// nom si elle n'existe pas déjà là-bas) plutôt que d'être simplement
+// signalé sans être transféré. Crée un mouvement 'transfer' (sortie) dans
+// la boutique source et un mouvement 'in' (entrée) dans la boutique de
+// destination, tous deux traçables via la même référence.
 export function useTransferStock() {
   const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
       toOrganizationId: string;
       lines: { product_id: string; sku: string | null; name: string; quantity: number }[];
-    }): Promise<{ transferred: number; unmatched: string[] }> => {
+    }): Promise<{ transferred: number; created: string[] }> => {
       if (!organizationId) throw new Error("Aucune boutique sélectionnée");
       const linesToSend = input.lines.filter((l) => l.quantity > 0);
       if (linesToSend.length === 0) throw new Error("Aucune quantité à transférer.");
+
+      const { data: sourceProducts, error: srcErr } = await supabase.from("products")
+        .select("*, categories(name)").in("id", linesToSend.map((l) => l.product_id));
+      if (srcErr) throw srcErr;
+      const sourceById = new Map((sourceProducts ?? []).map((p: any) => [p.id, p]));
 
       const { data: destProducts, error: destErr } = await supabase.from("products")
         .select("id, sku, name").eq("organization_id", input.toOrganizationId) as {
@@ -1226,11 +1593,48 @@ export function useTransferStock() {
       const bySku = new Map((destProducts ?? []).filter((p) => p.sku).map((p) => [p.sku!.toLowerCase(), p]));
       const byName = new Map((destProducts ?? []).map((p) => [p.name.toLowerCase(), p]));
 
+      const { data: destCategories, error: catErr } = await supabase.from("categories")
+        .select("id, name").eq("organization_id", input.toOrganizationId);
+      if (catErr) throw catErr;
+      const destCategoryByName = new Map((destCategories ?? []).map((c) => [c.name.toLowerCase(), c.id]));
+
       const reference = newTicketRef("TR");
-      const outRows: any[] = []; const inRows: any[] = []; const unmatched: string[] = [];
+      const outRows: any[] = []; const inRows: any[] = []; const created: string[] = [];
       for (const l of linesToSend) {
-        const match = (l.sku && bySku.get(l.sku.toLowerCase())) ?? byName.get(l.name.toLowerCase());
-        if (!match) { unmatched.push(l.name); continue; }
+        let match: { id: string; sku: string | null; name: string } | undefined =
+          (l.sku ? bySku.get(l.sku.toLowerCase()) : undefined) ?? byName.get(l.name.toLowerCase());
+
+        if (!match) {
+          const src = sourceById.get(l.product_id);
+          if (!src) continue;
+
+          let destCategoryId: string | null = null;
+          const categoryName: string | undefined = src.categories?.name;
+          if (categoryName) {
+            destCategoryId = destCategoryByName.get(categoryName.toLowerCase()) ?? null;
+            if (!destCategoryId) {
+              const { data: newCat, error: catInsertErr } = await supabase.from("categories")
+                .insert({ organization_id: input.toOrganizationId, name: categoryName }).select().single();
+              if (catInsertErr) throw catInsertErr;
+              destCategoryId = newCat.id;
+              destCategoryByName.set(categoryName.toLowerCase(), newCat.id);
+            }
+          }
+
+          const { data: newProduct, error: prodInsertErr } = await supabase.from("products").insert({
+            organization_id: input.toOrganizationId, category_id: destCategoryId,
+            sku: src.sku, barcode: src.barcode, name: src.name, description: src.description,
+            price: src.price, cost: src.cost, tax_rate: src.tax_rate, unit: src.unit,
+            image_url: src.image_url, is_active: src.is_active, low_stock_threshold: src.low_stock_threshold,
+          }).select().single();
+          if (prodInsertErr) throw prodInsertErr;
+
+          match = { id: newProduct.id, sku: newProduct.sku, name: newProduct.name };
+          if (match.sku) bySku.set(match.sku.toLowerCase(), match);
+          byName.set(match.name.toLowerCase(), match);
+          created.push(l.name);
+        }
+
         outRows.push({
           organization_id: organizationId, product_id: l.product_id, type: "transfer", quantity: l.quantity,
           reason: `Transfert sortant (${reference})`, reference, created_by: user?.id,
@@ -1246,7 +1650,7 @@ export function useTransferStock() {
         const { error: e2 } = await supabase.from("stock_movements").insert(inRows);
         if (e2) throw e2;
       }
-      return { transferred: outRows.length, unmatched };
+      return { transferred: outRows.length, created };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["products", organizationId] });

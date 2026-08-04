@@ -15,6 +15,7 @@ export const Route = createFileRoute("/app/erp/equipe")({
       title="Équipe"
       subtitle="Utilisateurs et rôles ZegERP"
       showPermissionsMatrix={false}
+      customRolesAppModule="erp"
     />
   ),
 });

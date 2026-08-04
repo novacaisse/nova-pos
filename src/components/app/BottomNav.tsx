@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
 import { useCurrentPlanModules } from "@/lib/data/accountHooks";
-import { useMyRole } from "@/lib/data/hooks";
+import { useMyRole, useMyModulePermissions } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { AppSwitcher } from "@/components/app/AppSwitcher";
 import { cn } from "@/lib/utils";
@@ -52,6 +52,7 @@ const MORE: Item[] = [
   { label: "Stock", to: "/app/stock", icon: Warehouse },
   { label: "Fournisseurs", to: "/app/fournisseurs", icon: Truck },
   { label: "Devis", to: "/app/devis", icon: FileText },
+  { label: "Réservations", to: "/app/reservations", icon: CalendarRange },
   { label: "Dépenses", to: "/app/depenses", icon: Wallet },
   { label: "Rapports", to: "/app/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/equipe", icon: UsersRound },
@@ -127,6 +128,61 @@ const ERP_MORE: Item[] = [
   { label: "Paramètres", to: "/app/erp/parametres", icon: Settings },
 ];
 
+// Rôles personnalisés (Équipe Phase B, migrations 063/064) — ZegCaisse
+// uniquement pour l'instant (cf. même carte dans AppSidebar.tsx).
+const POS_MODULE_FOR_URL: Record<string, string> = {
+  "/app/produits": "produits",
+  "/app/stock": "stock",
+  "/app/fournisseurs": "fournisseurs",
+  "/app/clients": "clients",
+  "/app/caisse": "ventes",
+  "/app/ventes": "ventes",
+  "/app/devis": "devis",
+  "/app/reservations": "reservations",
+  "/app/depenses": "depenses",
+  "/app/rapports": "rapports",
+  "/app/parametres": "parametres",
+};
+// Idem ZegHotel (Équipe Phase D-1, migrations 066/067).
+const HOTEL_MODULE_FOR_URL: Record<string, string> = {
+  "/app/hotel/reservations": "hotel_reservations",
+  "/app/hotel/rooms": "hotel_rooms",
+  "/app/hotel/housekeeping": "hotel_housekeeping",
+  "/app/hotel/maintenance": "hotel_maintenance",
+  "/app/hotel/clients": "hotel_clients",
+  "/app/hotel/corporate": "hotel_corporate",
+  "/app/hotel/pos-interne": "hotel_pos_interne",
+  "/app/hotel/rapports": "hotel_rapports",
+  "/app/hotel/canaux": "hotel_canaux",
+  "/app/hotel/parametres": "hotel_parametres",
+};
+// Idem ZegResto (Équipe Phase D-2, migrations 068/069).
+const RESTO_MODULE_FOR_URL: Record<string, string> = {
+  "/app/resto/salle": "resto_salle",
+  "/app/resto/commandes": "resto_commandes",
+  "/app/resto/cuisine": "resto_cuisine",
+  "/app/resto/menu": "resto_menu",
+  "/app/resto/reservations": "resto_reservations",
+  "/app/resto/rapports": "resto_rapports",
+  "/app/resto/parametres": "resto_parametres",
+};
+// Idem ZegERP (Équipe Phase D-3, migrations 070/071) — cf. même carte dans
+// AppSidebar.tsx pour le détail des pages composites (Achats/Ventes/Documents).
+const ERP_MODULE_FOR_URL: Record<string, string | string[]> = {
+  "/app/erp/produits": "erp_produits",
+  "/app/erp/stock": "erp_stock",
+  "/app/erp/achats": ["erp_achats", "erp_factures_fournisseurs", "erp_receptions"],
+  "/app/erp/ventes": ["erp_ventes", "erp_facturation_ventes", "erp_retours_clients"],
+  "/app/erp/pos": "erp_pos",
+  "/app/erp/finance": "erp_finance",
+  "/app/erp/comptabilite": "erp_comptabilite",
+  "/app/erp/rh": "erp_rh",
+  "/app/erp/documents": ["erp_documents", "erp_achats", "erp_ventes", "erp_rh"],
+  "/app/erp/rapports": "erp_rapports",
+  "/app/erp/parametres": "erp_parametres",
+};
+const MODULE_FOR_URL: Record<string, string | string[]> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL, ...RESTO_MODULE_FOR_URL, ...ERP_MODULE_FOR_URL };
+
 export function BottomNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -134,12 +190,21 @@ export function BottomNav() {
 
   const planModules = useCurrentPlanModules();
   const { data: myRole } = useMyRole();
+  const { data: myModulePerms } = useMyModulePermissions();
   const { currentOrganization } = useOrganization();
   const activeApps = currentOrganization?.active_apps ?? ["pos"];
   // Phase 4 : catalogue par app_module (avant, PLAN_MODULES ZegCaisse était
   // vérifié même côté ZegHotel, où aucun raccourci n'était donc jamais bridé).
   const isGatableModule = (to: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === to);
-  const included = (item: Item) => !planModules || !isGatableModule(item.to) || planModules.includes(item.to);
+  // Tant que myModulePerms n'a pas encore chargé, on ne masque rien ici.
+  const hasModulePermission = (to: string) => {
+    const key = MODULE_FOR_URL[to];
+    if (!key || !myModulePerms) return true;
+    const keys = Array.isArray(key) ? key : [key];
+    return keys.some((k) => myModulePerms.find((p) => p.module_key === k)?.can_view);
+  };
+  const included = (item: Item) =>
+    (!planModules || !isGatableModule(item.to) || planModules.includes(item.to)) && hasModulePermission(item.to);
 
   // ZegCaisse et ZegHôtel sont deux activités distinctes : quand les deux
   // sont actives, on ne mélange jamais leurs raccourcis — le menu affiché
