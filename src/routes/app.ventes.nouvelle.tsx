@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
-  Search, Plus, Minus, Trash2, User, X, Loader2, Check, Banknote, Smartphone, CreditCard, Wallet,
+  Search, Plus, Minus, Trash2, User, UserPlus, X, Loader2, Check, Banknote, Smartphone, CreditCard, Wallet,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
-  useProducts, useCustomers, useCreateSale, useMyRole, useTeamPermissions, useFormatMoney, newTicketRef,
+  useProducts, useCustomers, useUpsertCustomer, useCreateSale, useMyRole, useTeamPermissions, useFormatMoney, newTicketRef,
   type ProductWithStock, type Customer, type Sale,
 } from "@/lib/data/hooks";
 import { cn, selectOnFocus } from "@/lib/utils";
@@ -32,6 +32,7 @@ function NouvelleVentePage() {
   const navigate = useNavigate();
   const { data: products = [] } = useProducts();
   const { data: customers = [] } = useCustomers();
+  const upsertCustomer = useUpsertCustomer();
   const createSale = useCreateSale();
   const { data: myRole } = useMyRole();
   const perms = useTeamPermissions();
@@ -41,6 +42,8 @@ function NouvelleVentePage() {
   const [cart, setCart] = useState<Line[]>([]);
   const [customerQuery, setCustomerQuery] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [discount, setDiscount] = useState(0);
   const [method, setMethod] = useState<Sale["payment_method"]>("cash");
   const [notes, setNotes] = useState("");
@@ -79,6 +82,13 @@ function NouvelleVentePage() {
   const updatePrice = (i: number, price: number) =>
     setCart((c) => c.map((l, idx) => (idx === i ? { ...l, unit_price: Math.max(0, price) } : l)));
   const removeLine = (i: number) => setCart((c) => c.filter((_, idx) => idx !== i));
+
+  const createQuickCustomer = async () => {
+    if (!customerQuery.trim()) return;
+    const created = await upsertCustomer.mutateAsync({ name: customerQuery.trim(), phone: newCustomerPhone.trim() });
+    setCustomer(created as Customer);
+    setCustomerQuery(""); setNewCustomerPhone(""); setCreatingCustomer(false);
+  };
 
   const subtotal = cart.reduce((s, l) => s + l.unit_price * l.quantity, 0);
   const discountAmt = Math.max(0, Math.min(Math.round(subtotal), Math.round(discount)));
@@ -166,22 +176,42 @@ function NouvelleVentePage() {
                 <div className="min-w-0 flex-1 truncate text-sm font-medium">{customer.name}</div>
                 <button onClick={() => setCustomer(null)} className="grid h-7 w-7 place-items-center rounded-md hover:bg-muted"><X className="h-3.5 w-3.5" /></button>
               </div>
+            ) : creatingCustomer ? (
+              <div className="space-y-2 rounded-xl border border-border p-3">
+                <input value={customerQuery} onChange={(e) => setCustomerQuery(e.target.value)} placeholder="Nom du client *" autoFocus
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+                <input value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} placeholder="Téléphone"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+                <div className="flex gap-2">
+                  <button onClick={() => { setCreatingCustomer(false); setCustomerQuery(""); setNewCustomerPhone(""); }}
+                    className="h-9 flex-1 rounded-lg border border-border bg-card text-xs font-semibold">Annuler</button>
+                  <button onClick={createQuickCustomer} disabled={!customerQuery.trim() || upsertCustomer.isPending}
+                    className="flex h-9 flex-[2] items-center justify-center gap-1.5 rounded-lg bg-primary text-xs font-bold text-primary-foreground disabled:opacity-40">
+                    {upsertCustomer.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Créer et sélectionner
+                  </button>
+                </div>
+              </div>
             ) : (
-              <div className="relative">
-                <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input value={customerQuery} onChange={(e) => setCustomerQuery(e.target.value)} placeholder="Nom ou téléphone… (sinon comptoir)"
-                  className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
-                {filteredCustomers.length > 0 && (
-                  <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border bg-card shadow-elegant">
-                    {filteredCustomers.map((c) => (
-                      <button key={c.id} onClick={() => { setCustomer(c); setCustomerQuery(""); }}
-                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted">
-                        <span className="truncate">{c.name}</span>
-                        <span className="text-xs text-muted-foreground">{c.phone ?? "—"}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="space-y-2">
+                <div className="relative">
+                  <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input value={customerQuery} onChange={(e) => setCustomerQuery(e.target.value)} placeholder="Nom ou téléphone… (sinon comptoir)"
+                    className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
+                  {filteredCustomers.length > 0 && (
+                    <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border bg-card shadow-elegant">
+                      {filteredCustomers.map((c) => (
+                        <button key={c.id} onClick={() => { setCustomer(c); setCustomerQuery(""); }}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted">
+                          <span className="truncate">{c.name}</span>
+                          <span className="text-xs text-muted-foreground">{c.phone ?? "—"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setCreatingCustomer(true)} className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
+                  <UserPlus className="h-3.5 w-3.5" /> Créer un nouveau client
+                </button>
               </div>
             )}
           </div>

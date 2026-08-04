@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, FileText, Search, X, Send, ArrowRightLeft, Trash2, Edit3, CheckCircle2, Loader2, Printer } from "lucide-react";
+import { Plus, FileText, Search, X, Send, ArrowRightLeft, Trash2, Edit3, CheckCircle2, Loader2, Printer, Percent } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import {
@@ -219,21 +219,32 @@ function QuoteEditor({ initial, onClose, onSave }: {
   const [lines, setLines] = useState(
     initial?.quote_items.map((l) => ({ product_id: l.product_id, name: l.name, quantity: l.quantity, unit_price: l.unit_price })) ?? [],
   );
-  const [productSel, setProductSel] = useState(products[0]?.id ?? "");
-  const [qty, setQty] = useState(1);
+  const [productQuery, setProductQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  const [discountMode, setDiscountMode] = useState<"pct" | "amount">("amount");
+  const [discountPct, setDiscountPct] = useState(0);
+  const [discountAmountInput, setDiscountAmountInput] = useState(initial?.discount ?? 0);
 
-  useEffect(() => {
-    if (!productSel && products.length) setProductSel(products[0].id);
-  }, [products, productSel]);
+  const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
+  const discountAmt = Math.max(0, Math.min(
+    Math.round(subtotal),
+    discountMode === "pct" ? Math.round((subtotal * discountPct) / 100) : Math.round(discountAmountInput),
+  ));
+  const total = Math.max(0, subtotal - discountAmt);
 
-  const total = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return [];
+    return products.filter((p) => p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q)).slice(0, 8);
+  }, [products, productQuery]);
 
-  const addLine = () => {
-    const p = products.find((x) => x.id === productSel);
-    if (!p || qty <= 0) return;
-    setLines((l) => [...l, { product_id: p.id, name: p.name, quantity: qty, unit_price: p.price }]);
-    setQty(1);
+  const addLine = (p: (typeof products)[number]) => {
+    setLines((c) => {
+      const idx = c.findIndex((l) => l.product_id === p.id);
+      if (idx >= 0) { const copy = [...c]; copy[idx] = { ...copy[idx], quantity: copy[idx].quantity + 1 }; return copy; }
+      return [...c, { product_id: p.id, name: p.name, quantity: 1, unit_price: p.price }];
+    });
+    setProductQuery("");
   };
 
   const save = async () => {
@@ -244,6 +255,7 @@ function QuoteEditor({ initial, onClose, onSave }: {
       customer_id: customerId,
       valid_until: validUntil,
       status: initial?.status,
+      discount: discountAmt,
       items: lines,
     });
     setSaving(false);
@@ -274,12 +286,21 @@ function QuoteEditor({ initial, onClose, onSave }: {
 
           <div className="rounded-xl border border-border p-3">
             <div className="mb-2 text-xs font-semibold text-muted-foreground">Ajouter un article</div>
-            <div className="flex gap-2">
-              <select value={productSel} onChange={(e) => setProductSel(e.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-sm">
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name} — {formatXOF(p.price)}</option>)}
-              </select>
-              <input type="number" onFocus={selectOnFocus} min={1} value={qty} onChange={(e) => setQty(Number(e.target.value) || 1)} className="h-10 w-20 rounded-xl border border-border bg-background px-2 text-center text-sm" />
-              <button onClick={addLine} className="rounded-xl bg-primary px-3 text-sm font-bold text-primary-foreground">Ajouter</button>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input value={productQuery} onChange={(e) => setProductQuery(e.target.value)} placeholder="Rechercher un produit (nom, SKU)…"
+                className="h-10 w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
+              {filteredProducts.length > 0 && (
+                <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-64 overflow-y-auto rounded-xl border border-border bg-card shadow-elegant">
+                  {filteredProducts.map((p) => (
+                    <button key={p.id} onClick={() => addLine(p)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted">
+                      <span className="min-w-0 truncate">{p.name}</span>
+                      <span className="tabular shrink-0 text-xs text-muted-foreground">{formatXOF(p.price)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -303,9 +324,37 @@ function QuoteEditor({ initial, onClose, onSave }: {
             })}
           </div>
 
-          <div className="flex items-center justify-between rounded-xl bg-muted p-3">
-            <span className="text-sm font-semibold">Total</span>
-            <span className="tabular font-display text-2xl font-bold">{formatXOF(total)}</span>
+          <div className="space-y-2 rounded-xl bg-muted p-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Sous-total</span>
+              <span className="tabular font-medium">{formatXOF(Math.round(subtotal))}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Percent className="h-3.5 w-3.5" />
+                <span>Remise</span>
+                <div className="flex rounded-md border border-border bg-card p-0.5">
+                  <button type="button" onClick={() => setDiscountMode("pct")}
+                    className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "pct" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>%</button>
+                  <button type="button" onClick={() => setDiscountMode("amount")}
+                    className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", discountMode === "amount" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>F</button>
+                </div>
+                {discountMode === "pct" ? (
+                  <input type="number" onFocus={selectOnFocus} min={0} max={100} value={discountPct}
+                    onChange={(e) => setDiscountPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                    className="tabular h-7 w-14 rounded-md border border-border bg-card px-2 text-right text-xs" />
+                ) : (
+                  <input type="number" onFocus={selectOnFocus} min={0} value={discountAmountInput}
+                    onChange={(e) => setDiscountAmountInput(Math.max(0, Number(e.target.value) || 0))}
+                    className="tabular h-7 w-20 rounded-md border border-border bg-card px-2 text-right text-xs" />
+                )}
+              </div>
+              <span className="tabular font-medium">− {formatXOF(discountAmt)}</span>
+            </div>
+            <div className="flex items-center justify-between border-t border-dashed border-border pt-2">
+              <span className="text-sm font-semibold">Total</span>
+              <span className="tabular font-display text-2xl font-bold">{formatXOF(total)}</span>
+            </div>
           </div>
 
           <div className="flex gap-2">

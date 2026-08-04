@@ -253,12 +253,18 @@ function Overlay({ children, onClose, w = "max-w-md" }: { children: React.ReactN
 
 function AdjustDialog({ products, onClose, onSave }: { products: ProductWithStock[]; onClose: () => void; onSave: (m: { product_id: string; type: any; quantity: number; reason?: string }) => Promise<void> }) {
   const [productId, setProductId] = useState(products[0]?.id ?? "");
+  const [productQuery, setProductQuery] = useState("");
   const [kind, setKind] = useState<LocalKind>("entree");
   const [qty, setQty] = useState(0);
   const [reason, setReason] = useState("");
   const inp = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
 
   const p = products.find((x) => x.id === productId);
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return [];
+    return products.filter((x) => x.name.toLowerCase().includes(q) || (x.sku ?? "").toLowerCase().includes(q)).slice(0, 8);
+  }, [products, productQuery]);
   if (!p) return null;
 
   const delta = kind === "entree" ? +Math.abs(qty)
@@ -284,9 +290,26 @@ function AdjustDialog({ products, onClose, onSave }: { products: ProductWithStoc
       </div>
       <div className="space-y-3 p-5">
         <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Produit</div>
-          <select value={productId} onChange={(e) => setProductId(e.target.value)} className={inp}>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name} (stock : {p.stock})</option>)}
-          </select>
+          <div className="mb-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs">
+            Sélectionné : <b>{p.name}</b> (stock : {p.stock})
+          </div>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input value={productQuery} onChange={(e) => setProductQuery(e.target.value)}
+              placeholder="Rechercher un autre produit (nom, SKU)…"
+              className={cn(inp, "pl-9")} />
+            {filteredProducts.length > 0 && (
+              <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border bg-card shadow-elegant">
+                {filteredProducts.map((x) => (
+                  <button key={x.id} type="button" onClick={() => { setProductId(x.id); setProductQuery(""); }}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted">
+                    <span className="min-w-0 truncate">{x.name}</span>
+                    <span className="tabular shrink-0 text-xs text-muted-foreground">stock {x.stock}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </label>
         <div className="grid grid-cols-5 gap-1">
           {(Object.keys(KIND_META) as LocalKind[]).map((t) => (

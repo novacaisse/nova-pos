@@ -825,6 +825,10 @@ export function useUpsertQuote() {
       valid_until?: string | null;
       notes?: string | null;
       status?: QuoteStatus;
+      // Remise globale du devis (montant, en %/fixe déjà résolu côté appelant
+      // — voir QuoteEditor) — prioritaire sur la somme des remises par
+      // ligne si fournie, même principe que sales.discount pour une vente.
+      discount?: number;
       items: { product_id: string | null; name: string; quantity: number; unit_price: number; discount?: number; tax_rate?: number }[];
     }) => {
       if (!organizationId) throw new Error("Aucune boutique sélectionnée");
@@ -834,14 +838,15 @@ export function useUpsertQuote() {
       });
       const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
       const itemsDiscount = items.reduce((s, i) => s + (i.discount ?? 0), 0);
-      const total = Math.max(0, subtotal - itemsDiscount);
+      const quoteDiscount = input.discount ?? itemsDiscount;
+      const total = Math.max(0, subtotal - quoteDiscount);
 
       const payload = {
         organization_id: organizationId,
         reference: input.reference ?? newTicketRef("DEV"),
         customer_id: input.customer_id ?? null,
         status: input.status ?? "draft",
-        subtotal, discount: itemsDiscount, tax: 0, total,
+        subtotal, discount: quoteDiscount, tax: 0, total,
         valid_until: input.valid_until ?? null,
         notes: input.notes ?? null,
       };
