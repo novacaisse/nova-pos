@@ -52,6 +52,7 @@ const MORE: Item[] = [
   { label: "Stock", to: "/app/stock", icon: Warehouse },
   { label: "Fournisseurs", to: "/app/fournisseurs", icon: Truck },
   { label: "Devis", to: "/app/devis", icon: FileText },
+  { label: "Réservations", to: "/app/reservations", icon: CalendarRange },
   { label: "Dépenses", to: "/app/depenses", icon: Wallet },
   { label: "Rapports", to: "/app/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/equipe", icon: UsersRound },

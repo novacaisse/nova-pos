@@ -25,6 +25,7 @@ import { Route as AppVentesRouteImport } from './routes/app.ventes'
 import { Route as AppSupportRouteImport } from './routes/app.support'
 import { Route as AppStockRouteImport } from './routes/app.stock'
 import { Route as AppRestoRouteImport } from './routes/app.resto'
+import { Route as AppReservationsRouteImport } from './routes/app.reservations'
 import { Route as AppRapportsRouteImport } from './routes/app.rapports'
 import { Route as AppProfilRouteImport } from './routes/app.profil'
 import { Route as AppProduitsRouteImport } from './routes/app.produits'
@@ -170,6 +171,11 @@ const AppStockRoute = AppStockRouteImport.update({
 const AppRestoRoute = AppRestoRouteImport.update({
   id: '/resto',
   path: '/resto',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReservationsRoute = AppReservationsRouteImport.update({
+  id: '/reservations',
+  path: '/reservations',
   getParentRoute: () => AppRoute,
 } as any)
 const AppRapportsRoute = AppRapportsRouteImport.update({
@@ -532,6 +538,7 @@ export interface FileRoutesByFullPath {
   '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
+  '/app/reservations': typeof AppReservationsRoute
   '/app/resto': typeof AppRestoRouteWithChildren
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
@@ -609,6 +616,7 @@ export interface FileRoutesByTo {
   '/app/parametres': typeof AppParametresRoute
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
+  '/app/reservations': typeof AppReservationsRoute
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
   '/souscription/confirmation': typeof SouscriptionConfirmationRoute
@@ -691,6 +699,7 @@ export interface FileRoutesById {
   '/app/produits': typeof AppProduitsRouteWithChildren
   '/app/profil': typeof AppProfilRoute
   '/app/rapports': typeof AppRapportsRoute
+  '/app/reservations': typeof AppReservationsRoute
   '/app/resto': typeof AppRestoRouteWithChildren
   '/app/stock': typeof AppStockRoute
   '/app/support': typeof AppSupportRoute
@@ -776,6 +785,7 @@ export interface FileRouteTypes {
     | '/app/produits'
     | '/app/profil'
     | '/app/rapports'
+    | '/app/reservations'
     | '/app/resto'
     | '/app/stock'
     | '/app/support'
@@ -853,6 +863,7 @@ export interface FileRouteTypes {
     | '/app/parametres'
     | '/app/profil'
     | '/app/rapports'
+    | '/app/reservations'
     | '/app/stock'
     | '/app/support'
     | '/souscription/confirmation'
@@ -934,6 +945,7 @@ export interface FileRouteTypes {
     | '/app/produits'
     | '/app/profil'
     | '/app/rapports'
+    | '/app/reservations'
     | '/app/resto'
     | '/app/stock'
     | '/app/support'
@@ -1108,6 +1120,13 @@ declare module '@tanstack/react-router' {
       path: '/resto'
       fullPath: '/app/resto'
       preLoaderRoute: typeof AppRestoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/reservations': {
+      id: '/app/reservations'
+      path: '/reservations'
+      fullPath: '/app/reservations'
+      preLoaderRoute: typeof AppReservationsRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/rapports': {
@@ -1741,6 +1760,7 @@ interface AppRouteChildren {
   AppProduitsRoute: typeof AppProduitsRouteWithChildren
   AppProfilRoute: typeof AppProfilRoute
   AppRapportsRoute: typeof AppRapportsRoute
+  AppReservationsRoute: typeof AppReservationsRoute
   AppRestoRoute: typeof AppRestoRouteWithChildren
   AppStockRoute: typeof AppStockRoute
   AppSupportRoute: typeof AppSupportRoute
@@ -1764,6 +1784,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppProduitsRoute: AppProduitsRouteWithChildren,
   AppProfilRoute: AppProfilRoute,
   AppRapportsRoute: AppRapportsRoute,
+  AppReservationsRoute: AppReservationsRoute,
   AppRestoRoute: AppRestoRouteWithChildren,
   AppStockRoute: AppStockRoute,
   AppSupportRoute: AppSupportRoute,

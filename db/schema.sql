@@ -6301,6 +6301,42 @@ create policy erp_settings_write on public.erp_settings for all to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
+-- =============== Réservations ZegCaisse (migration 062) — pas une vente :
+-- ne bouge jamais le stock avant d'être honorée, d'où une table dédiée
+-- plutôt qu'un détournement de sales.status (collision sémantique avec les
+-- tickets en attente, éphémères). items en jsonb : pas de ventilation TVA
+-- par ligne ni de mouvement de stock avant d'être honorée. ===============
+create table if not exists public.reservations (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reference text not null,
+  customer_id uuid references public.customers(id) on delete set null,
+  customer_name text not null,
+  customer_phone text,
+  items jsonb not null default '[]'::jsonb,
+  total numeric(14,2) not null default 0,
+  deposit numeric(14,2) not null default 0,
+  reservation_date date not null,
+  status text not null default 'pending' check (status in ('pending', 'fulfilled', 'cancelled')),
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_reservations_org on public.reservations(organization_id);
+create index if not exists idx_reservations_date on public.reservations(organization_id, reservation_date);
+alter table public.reservations enable row level security;
+
+create policy reservations_select on public.reservations for select to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier','accountant']::public.app_role[]));
+create policy reservations_insert on public.reservations for insert to authenticated
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager','cashier']::public.app_role[]));
+create policy reservations_update on public.reservations for update to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]))
+  with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+create policy reservations_delete on public.reservations for delete to authenticated
+  using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages) + les 15 tables

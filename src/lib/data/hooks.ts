@@ -635,6 +635,67 @@ export function useAddSalePayment() {
   });
 }
 
+// ============ RÉSERVATIONS (migration 062) ============
+// Pas une vente : ne bouge jamais le stock avant d'être honorée (contrairement
+// à un ticket en attente, qui EST une vraie ligne `sales` en 'draft',
+// éphémère) — table dédiée, items en jsonb (pas de ventilation TVA par
+// ligne ni de mouvement de stock nécessaire avant d'honorer la réservation).
+export type ReservationStatus = "pending" | "fulfilled" | "cancelled";
+export type ReservationItem = { product_id: string | null; name: string; quantity: number; unit_price: number };
+export type Reservation = {
+  id: string; organization_id: string; reference: string;
+  customer_id: string | null; customer_name: string; customer_phone: string | null;
+  items: ReservationItem[]; total: number; deposit: number;
+  reservation_date: string; status: ReservationStatus; notes: string | null;
+  created_at: string; updated_at: string;
+};
+export function useReservations() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["reservations", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<Reservation[]> => {
+      const { data, error } = await supabase.from("reservations")
+        .select("*").eq("organization_id", organizationId!).order("reservation_date", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Reservation[];
+    },
+  });
+}
+export function useUpsertReservation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (r: Partial<Reservation> & { customer_name: string; items: ReservationItem[]; total: number; reservation_date: string }) => {
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const { data, error } = await supabase.from("reservations")
+        .upsert({ ...r, organization_id: organizationId, updated_at: new Date().toISOString() }).select().single();
+      if (error) throw error;
+      return data as Reservation;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reservations", organizationId] }),
+  });
+}
+export function useUpdateReservationStatus() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: ReservationStatus }) => {
+      const { error } = await supabase.from("reservations").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reservations", organizationId] }),
+  });
+}
+export function useDeleteReservation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("reservations").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reservations", organizationId] }),
+  });
+}
+
 // ============ TICKETS EN ATTENTE (Caisse) ============
 // Persistés comme de vraies lignes `sales` (status: 'draft', déjà prévu
 // dans l'enum sale_status) au lieu d'un state React perdu au reload. Le

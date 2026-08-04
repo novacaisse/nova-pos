@@ -105,6 +105,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Point de vente", url: "/app/caisse", icon: "ScanBarcode", badge: "F1" },
     { title: "Ventes", url: "/app/ventes", icon: "Receipt" },
     { title: "Devis", url: "/app/devis", icon: "FileText" },
+    { title: "Réservations", url: "/app/reservations", icon: "CalendarRange" },
     { title: "Clients", url: "/app/clients", icon: "Users" },
   ],
   catalogue: [
@@ -185,6 +186,7 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   "/app/caisse": ["stock", "front_desk", "housekeeping"],
   "/app/ventes": ["stock", "front_desk", "housekeeping"],
   "/app/devis": ["stock", "front_desk", "housekeeping"],
+  "/app/reservations": ["stock", "front_desk", "housekeeping"],
   "/app/clients": ["stock", "front_desk", "housekeeping"],
   "/app/produits": ["front_desk", "housekeeping"],
   "/app/stock": ["front_desk", "housekeeping"],
