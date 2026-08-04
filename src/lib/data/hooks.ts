@@ -200,6 +200,95 @@ export function useDeleteProduct() {
   });
 }
 
+export type BulkImportProductRow = {
+  name: string; sku?: string | null; barcode?: string | null; category_name?: string | null;
+  price: number; cost?: number; unit?: string | null; low_stock_threshold?: number; stock?: number;
+};
+// Import en masse (CSV, "Excel" au sens où le fichier vient d'un tableur —
+// voir app.produits.index.tsx pour le parsing) : une ligne par produit,
+// une catégorie retrouvée/créée par nom (jamais par id, le fichier ne
+// connaît que des noms), un produit retrouvé par SKU s'il existe déjà
+// (mise à jour du catalogue, jamais du stock — le stock existant n'est
+// touché que pour un produit réellement nouveau, via le même mécanisme
+// "stock initial" que la création manuelle dans useUpsertProduct).
+// Boucle séquentielle plutôt qu'un upsert(...).select() en un seul appel :
+// plus lent sur un très gros fichier, mais chaque ligne réussit ou échoue
+// indépendamment (une erreur de ligne n'annule jamais tout l'import), et
+// le rattachement stock initial → produit fraîchement créé reste sans
+// ambiguïté (pas de réappariement fragile après un upsert en lot).
+export function useBulkImportProducts() {
+  const organizationId = useOrganizationId(); const { user } = useAuth(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (rows: BulkImportProductRow[]) => {
+      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
+      const { data: existingCats } = await supabase.from("categories").select("id, name").eq("organization_id", organizationId);
+      const catByName = new Map<string, string>((existingCats ?? []).map((c) => [c.name.toLowerCase(), c.id]));
+
+      let created = 0, updated = 0;
+      const errors: { row: number; message: string }[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        try {
+          if (!r.name?.trim()) throw new Error("Nom manquant");
+          if (!(r.price >= 0)) throw new Error("Prix invalide");
+
+          let categoryId: string | null = null;
+          const catName = r.category_name?.trim();
+          if (catName) {
+            const key = catName.toLowerCase();
+            if (!catByName.has(key)) {
+              const { data: newCat, error: catErr } = await supabase.from("categories")
+                .insert({ organization_id: organizationId, name: catName, color: "#0891b2" }).select("id").single();
+              if (catErr) throw catErr;
+              catByName.set(key, newCat.id);
+            }
+            categoryId = catByName.get(key)!;
+          }
+
+          const sku = r.sku?.trim() || null;
+          let existingId: string | null = null;
+          if (sku) {
+            const { data: existing } = await supabase.from("products").select("id")
+              .eq("organization_id", organizationId).eq("sku", sku).maybeSingle();
+            existingId = existing?.id ?? null;
+          }
+
+          const payload = {
+            organization_id: organizationId, name: r.name.trim(), sku, barcode: r.barcode?.trim() || null,
+            category_id: categoryId, price: r.price, cost: r.cost ?? 0,
+            unit: r.unit?.trim() || "pcs", low_stock_threshold: r.low_stock_threshold ?? 5,
+          };
+
+          if (existingId) {
+            const { error } = await supabase.from("products").update(payload).eq("id", existingId);
+            if (error) throw error;
+            updated++;
+          } else {
+            const { data: inserted, error } = await supabase.from("products").insert(payload).select("id").single();
+            if (error) throw error;
+            created++;
+            if (r.stock && r.stock > 0) {
+              await supabase.from("stock_movements").insert({
+                organization_id: organizationId, product_id: inserted.id, type: "in",
+                quantity: r.stock, reason: "Import en masse", created_by: user?.id,
+              });
+            }
+          }
+        } catch (e: any) {
+          errors.push({ row: i + 1, message: e?.message ?? "Erreur inconnue" });
+        }
+      }
+      return { created, updated, errors };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["categories", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
+    },
+  });
+}
+
 // ============ CUSTOMERS ============
 export function useCustomers() {
   const organizationId = useOrganizationId();
@@ -487,6 +576,23 @@ export function useStockMovements(limit = 100) {
         .eq("organization_id", organizationId!).order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return (data ?? []).map((m: any) => ({ ...m, product_name: m.products?.name ?? "—" }));
+    },
+  });
+}
+// Historique entrées/sorties d'un seul produit (popup détail produit) —
+// useStockMovements ci-dessus ne filtre que par organisation, pas par
+// produit.
+export function useProductStockMovements(productId: string | null) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["stock_movements", organizationId, "product", productId],
+    enabled: !!organizationId && !!productId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("stock_movements")
+        .select("*").eq("organization_id", organizationId!).eq("product_id", productId!)
+        .order("created_at", { ascending: false }).limit(100);
+      if (error) throw error;
+      return (data ?? []) as StockMovement[];
     },
   });
 }

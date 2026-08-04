@@ -1,16 +1,54 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Package, ChevronDown, Check } from "lucide-react";
+import {
+  Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Package, ChevronDown, Check,
+  Upload, Download, Loader2, ArrowDownCircle, ArrowUpCircle,
+} from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { PageSkeleton } from "@/components/app/PageSkeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  useProducts, useDeleteProduct,
+  useProducts, useDeleteProduct, useProductStockMovements, useBulkImportProducts,
   useCategories, useUpsertCategory, useDeleteCategory, useMyRole, useTeamPermissions,
-  useFormatMoney, type ProductWithStock, type Category,
+  useFormatMoney, type ProductWithStock, type Category, type BulkImportProductRow,
 } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
+
+// Parseur CSV minimal (délimiteur , ou ; auto-détecté sur l'en-tête, champs
+// entre guillemets gérés) — "importation Excel" au sens où le fichier vient
+// d'un tableur : Excel exporte/ouvre le CSV nativement, pas besoin d'une
+// dépendance pour lire le binaire .xlsx. xlsx (SheetJS) a été évalué et
+// écarté : la version publiée sur npm (0.18.5, la seule installable via
+// npm install) porte des CVE actives (pollution de prototype, ReDoS) sans
+// correctif disponible sur le registre npm — cf. npm audit. Le CSV est du
+// texte brut, aucune surface d'attaque de ce type.
+function parseCsv(text: string): string[][] {
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+  const delimiter = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === delimiter) { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.some((f) => f.trim() !== "")) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); if (row.some((f) => f.trim() !== "")) rows.push(row); }
+  return rows;
+}
 
 export const Route = createFileRoute("/app/produits/")({
   validateSearch: (search: Record<string, unknown>): { q?: string } => ({
@@ -37,6 +75,8 @@ function ProduitsPage() {
   const [view, setView] = useState<"grid" | "list">("list");
   const [confirmDel, setConfirmDel] = useState<ProductWithStock | null>(null);
   const [manageCats, setManageCats] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [viewing, setViewing] = useState<ProductWithStock | null>(null);
 
   const list = useMemo(() => products.filter((p) => {
     if (cat !== "all" && p.category_id !== cat) return false;
@@ -53,6 +93,7 @@ function ProduitsPage() {
         actions={canManage && (
           <>
             <button onClick={() => setManageCats(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><TagIcon className="h-4 w-4" /> Catégories</button>
+            <button onClick={() => setImporting(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Upload className="h-4 w-4" /> Importer</button>
             <Link to="/app/produits/nouveau" className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouveau produit</Link>
           </>
         )}
@@ -103,12 +144,12 @@ function ProduitsPage() {
                   return (
                     <tr key={p.id} className="border-t border-border/60 hover:bg-muted/40">
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
+                        <button onClick={() => setViewing(p)} className="flex items-center gap-3 text-left hover:underline">
                           <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-muted text-lg">
                             {p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : "📦"}
                           </div>
                           <div><div className="font-semibold">{p.name}</div><div className="text-[11px] text-muted-foreground">{p.unit}</div></div>
-                        </div>
+                        </button>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs">{p.sku ?? "—"}</td>
                       <td className="px-4 py-3"><span className="rounded-full bg-muted px-2 py-0.5 text-xs">{catName}</span></td>
@@ -134,11 +175,13 @@ function ProduitsPage() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {list.map((p) => (
               <div key={p.id} className="group rounded-2xl border border-border bg-card p-3 hover:shadow-elegant">
-                <div className="grid aspect-square place-items-center overflow-hidden rounded-xl bg-muted text-5xl">
-                  {p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : "📦"}
-                </div>
-                <div className="mt-3 truncate text-sm font-semibold">{p.name}</div>
-                <div className="text-[11px] text-muted-foreground">{p.sku ?? "—"}</div>
+                <button onClick={() => setViewing(p)} className="block w-full text-left">
+                  <div className="grid aspect-square place-items-center overflow-hidden rounded-xl bg-muted text-5xl">
+                    {p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : "📦"}
+                  </div>
+                  <div className="mt-3 truncate text-sm font-semibold">{p.name}</div>
+                  <div className="text-[11px] text-muted-foreground">{p.sku ?? "—"}</div>
+                </button>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="tabular font-bold">{formatXOF(Number(p.price))}</span>
                   {canManage && (
@@ -161,6 +204,14 @@ function ProduitsPage() {
         )}
         {manageCats && (
           <CategoriesDialog cats={cats} onClose={() => setManageCats(false)} />
+        )}
+        {importing && (
+          <ImportDialog cats={cats} onClose={() => setImporting(false)} />
+        )}
+        {viewing && (
+          <ProductDetailDialog product={viewing} cats={cats} canManage={canManage} canSeeCostMargin={canSeeCostMargin}
+            onClose={() => setViewing(null)}
+            onDelete={() => { setConfirmDel(viewing); setViewing(null); }} />
         )}
       </AnimatePresence>
     </div>
@@ -257,5 +308,251 @@ function CategoryFilter({ cats, value, onChange }: { cats: Category[]; value: "a
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+const IMPORT_TEMPLATE_HEADER = ["Nom", "SKU", "Code-barres", "Catégorie", "Prix vente", "Prix achat", "Unité", "Seuil stock bas", "Stock initial"];
+
+function downloadFile(name: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function ImportDialog({ cats, onClose }: { cats: Category[]; onClose: () => void }) {
+  const bulkImport = useBulkImportProducts();
+  const [mode, setMode] = useState<"all" | "category">("all");
+  const [categoryId, setCategoryId] = useState(cats[0]?.id ?? "");
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState<BulkImportProductRow[]>([]);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ created: number; updated: number; errors: { row: number; message: string }[] } | null>(null);
+
+  const categoryName = cats.find((c) => c.id === categoryId)?.name ?? "";
+
+  const onFile = async (file?: File) => {
+    if (!file) return;
+    setResult(null); setParseError(null); setFileName(file.name);
+    try {
+      const text = await file.text();
+      const table = parseCsv(text);
+      if (table.length < 2) { setParseError("Fichier vide ou sans lignes de données."); setRows([]); return; }
+      const header = table[0].map((h) => h.trim().toLowerCase());
+      const idx = (...names: string[]) => header.findIndex((h) => names.includes(h));
+      const iName = idx("nom", "name");
+      const iSku = idx("sku");
+      const iBarcode = idx("code-barres", "code barres", "barcode");
+      const iCategory = idx("catégorie", "categorie", "category");
+      const iPrice = idx("prix vente", "prix", "price");
+      const iCost = idx("prix achat", "cost", "coût", "cout");
+      const iUnit = idx("unité", "unite", "unit");
+      const iThreshold = idx("seuil stock bas", "seuil", "threshold");
+      const iStock = idx("stock initial", "stock");
+      if (iName === -1 || iPrice === -1) {
+        setParseError("Colonnes obligatoires manquantes : « Nom » et « Prix vente ».");
+        setRows([]);
+        return;
+      }
+      const parsed: BulkImportProductRow[] = table.slice(1).map((r) => ({
+        name: r[iName] ?? "",
+        sku: iSku >= 0 ? r[iSku] : null,
+        barcode: iBarcode >= 0 ? r[iBarcode] : null,
+        category_name: mode === "category" ? categoryName : (iCategory >= 0 ? r[iCategory] : null),
+        price: Number((r[iPrice] ?? "0").replace(",", ".")) || 0,
+        cost: iCost >= 0 ? Number((r[iCost] ?? "0").replace(",", ".")) || 0 : 0,
+        unit: iUnit >= 0 ? r[iUnit] : null,
+        low_stock_threshold: iThreshold >= 0 ? Number(r[iThreshold]) || 5 : 5,
+        stock: iStock >= 0 ? Number(r[iStock]) || 0 : 0,
+      }));
+      setRows(parsed);
+    } catch (e: any) {
+      setParseError(e?.message ?? "Impossible de lire ce fichier.");
+      setRows([]);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const example = ["Riz 5kg", "RIZ-5KG", "", mode === "category" ? categoryName : "Alimentation", "5000", "4000", "pcs", "5", "20"];
+    const csv = [IMPORT_TEMPLATE_HEADER.join(","), example.join(",")].join("\n");
+    downloadFile("modele-import-produits.csv", csv, "text/csv");
+  };
+
+  const submit = async () => {
+    if (rows.length === 0) return;
+    const res = await bulkImport.mutateAsync(rows);
+    setResult(res);
+    setRows([]);
+  };
+
+  return (
+    <Overlay onClose={onClose} w="max-w-lg">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="font-display text-lg font-bold">Importer des produits</div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="space-y-4 p-5">
+        <div className="flex gap-2">
+          <button onClick={() => setMode("all")}
+            className={cn("flex-1 rounded-xl border px-3 py-2 text-sm font-semibold", mode === "all" ? "border-primary bg-primary/10 text-primary" : "border-border")}>
+            Tous les produits
+          </button>
+          <button onClick={() => setMode("category")}
+            className={cn("flex-1 rounded-xl border px-3 py-2 text-sm font-semibold", mode === "category" ? "border-primary bg-primary/10 text-primary" : "border-border")}>
+            Par catégorie
+          </button>
+        </div>
+        {mode === "category" && (
+          <label className="block">
+            <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Catégorie appliquée à toutes les lignes</div>
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm">
+              {cats.length === 0 && <option value="">Aucune catégorie — créez-en une d'abord</option>}
+              {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+        )}
+
+        <div className="rounded-xl border border-dashed border-border p-4 text-center">
+          <p className="text-xs text-muted-foreground">
+            Fichier CSV — colonnes : {IMPORT_TEMPLATE_HEADER.join(" · ")}.
+            {mode === "category" && " (la colonne Catégorie est ignorée en mode « Par catégorie »)"}
+          </p>
+          <button onClick={downloadTemplate} className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
+            <Download className="h-3.5 w-3.5" /> Télécharger un modèle
+          </button>
+          <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-semibold hover:bg-muted">
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+            <Upload className="h-4 w-4" /> {fileName || "Choisir un fichier CSV…"}
+          </label>
+        </div>
+
+        {parseError && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{parseError}</div>}
+
+        {rows.length > 0 && (
+          <div className="rounded-xl bg-muted p-3 text-sm">
+            <b>{rows.length}</b> ligne{rows.length > 1 ? "s" : ""} prête{rows.length > 1 ? "s" : ""} à importer.
+          </div>
+        )}
+
+        {result && (
+          <div className="space-y-2 rounded-xl border border-border p-3 text-sm">
+            <div><span className="font-semibold text-success">{result.created}</span> créé{result.created > 1 ? "s" : ""} · <span className="font-semibold text-primary">{result.updated}</span> mis à jour</div>
+            {result.errors.length > 0 && (
+              <div className="max-h-32 overflow-y-auto text-xs text-destructive">
+                {result.errors.map((e, i) => <div key={i}>Ligne {e.row} : {e.message}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Fermer</button>
+          <button onClick={submit} disabled={rows.length === 0 || bulkImport.isPending || (mode === "category" && !categoryId)}
+            className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+            {bulkImport.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Importer {rows.length > 0 ? `(${rows.length})` : ""}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+const MOVEMENT_LABEL: Record<string, string> = { in: "Entrée", out: "Sortie", adjustment: "Ajustement", transfer: "Transfert", sale: "Vente", return: "Retour" };
+
+function ProductDetailDialog({ product, cats, canManage, canSeeCostMargin, onClose, onDelete }: {
+  product: ProductWithStock; cats: Category[]; canManage: boolean; canSeeCostMargin: boolean;
+  onClose: () => void; onDelete: () => void;
+}) {
+  const formatXOF = useFormatMoney();
+  const { data: movements = [], isLoading } = useProductStockMovements(product.id);
+  const catName = cats.find((c) => c.id === product.category_id)?.name ?? "—";
+  const cost = Number(product.cost) || 0;
+  const price = Number(product.price) || 0;
+  const margin = price ? Math.round(((price - cost) / price) * 100) : 0;
+
+  return (
+    <Overlay onClose={onClose} w="max-w-lg">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="font-display text-lg font-bold">{product.name}</div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="max-h-[75vh] space-y-4 overflow-y-auto p-5">
+        <div className="flex gap-4">
+          <div className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-xl bg-muted text-4xl">
+            {product.image_url ? <img src={product.image_url} alt="" className="h-full w-full object-cover" /> : "📦"}
+          </div>
+          <div className="min-w-0 flex-1 space-y-1 text-sm">
+            <div className="flex justify-between"><span className="text-muted-foreground">SKU</span><span className="font-mono">{product.sku ?? "—"}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Code-barres</span><span className="font-mono">{product.barcode ?? "—"}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Catégorie</span><span>{catName}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Unité</span><span>{product.unit ?? "—"}</span></div>
+          </div>
+        </div>
+
+        <div className={cn("grid gap-2", canSeeCostMargin ? "grid-cols-4" : "grid-cols-2")}>
+          {canSeeCostMargin && (
+            <div className="rounded-xl border border-border bg-card p-2.5 text-center">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Achat</div>
+              <div className="tabular mt-0.5 text-sm font-bold">{formatXOF(cost)}</div>
+            </div>
+          )}
+          <div className="rounded-xl border border-border bg-card p-2.5 text-center">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Vente</div>
+            <div className="tabular mt-0.5 text-sm font-bold">{formatXOF(price)}</div>
+          </div>
+          {canSeeCostMargin && (
+            <div className="rounded-xl border border-border bg-card p-2.5 text-center">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Marge</div>
+              <div className={cn("tabular mt-0.5 text-sm font-bold", margin > 0 ? "text-success" : "text-muted-foreground")}>{margin}%</div>
+            </div>
+          )}
+          <div className="rounded-xl border border-border bg-card p-2.5 text-center">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Stock</div>
+            <div className={cn("tabular mt-0.5 text-sm font-bold", product.stock < product.low_stock_threshold ? "text-warning-foreground" : "")}>{product.stock}</div>
+          </div>
+        </div>
+
+        {canManage && (
+          <div className="flex gap-2">
+            <Link to="/app/produits/$productId" params={{ productId: product.id }}
+              className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-semibold hover:bg-muted">
+              <Edit3 className="h-4 w-4" /> Modifier
+            </Link>
+            <button onClick={onDelete} className="flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-destructive/40 text-sm font-semibold text-destructive hover:bg-destructive/10">
+              <Trash2 className="h-4 w-4" /> Supprimer
+            </button>
+          </div>
+        )}
+
+        <div>
+          <div className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Entrées / sorties de stock</div>
+          {isLoading ? (
+            <div className="grid place-items-center py-6"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          ) : movements.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">Aucun mouvement pour l'instant.</div>
+          ) : (
+            <div className="divide-y divide-border rounded-xl border border-border">
+              {movements.map((m) => {
+                const positive = m.type === "in" || m.type === "return";
+                const Icon = positive ? ArrowDownCircle : ArrowUpCircle;
+                return (
+                  <div key={m.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                    <Icon className={cn("h-4 w-4 shrink-0", positive ? "text-success" : "text-primary")} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">{MOVEMENT_LABEL[m.type] ?? m.type}{m.reason ? ` — ${m.reason}` : ""}</div>
+                      <div className="text-[11px] text-muted-foreground">{new Date(m.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                    </div>
+                    <div className={cn("tabular shrink-0 text-sm font-bold", positive ? "text-success" : "text-destructive")}>
+                      {positive ? "+" : "−"}{m.quantity}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </Overlay>
   );
 }
