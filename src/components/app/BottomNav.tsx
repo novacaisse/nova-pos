@@ -166,7 +166,22 @@ const RESTO_MODULE_FOR_URL: Record<string, string> = {
   "/app/resto/rapports": "resto_rapports",
   "/app/resto/parametres": "resto_parametres",
 };
-const MODULE_FOR_URL: Record<string, string> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL, ...RESTO_MODULE_FOR_URL };
+// Idem ZegERP (Équipe Phase D-3, migrations 070/071) — cf. même carte dans
+// AppSidebar.tsx pour le détail des pages composites (Achats/Ventes/Documents).
+const ERP_MODULE_FOR_URL: Record<string, string | string[]> = {
+  "/app/erp/produits": "erp_produits",
+  "/app/erp/stock": "erp_stock",
+  "/app/erp/achats": ["erp_achats", "erp_factures_fournisseurs", "erp_receptions"],
+  "/app/erp/ventes": ["erp_ventes", "erp_facturation_ventes", "erp_retours_clients"],
+  "/app/erp/pos": "erp_pos",
+  "/app/erp/finance": "erp_finance",
+  "/app/erp/comptabilite": "erp_comptabilite",
+  "/app/erp/rh": "erp_rh",
+  "/app/erp/documents": ["erp_documents", "erp_achats", "erp_ventes", "erp_rh"],
+  "/app/erp/rapports": "erp_rapports",
+  "/app/erp/parametres": "erp_parametres",
+};
+const MODULE_FOR_URL: Record<string, string | string[]> = { ...POS_MODULE_FOR_URL, ...HOTEL_MODULE_FOR_URL, ...RESTO_MODULE_FOR_URL, ...ERP_MODULE_FOR_URL };
 
 export function BottomNav() {
   const [open, setOpen] = useState(false);
@@ -185,7 +200,8 @@ export function BottomNav() {
   const hasModulePermission = (to: string) => {
     const key = MODULE_FOR_URL[to];
     if (!key || !myModulePerms) return true;
-    return myModulePerms.find((p) => p.module_key === key)?.can_view ?? false;
+    const keys = Array.isArray(key) ? key : [key];
+    return keys.some((k) => myModulePerms.find((p) => p.module_key === k)?.can_view);
   };
   const included = (item: Item) =>
     (!planModules || !isGatableModule(item.to) || planModules.includes(item.to)) && hasModulePermission(item.to);
