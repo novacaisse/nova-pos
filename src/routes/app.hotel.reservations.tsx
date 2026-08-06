@@ -18,6 +18,7 @@ import {
   type HotelFolioDetail, type HotelRoomType, type HotelSeasonalRate, type HotelRatePlan,
 } from "@/lib/data/hotelHooks";
 import { cn, selectOnFocus } from "@/lib/utils";
+import { MoneyFusionPayButton } from "@/components/app/MoneyFusionPayButton";
 
 // Aperçu du tarif définitif (migration 027) : tarif saisonnier (s'il y en a
 // un qui s'applique cette nuit-là) remplace base_price, puis le % de la
@@ -609,6 +610,7 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
   const [chargeAmount, setChargeAmount] = useState(0);
   const [payAmount, setPayAmount] = useState(0);
   const [payMethod, setPayMethod] = useState<HotelPaymentMethod>("cash");
+  const [depositAmount, setDepositAmount] = useState(0);
 
   return (
     <>
@@ -724,8 +726,27 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                         <input type="number" onFocus={selectOnFocus} value={payAmount} onChange={(e) => setPayAmount(Number(e.target.value))} placeholder="Montant" className="flex-1 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
                         <button disabled={busy || !payAmount}
                           onClick={() => run(async () => { await addPayment.mutateAsync({ folio_id: folio.id, amount: payAmount, method: payMethod }); setPayAmount(0); })}
-                          className="flex items-center gap-1 rounded-xl bg-success/10 px-3 text-xs font-semibold text-success disabled:opacity-40"><Banknote className="h-3.5 w-3.5" /> Encaisser</button>
+                          className="flex items-center gap-1 rounded-xl bg-success/10 px-3 text-xs font-semibold text-success disabled:opacity-40"><Banknote className="h-3.5 w-3.5" /> Encaisser (manuel)</button>
                       </div>
+                      {/* Lien de paiement Mobile Money réel — le montant du
+                          solde est recalculé côté serveur (jamais celui
+                          affiché ici), toujours exact au moment du clic. */}
+                      {currentOrganization && folioBalance(folio) > 0 && (
+                        <MoneyFusionPayButton organizationId={currentOrganization.id} appModule="hotel" targetId={folio.id}
+                          kind="payment" label={`Payer le solde (${formatMoney(folioBalance(folio))}) via Mobile Money`}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5 text-xs font-semibold text-primary hover:bg-primary/10" />
+                      )}
+                      {reservation.status !== "checked_out" && reservation.status !== "cancelled" && (
+                        <div className="flex gap-2">
+                          <input type="number" onFocus={selectOnFocus} value={depositAmount || ""} placeholder="Montant de l'acompte"
+                            onChange={(e) => setDepositAmount(Number(e.target.value))}
+                            className="flex-1 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
+                          {currentOrganization && depositAmount > 0 && (
+                            <MoneyFusionPayButton organizationId={currentOrganization.id} appModule="hotel" targetId={folio.id}
+                              kind="deposit" amount={depositAmount} label="Acompte via Mobile Money" />
+                          )}
+                        </div>
+                      )}
                       {reservation.status === "checked_out" && (
                         <div className="space-y-2">
                           <button disabled={busy} onClick={() => run(() => closeFolio.mutateAsync({ folioId: folio.id }))}

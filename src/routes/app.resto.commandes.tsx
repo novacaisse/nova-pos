@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { MoneyFusionPayButton } from "@/components/app/MoneyFusionPayButton";
 import {
   useRestoOrders, useUpsertRestoOrder, useRestoOrderItems, useAddRestoOrderItem,
   useUpdateRestoOrderItemStatut, useRestoOrderKitchenTickets, useUpdateRestoTableStatut,
@@ -633,6 +635,7 @@ function BillPaymentPanel({ bill, items, orderId, formatMoney, onFullyPaid }: {
   const { data: payments = [] } = useRestoBillPayments(bill.id);
   const setSplitItems = useSetRestoBillSplitItems();
   const addPayment = useAddRestoBillPayment();
+  const { currentOrganization } = useOrganization();
   const [assignments, setAssignments] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -720,7 +723,16 @@ function BillPaymentPanel({ bill, items, orderId, formatMoney, onFullyPaid }: {
       </div>
 
       {bill.split_mode === "aucun" ? (
-        <PaymentForm remaining={remaining} onPay={(montant, methode) => addPayment.mutateAsync({ billId: bill.id, montant, methode }).then(() => { if (montant >= remaining) onFullyPaid(); })} busy={addPayment.isPending} />
+        <div className="space-y-2">
+          <PaymentForm remaining={remaining} onPay={(montant, methode) => addPayment.mutateAsync({ billId: bill.id, montant, methode }).then(() => { if (montant >= remaining) onFullyPaid(); })} busy={addPayment.isPending} />
+          {/* Lien de paiement Mobile Money réel — le montant (reste dû net
+              de la remise fidélité) est recalculé côté serveur. */}
+          {currentOrganization && remaining > 0 && (
+            <MoneyFusionPayButton organizationId={currentOrganization.id} appModule="resto" targetId={bill.id}
+              label={`Payer ${formatMoney(remaining)} via Mobile Money`}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5 text-xs font-semibold text-primary hover:bg-primary/10" />
+          )}
+        </div>
       ) : (
         <div className="space-y-3">
           {splits.map((s) => {
