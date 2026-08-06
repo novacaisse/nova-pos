@@ -16,11 +16,13 @@ import { BottomNav } from "@/components/app/BottomNav";
 import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
 import { TrialExpiredModuleLock, TrialExpiredPopup, isAllowedWhenTrialExpired } from "@/components/app/TrialExpiredBlock";
+import { TrialPromoPopup } from "@/components/app/TrialPromoPopup";
 import { OnboardingFlow } from "@/components/app/OnboardingFlow";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useMyRole, useReconcilePendingSubscriptionPayments } from "@/lib/data/hooks";
 import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
+import { getTrialInfo } from "@/lib/trial";
 
 export const Route = createFileRoute("/app")({
   // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
@@ -125,6 +127,7 @@ function AppLayout() {
   // Abonnement restent ouverts, partout où readOnly.reason est visible.
   const { readOnly } = useReadOnlyMode();
   const moduleLocked = readOnly && !isAllowedWhenTrialExpired(pathname);
+  const trial = getTrialInfo(currentOrganization);
 
   return (
     <SidebarProvider defaultOpen>
@@ -189,6 +192,7 @@ function AppLayout() {
         </div>
         <PwaInstallBanner />
         {readOnly && <TrialExpiredPopup organizationId={currentOrganization?.id} />}
+        {trial.onTrial && !trial.expired && <TrialPromoPopup organizationId={currentOrganization?.id} daysLeft={trial.daysLeft} />}
       </div>
     </SidebarProvider>
   );

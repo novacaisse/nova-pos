@@ -57,7 +57,8 @@ export function TrialBanner() {
         {info.daysLeft === 0
           ? "dernier jour"
           : `${info.daysLeft} jour${info.daysLeft > 1 ? "s" : ""} restant${info.daysLeft > 1 ? "s" : ""}`}
-        .
+        {" — "}
+        souscrivez maintenant et économisez 5 000 F, appliqués automatiquement.
       </div>
       <Link
         to="/souscription"
