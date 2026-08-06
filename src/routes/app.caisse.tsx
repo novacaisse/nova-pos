@@ -18,6 +18,7 @@ import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
 import { THERMAL_CSS, renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import { BarcodeScannerDialog } from "@/components/app/BarcodeScannerDialog";
+import { MoneyFusionPayButton } from "@/components/app/MoneyFusionPayButton";
 
 export const Route = createFileRoute("/app/caisse")({
   validateSearch: (search: Record<string, unknown>): { holdId?: string } => ({
@@ -995,6 +996,7 @@ function RecentSalesDialog({ onClose }: { onClose: () => void }) {
 }
 function AddSalePaymentDialog({ sale, onClose }: { sale: Sale; onClose: () => void }) {
   const formatXOF = useFormatMoney();
+  const { currentOrganization } = useOrganization();
   const due = Math.max(0, Number(sale.total) - Number(sale.paid));
   const [amount, setAmount] = useState(due);
   const [method, setMethod] = useState<PaymentMethod>("cash");
@@ -1037,9 +1039,18 @@ function AddSalePaymentDialog({ sale, onClose }: { sale: Sale; onClose: () => vo
           <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
           <button onClick={submit} disabled={amount <= 0 || amount > due || addPayment.isPending}
             className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
-            {addPayment.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Encaisser
+            {addPayment.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Encaisser (manuel)
           </button>
         </div>
+        {/* "Encaisser (manuel)" ci-dessus enregistre juste une méthode
+            déclarée — utile si le client a déjà payé hors app (virement
+            direct entre téléphones). Ce bouton génère un vrai lien
+            MoneyFusion : le client paie depuis son téléphone, le webhook
+            crédite ce paiement automatiquement une fois confirmé. */}
+        {currentOrganization && (
+          <MoneyFusionPayButton organizationId={currentOrganization.id} appModule="pos" targetId={sale.id}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5 text-xs font-semibold text-primary hover:bg-primary/10" />
+        )}
       </div>
     </DialogShell>
   );

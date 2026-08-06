@@ -459,6 +459,54 @@ create table if not exists public.subscription_payments (
 create index if not exists idx_sub_payments_shop on public.subscription_payments(organization_id);
 create index if not exists idx_sub_payments_subscription on public.subscription_payments(subscription_id);
 
+-- payment_requests (migration 083) : même rôle que subscription_payments
+-- ci-dessus, mais pour les paiements CLIENTS des 4 modules ZegOS (pas
+-- l'abonnement SaaS) — ZegCaisse (sales), ZegHotel (hotel_folios, acompte
+-- réservation ET solde folio au check-out), ZegResto (resto_bills), ZegERP
+-- (erp_pos_sales). provider_ref (token MoneyFusion) est la clé de
+-- réconciliation utilisée par moneyfusion-webhook, partagé avec
+-- subscription_payments (le webhook cherche d'abord dans l'une, puis dans
+-- l'autre). Écriture réservée au service_role (Edge Functions
+-- create-module-payment / moneyfusion-webhook) — le montant n'est jamais
+-- celui envoyé par le client, toujours recalculé depuis l'enregistrement
+-- cible. Voir AUDIT_ZEGHOTEL_FINALISATION_2026-08.md §2b (constat initial :
+-- "Mobile Money" n'était qu'une étiquette manuelle sans passerelle réelle).
+create table if not exists public.payment_requests (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto', 'erp')),
+  target_table text not null check (target_table in ('sales', 'hotel_folios', 'resto_bills', 'erp_pos_sales')),
+  target_id uuid not null,
+  amount numeric(14,2) not null check (amount > 0),
+  currency text not null default 'XOF',
+  status text not null default 'pending' check (status in ('pending', 'paid', 'failed')),
+  provider text not null default 'moneyfusion',
+  provider_ref text unique,
+  phone text,
+  full_name text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  paid_at timestamptz
+);
+create index if not exists idx_payment_requests_org on public.payment_requests(organization_id);
+create index if not exists idx_payment_requests_target on public.payment_requests(target_table, target_id);
+alter table public.payment_requests enable row level security;
+
+-- Lecture seule pour l'UI (statut pending/success/failed) — pas de policy
+-- insert/update/delete pour authenticated, la création/mise à jour passe
+-- exclusivement par le service_role (Edge Functions, RLS bypassée).
+create policy payment_requests_select on public.payment_requests for select to authenticated
+using (
+  case target_table
+    when 'sales' then public.has_module_permission(organization_id, 'ventes', 'view')
+    when 'hotel_folios' then public.has_module_permission(organization_id, 'hotel_folios', 'view')
+    when 'resto_bills' then public.has_module_permission(organization_id, 'resto_paiements', 'view')
+    when 'erp_pos_sales' then public.has_module_permission(organization_id, 'erp_pos', 'view')
+    else false
+  end
+);
+
 -- Validation manuelle d'un paiement par le Super Admin (migration 020e) —
 -- filet de sécurité si la vérification automatique MoneyFusion (Edge
 -- Function check-subscription-payment) reste bloquée. Même logique que
@@ -4277,7 +4325,18 @@ grant execute on function public.set_resto_bill_split_items(uuid, jsonb) to auth
 
 -- security definer (contrairement à add_sale_payment) car resto_bill_payments
 -- n'a aucune policy insert directe — voir plus haut.
-create or replace function public.add_resto_bill_payment(
+--
+-- Scindée en deux (migration 083, mission "Onboarding + MoneyFusion +
+-- permissions" Partie 2) : apply_resto_bill_payment() porte toute la
+-- logique métier SANS contrôle de rôle, réservée à service_role — c'est
+-- elle que moneyfusion-webhook appelle pour créditer un paiement MoneyFusion
+-- confirmé (has_module_permission() lit organization_members pour
+-- auth.uid(), NULL sous un appel service_role sans session utilisateur ;
+-- l'appeler telle quelle échouerait "Accès refusé."). add_resto_bill_payment()
+-- reste le point d'entrée pour les appelants authentifiés (paiement manuel
+-- depuis l'écran de facturation) — même signature qu'avant, comportement
+-- inchangé pour eux.
+create or replace function public.apply_resto_bill_payment(
   p_bill_id uuid,
   p_montant numeric,
   p_methode text,
@@ -4299,9 +4358,6 @@ begin
 
   select * into v_bill from public.resto_bills where id = p_bill_id for update;
   if not found then raise exception 'Note introuvable.'; end if;
-  if not public.has_module_permission(v_bill.organization_id, 'resto_paiements', 'create') then
-    raise exception 'Accès refusé.';
-  end if;
   if v_bill.statut = 'payee' then raise exception 'Cette note est déjà réglée.'; end if;
   if v_bill.statut = 'annulee' then raise exception 'Cette note a été annulée.'; end if;
 
@@ -4341,6 +4397,27 @@ begin
   end if;
 
   return v_bill;
+end;
+$$;
+revoke all on function public.apply_resto_bill_payment(uuid, numeric, text, uuid) from public, anon, authenticated;
+grant execute on function public.apply_resto_bill_payment(uuid, numeric, text, uuid) to service_role;
+
+create or replace function public.add_resto_bill_payment(
+  p_bill_id uuid,
+  p_montant numeric,
+  p_methode text,
+  p_split_id uuid default null
+) returns public.resto_bills
+language plpgsql security definer set search_path = public as $$
+declare
+  v_org uuid;
+begin
+  select organization_id into v_org from public.resto_bills where id = p_bill_id;
+  if v_org is null then raise exception 'Note introuvable.'; end if;
+  if not public.has_module_permission(v_org, 'resto_paiements', 'create') then
+    raise exception 'Accès refusé.';
+  end if;
+  return public.apply_resto_bill_payment(p_bill_id, p_montant, p_methode, p_split_id);
 end;
 $$;
 revoke all on function public.add_resto_bill_payment(uuid, numeric, text, uuid) from public;
@@ -5900,7 +5977,14 @@ create policy erp_pos_sale_lines_write on public.erp_pos_sale_lines for all to a
 -- complete_erp_pos_sale() : crée un mouvement 'sale' par ligne (coût repris
 -- de erp_products.cost), recalcule total_amount à partir des lignes,
 -- passe la vente "completed". Bloque si la session de caisse est fermée.
-create or replace function public.complete_erp_pos_sale(
+-- Scindée en deux (migration 083, mission "Onboarding + MoneyFusion +
+-- permissions" Partie 2) — même raison que apply_resto_bill_payment plus
+-- haut : apply_complete_erp_pos_sale() porte la logique métier (mouvements
+-- de stock, calcul du total, passage 'completed') sans contrôle de rôle,
+-- réservée à service_role, appelée par moneyfusion-webhook une fois un
+-- paiement MoneyFusion confirmé sur une vente POS ERP 'draft'.
+-- complete_erp_pos_sale() reste le point d'entrée authentifié inchangé.
+create or replace function public.apply_complete_erp_pos_sale(
   p_organization_id uuid,
   p_sale_id uuid
 ) returns public.erp_pos_sales
@@ -5913,10 +5997,6 @@ declare
   v_subtotal numeric(14,2) := 0;
   v_tax numeric(14,2) := 0;
 begin
-  if not public.has_module_permission(p_organization_id, 'erp_pos', 'manage') then
-    raise exception 'Accès refusé.';
-  end if;
-
   select * into v_sale from public.erp_pos_sales
     where id = p_sale_id and organization_id = p_organization_id for update;
   if not found then raise exception 'Vente introuvable.'; end if;
@@ -5943,6 +6023,21 @@ begin
     where id = p_sale_id returning * into v_sale;
 
   return v_sale;
+end;
+$$;
+revoke all on function public.apply_complete_erp_pos_sale(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.apply_complete_erp_pos_sale(uuid, uuid) to service_role;
+
+create or replace function public.complete_erp_pos_sale(
+  p_organization_id uuid,
+  p_sale_id uuid
+) returns public.erp_pos_sales
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.has_module_permission(p_organization_id, 'erp_pos', 'manage') then
+    raise exception 'Accès refusé.';
+  end if;
+  return public.apply_complete_erp_pos_sale(p_organization_id, p_sale_id);
 end;
 $$;
 revoke all on function public.complete_erp_pos_sale(uuid, uuid) from public;

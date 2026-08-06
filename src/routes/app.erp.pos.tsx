@@ -7,6 +7,8 @@ import { Loader2, Plus, Trash2, X, AlertCircle, Wallet, ScanBarcode, RotateCcw, 
 import { PageHeader } from "@/components/app/PageHeader";
 import { useMyRole, useFormatMoney } from "@/lib/data/hooks";
 import { cn, selectOnFocus } from "@/lib/utils";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { MoneyFusionPayButton } from "@/components/app/MoneyFusionPayButton";
 import { useErpProducts, useErpWarehouses } from "@/lib/data/erpHooks";
 import {
   useErpCashSessions, useOpenErpCashSession, useCloseErpCashSession,
@@ -220,6 +222,7 @@ function SaleDetailDialog({ sale, canManage, onClose }: { sale: ErpPosSale; canM
   const cancel = useCancelErpPosSale();
   const complete = useCompleteErpPosSale();
   const formatMoney = useFormatMoney();
+  const { currentOrganization } = useOrganization();
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [unitPrice, setUnitPrice] = useState(0);
@@ -273,11 +276,19 @@ function SaleDetailDialog({ sale, canManage, onClose }: { sale: ErpPosSale; canM
       )}
       <ErrorBanner error={error} />
       {isDraft && canManage && (
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex flex-wrap justify-end gap-2 pt-2">
           <button onClick={() => cancel.mutateAsync(sale.id).then(onClose)} disabled={cancel.isPending} className="rounded-xl border border-destructive/40 px-4 py-2 text-sm font-semibold text-destructive hover:bg-destructive/10">Annuler</button>
+          {/* Lien de paiement Mobile Money réel : la vente reste 'draft'
+              tant que le paiement n'est pas confirmé — le webhook appelle
+              lui-même apply_complete_erp_pos_sale() une fois payé, jamais
+              besoin de cliquer "Finaliser" séparément dans ce cas. */}
+          {currentOrganization && lines.length > 0 && (
+            <MoneyFusionPayButton organizationId={currentOrganization.id} appModule="erp" targetId={sale.id}
+              label="Payer via Mobile Money" />
+          )}
           <button onClick={() => complete.mutateAsync(sale.id).then(onClose)} disabled={lines.length === 0 || complete.isPending}
             className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-40">
-            {complete.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Finaliser
+            {complete.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Finaliser (manuel)
           </button>
         </div>
       )}
