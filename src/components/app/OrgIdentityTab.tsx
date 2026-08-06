@@ -6,7 +6,7 @@
 // chaque application affiche et modifie ces informations depuis son propre
 // écran — jamais un écran "Paramètres" commun aux deux.
 import { useEffect, useState } from "react";
-import { Save, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Save, Image as ImageIcon, Loader2, ExternalLink } from "lucide-react";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useShopSettings, useUpdateShopSettings, useUpdateShop, useUploadShopLogo, useMyRole } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
@@ -91,6 +91,20 @@ export function OrgIdentityTab({ heading = "Informations de l'organisation" }: {
         <Field label="Facebook" value={shopExtra.facebook} onChange={(v) => setShopExtra({ ...shopExtra, facebook: v })} disabled={!canManage} />
         <Field label="Instagram" value={shopExtra.instagram} onChange={(v) => setShopExtra({ ...shopExtra, instagram: v })} disabled={!canManage} />
       </div>
+
+      {/* FNE (facturation électronique normalisée) : spécifique à la DGI
+          Côte d'Ivoire, sans objet pour les organisations des autres pays
+          couverts (COUNTRIES, AddOrganizationDialog.tsx) — masqué sinon. */}
+      {currentOrganization.country === "Côte d'Ivoire" && (
+        <a href="https://www.services.fne.dgi.gouv.ci/fr" target="_blank" rel="noopener noreferrer"
+          className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 p-3 text-sm hover:border-primary hover:bg-primary/5">
+          <span>
+            <span className="font-semibold">Facture Normalisée Électronique (FNE)</span>
+            <span className="block text-xs text-muted-foreground">Portail officiel DGI Côte d'Ivoire — facturation électronique normalisée.</span>
+          </span>
+          <ExternalLink className="h-4 w-4 shrink-0 text-primary" />
+        </a>
+      )}
 
       {canManage && (
         <button onClick={save} disabled={updateShop.isPending || updateSettings.isPending}
