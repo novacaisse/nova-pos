@@ -15,10 +15,12 @@ import { UserMenu } from "@/components/app/UserMenu";
 import { BottomNav } from "@/components/app/BottomNav";
 import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
+import { TrialExpiredModuleLock, TrialExpiredPopup, isAllowedWhenTrialExpired } from "@/components/app/TrialExpiredBlock";
 import { OnboardingFlow } from "@/components/app/OnboardingFlow";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useMyRole, useReconcilePendingSubscriptionPayments } from "@/lib/data/hooks";
+import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
 
 export const Route = createFileRoute("/app")({
   // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
@@ -115,6 +117,13 @@ function AppLayout() {
   const inRestoContext = appModule === "resto";
   const inErpContext = appModule === "erp";
 
+  // Au-delà de la lecture seule (useReadOnlyMode bloque déjà les actions
+  // d'écriture aux points d'entrée), l'essai/abonnement expiré verrouille
+  // maintenant les modules eux-mêmes : seuls le tableau de bord et
+  // Abonnement restent ouverts, partout où readOnly.reason est visible.
+  const { readOnly } = useReadOnlyMode();
+  const moduleLocked = readOnly && !isAllowedWhenTrialExpired(pathname);
+
   return (
     <SidebarProvider defaultOpen>
       <div className="flex min-h-screen w-full bg-background">
@@ -169,7 +178,7 @@ function AppLayout() {
           </div>
 
           <main className="flex-1 min-w-0 pb-16 md:pb-0">
-            <Outlet />
+            {moduleLocked ? <TrialExpiredModuleLock /> : <Outlet />}
           </main>
         </div>
 
@@ -177,6 +186,7 @@ function AppLayout() {
           <BottomNav />
         </div>
         <PwaInstallBanner />
+        {readOnly && <TrialExpiredPopup organizationId={currentOrganization?.id} />}
       </div>
     </SidebarProvider>
   );
