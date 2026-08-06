@@ -25,8 +25,10 @@ import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
 export const Route = createFileRoute("/app")({
   // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
   // ("NovaCaisse — La caisse moderne…"), volontairement inchangé pour les
-  // pages publiques (landing) — l'espace connecté a besoin du sien.
-  head: () => ({ meta: [{ title: "ZegCaisse" }] }),
+  // pages publiques (landing) — l'espace connecté a besoin du sien. "zegOS"
+  // plutôt que "ZegCaisse" : /app/* couvre les 4 applications, pas
+  // seulement ZegCaisse (même PWA installable pour toutes, voir manifest).
+  head: () => ({ meta: [{ title: "zegOS" }] }),
   component: AppLayout,
 });
 
