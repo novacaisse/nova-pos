@@ -93,7 +93,11 @@ create table if not exists public.organizations (
   -- ZegCaisse ET un établissement ZegHotel).
   -- Migration 036 (ZegResto) : 'resto' ajouté aux deux valeurs d'origine.
   -- Migration 047 (ZegERP) : 'erp' ajouté.
-  app_module text not null check (app_module in ('pos', 'hotel', 'resto', 'erp'))
+  app_module text not null check (app_module in ('pos', 'hotel', 'resto', 'erp')),
+  -- Migration 082 : onboarding ZegHotel obligatoire — false tant qu'aucune
+  -- chambre n'a été créée, app.hotel.tsx bloque /app/hotel/* sur un wizard
+  -- jusqu'à passage à true. Sans effet pour les autres app_module.
+  hotel_onboarding_completed boolean not null default false
 );
 create index if not exists idx_organizations_account on public.organizations(account_id);
 

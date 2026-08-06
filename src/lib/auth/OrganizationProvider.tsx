@@ -20,6 +20,10 @@ export type Organization = {
   // ZegCaisse/ZegHotel pour le sélecteur d'en-tête et les limites de formule.
   account_id: string;
   app_module: "pos" | "hotel" | "resto" | "erp";
+  // Onboarding ZegHotel obligatoire (migration 082) : false tant qu'aucune
+  // chambre n'a été créée — app.hotel.tsx bloque /app/hotel/* sur un wizard
+  // jusqu'à passage à true. Sans effet pour les autres app_module.
+  hotel_onboarding_completed: boolean;
 };
 
 type OrganizationCtx = {
@@ -59,7 +63,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     setError(null);
     const { data, error: fetchErr } = await supabase
       .from("organizations")
-      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at,suspended,active_apps,account_id,app_module")
+      .select("id,name,slug,currency,country,logo_url,plan,trial_ends_at,suspended,active_apps,account_id,app_module,hotel_onboarding_completed")
       .order("created_at", { ascending: true });
     if (fetchErr) {
       setError(fetchErr.message);
