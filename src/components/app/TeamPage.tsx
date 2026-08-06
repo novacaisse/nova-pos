@@ -364,8 +364,8 @@ const CRUD_LABEL: Record<CrudLevel, string> = { can_create: "Créer", can_read: 
 const CRUD_ORDER: CrudLevel[] = ["can_read", "can_create", "can_update", "can_delete"];
 
 function ModulePermissionsModal({ member, appModule, onClose }: { member: ShopMember; appModule: string; onClose: () => void }) {
-  const { data: modules = [] } = usePermissionModules(appModule);
-  const { data: existingRows = [] } = useOrganizationModulePermissions(member.user_id);
+  const { data: modules = [], isLoading: modulesLoading, error: modulesError } = usePermissionModules(appModule);
+  const { data: existingRows = [], isLoading: rowsLoading, error: rowsError } = useOrganizationModulePermissions(member.user_id);
   const upsert = useUpsertModulePermission();
   const [grid, setGrid] = useState<Record<string, Record<CrudLevel, boolean>>>({});
   const [error, setError] = useState<string | null>(null);
@@ -412,11 +412,23 @@ function ModulePermissionsModal({ member, appModule, onClose }: { member: ShopMe
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <div>
             <div className="font-display text-lg font-bold">Permissions — {member.profile?.full_name || "—"}</div>
-            <div className="text-xs text-muted-foreground">Rôle de base : {ROLE_LABEL[member.role]} (ces droits s'ajoutent, ne le remplacent pas)</div>
+            <div className="text-xs text-muted-foreground">
+              Rôle de base : {ROLE_LABEL[member.role]} — indicatif seulement, ne pré-remplit ni ne limite les cases ci-dessous. Une poignée d'actions très sensibles (ex. suppression sur certains modules) restent réservées au propriétaire/gérant quel que soit ce réglage.
+            </div>
           </div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
         <div className="max-h-[75vh] space-y-4 overflow-y-auto p-5">
+          {(modulesError || rowsError) && (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+              Impossible de charger les modules ou les permissions actuelles ({(modulesError as any)?.message ?? (rowsError as any)?.message ?? "erreur inconnue"}).
+            </div>
+          )}
+          {!modulesError && !rowsError && !modulesLoading && !rowsLoading && modules.length === 0 && (
+            <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+              Aucun module actif pour cette application.
+            </div>
+          )}
           <div className="overflow-x-auto rounded-xl border border-border">
             <table className="w-full text-sm">
               <thead className="bg-muted/40">
@@ -428,6 +440,11 @@ function ModulePermissionsModal({ member, appModule, onClose }: { member: ShopMe
                 </tr>
               </thead>
               <tbody>
+                {(modulesLoading || rowsLoading) && (
+                  <tr><td colSpan={CRUD_ORDER.length + 1} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                    <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+                  </td></tr>
+                )}
                 {modules.map((m) => (
                   <tr key={m.key} className="border-t border-border/60">
                     <td className="px-3 py-2 font-medium">{m.label}</td>
@@ -450,7 +467,7 @@ function ModulePermissionsModal({ member, appModule, onClose }: { member: ShopMe
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
-            <button onClick={save} disabled={saving}
+            <button onClick={save} disabled={saving || modulesLoading || rowsLoading || !!modulesError || !!rowsError || modules.length === 0}
               className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
             </button>

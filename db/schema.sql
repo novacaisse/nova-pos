@@ -1202,6 +1202,12 @@ insert into public.permission_modules (key, app_module, label, open_view, sort_o
   ('erp_rapports',              'erp', 'Rapports & BI',           false, 14),
   ('erp_parametres',            'erp', 'Paramètres',              false, 15)
 on conflict (key) do nothing;
+-- RLS + policy select (migration 085) : catalogue de référence, aucune
+-- donnée sensible, aucun scoping par organisation nécessaire — lecture
+-- ouverte à tout utilisateur authentifié.
+alter table public.permission_modules enable row level security;
+create policy permission_modules_select on public.permission_modules for select to authenticated
+using (true);
 
 create table if not exists public.organization_roles (
   id uuid primary key default gen_random_uuid(),
