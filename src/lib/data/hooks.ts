@@ -1323,26 +1323,21 @@ export function useRemoveMember() {
   });
 }
 
-export function useUpdateMemberCustomRole() {
-  const organizationId = useOrganizationId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ memberId, customRoleId }: { memberId: string; customRoleId: string | null }) => {
-      const { error } = await supabase.from("organization_members").update({ custom_role_id: customRoleId }).eq("id", memberId);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_members", organizationId] }),
-  });
-}
-
-// ============ RÔLES PERSONNALISÉS (organization_roles + permissions par module) ============
-// Le propriétaire peut créer ses propres rôles, avec des droits par module
-// (view/create/manage) réellement vérifiés en RLS via has_module_permission()
-// (migrations 063/064) — pas seulement un masquage côté UI. organization_members
-// reste toujours géré owner-only (voir migration 063, risque d'escalade de
-// privilèges), jamais via ce système.
+// ============ MATRICE DE PERMISSIONS PAR MEMBRE (migration 084) ============
+// Remplace les rôles personnalisés nommés (organization_roles/
+// organization_role_permissions, mission "Onboarding + MoneyFusion +
+// permissions" Partie 4) : chaque membre non-owner a une ligne can_create/
+// can_read/can_update/can_delete par module, réellement vérifiée en RLS
+// via has_module_permission() (source de vérité rebasée sur
+// organization_module_permissions) — jamais un simple masquage côté UI.
+// Modifiable exclusivement par le propriétaire (RLS org_module_perms_write) ;
+// organization_members reste toujours géré owner-only, jamais via ce
+// système (risque d'escalade de privilèges).
 export type PermissionModule = { key: string; app_module: string; label: string; open_view: boolean; sort_order: number };
-export type OrganizationRole = { id: string; organization_id: string; key: string; name: string; created_at: string };
-export type OrganizationRolePermission = { role_id: string; module_key: string; can_view: boolean; can_create: boolean; can_manage: boolean };
+export type ModulePermissionRow = {
+  organization_id: string; user_id: string; module_key: string;
+  can_create: boolean; can_read: boolean; can_update: boolean; can_delete: boolean;
+};
 export type MyModulePermission = { module_key: string; can_view: boolean; can_create: boolean; can_manage: boolean };
 
 export function usePermissionModules(appModule: string) {
@@ -1357,87 +1352,30 @@ export function usePermissionModules(appModule: string) {
   });
 }
 
-export function useOrganizationRoles() {
+export function useOrganizationModulePermissions(memberUserId: string | null) {
   const organizationId = useOrganizationId();
   return useQuery({
-    queryKey: ["organization_roles", organizationId],
-    enabled: !!organizationId,
-    queryFn: async (): Promise<OrganizationRole[]> => {
-      const { data, error } = await supabase.from("organization_roles")
-        .select("*").eq("organization_id", organizationId!).order("created_at");
+    queryKey: ["organization_module_permissions", organizationId, memberUserId],
+    enabled: !!organizationId && !!memberUserId,
+    queryFn: async (): Promise<ModulePermissionRow[]> => {
+      const { data, error } = await supabase.from("organization_module_permissions")
+        .select("*").eq("organization_id", organizationId!).eq("user_id", memberUserId!);
       if (error) throw error;
-      return data as OrganizationRole[];
+      return data as ModulePermissionRow[];
     },
   });
 }
 
-export function useOrganizationRolePermissions(roleId: string | null) {
-  return useQuery({
-    queryKey: ["organization_role_permissions", roleId],
-    enabled: !!roleId,
-    queryFn: async (): Promise<OrganizationRolePermission[]> => {
-      const { data, error } = await supabase.from("organization_role_permissions")
-        .select("*").eq("role_id", roleId!);
-      if (error) throw error;
-      return data as OrganizationRolePermission[];
-    },
-  });
-}
-
-// slug simple à partir du nom saisi (organization_roles.key, unique par
-// organisation) — suffixe aléatoire en cas de collision plutôt qu'une erreur
-// opaque remontée à l'utilisateur.
-function slugifyRoleKey(name: string) {
-  const base = name.trim().toLowerCase()
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return (base || "role") + "_" + Math.random().toString(36).slice(2, 6);
-}
-
-export function useUpsertOrganizationRole() {
+export function useUpsertModulePermission() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id?: string; name: string }) => {
-      if (!organizationId) throw new Error("Aucune boutique sélectionnée");
-      if (input.id) {
-        const { data, error } = await supabase.from("organization_roles")
-          .update({ name: input.name }).eq("id", input.id).select().single();
-        if (error) throw error;
-        return data as OrganizationRole;
-      }
-      const { data, error } = await supabase.from("organization_roles")
-        .insert({ organization_id: organizationId, name: input.name, key: slugifyRoleKey(input.name) })
-        .select().single();
-      if (error) throw error;
-      return data as OrganizationRole;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["organization_roles", organizationId] }),
-  });
-}
-
-export function useDeleteOrganizationRole() {
-  const organizationId = useOrganizationId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (roleId: string) => {
-      const { error } = await supabase.from("organization_roles").delete().eq("id", roleId);
+    mutationFn: async (row: { user_id: string; module_key: string; can_create: boolean; can_read: boolean; can_update: boolean; can_delete: boolean }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { error } = await supabase.from("organization_module_permissions")
+        .upsert({ organization_id: organizationId, ...row }, { onConflict: "organization_id,user_id,module_key" });
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["organization_roles", organizationId] });
-      qc.invalidateQueries({ queryKey: ["organization_members", organizationId] });
-    },
-  });
-}
-
-export function useUpsertRolePermissions() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ roleId, rows }: { roleId: string; rows: Omit<OrganizationRolePermission, "role_id">[] }) => {
-      const { error } = await supabase.from("organization_role_permissions")
-        .upsert(rows.map((r) => ({ role_id: roleId, ...r })));
-      if (error) throw error;
-    },
-    onSuccess: (_data, { roleId }) => qc.invalidateQueries({ queryKey: ["organization_role_permissions", roleId] }),
+    onSuccess: (_data, row) => qc.invalidateQueries({ queryKey: ["organization_module_permissions", organizationId, row.user_id] }),
   });
 }
 

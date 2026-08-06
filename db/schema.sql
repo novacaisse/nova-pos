@@ -1409,13 +1409,79 @@ insert into public.default_role_permissions (role, module_key, can_view, can_cre
   ('accountant', 'erp_parametres', true, false, false)
 on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
 
+-- organization_module_permissions (migration 084, mission "Onboarding +
+-- MoneyFusion + permissions" Partie 4) : SOURCE DE VÉRITÉ des permissions
+-- non-owner, remplace organization_roles/organization_role_permissions
+-- (rôles personnalisés nommés) — matrice directe par membre, 4 verbes
+-- indépendants (create/read/update/delete). Le propriétaire n'a jamais de
+-- ligne ici : has_module_permission() court-circuite role='owner' avant
+-- toute lecture de cette table (accès total structurel, jamais piloté par
+-- la matrice — élimine le risque qu'un propriétaire se retire lui-même
+-- l'accès). organization_roles/organization_role_permissions/
+-- default_role_permissions restent en base (non supprimées, cf. migration
+-- 084) mais ne sont plus lues par aucune fonction applicative — orphelines
+-- volontairement, nettoyage définitif laissé à une migration de suivi.
+create table if not exists public.organization_module_permissions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  module_key text not null references public.permission_modules(key) on delete cascade,
+  can_create boolean not null default false,
+  can_read boolean not null default false,
+  can_update boolean not null default false,
+  can_delete boolean not null default false,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null,
+  unique (organization_id, user_id, module_key)
+);
+create index if not exists idx_org_module_perms_org on public.organization_module_permissions(organization_id);
+create index if not exists idx_org_module_perms_user on public.organization_module_permissions(user_id);
+alter table public.organization_module_permissions enable row level security;
+
+create policy org_module_perms_select on public.organization_module_permissions for select to authenticated
+using (
+  user_id = auth.uid()
+  or exists (
+    select 1 from public.organization_members m
+    where m.organization_id = organization_module_permissions.organization_id
+      and m.user_id = auth.uid() and m.role = 'owner'
+  )
+);
+-- Écriture réservée au propriétaire uniquement (jamais manager, contrairement
+-- au reste du projet) — mandat explicite de la mission Partie 4.
+create policy org_module_perms_write on public.organization_module_permissions for all to authenticated
+using (
+  exists (
+    select 1 from public.organization_members m
+    where m.organization_id = organization_module_permissions.organization_id
+      and m.user_id = auth.uid() and m.role = 'owner'
+  )
+)
+with check (
+  exists (
+    select 1 from public.organization_members m
+    where m.organization_id = organization_module_permissions.organization_id
+      and m.user_id = auth.uid() and m.role = 'owner'
+  )
+);
+
+-- has_module_permission() (mise à jour migration 084) : signature et
+-- vocabulaire de niveau ('view'/'create'/'manage') INCHANGÉS pour ne
+-- casser aucune des ~287 policies RLS qui l'appellent déjà à travers tout
+-- le projet (vérifié : select count(*) from pg_policies where qual/
+-- with_check like '%has_module_permission%') — seule la source de données
+-- change (organization_module_permissions au lieu de organization_role_
+-- permissions/default_role_permissions). 'manage' reste un alias de
+-- (can_update ET can_delete) pour ces call sites non encore migrés au
+-- vocabulaire fin ; 'read'/'update'/'delete' sont les verbes de premier
+-- rang pour tout code écrit à partir de maintenant (ex. les policies
+-- payment_requests, migration 083).
 create or replace function public.has_module_permission(_org_id uuid, _module_key text, _level text default 'view')
 returns boolean language plpgsql stable security definer set search_path = public as $$
 declare
-  v_custom_role_id uuid;
-  v_legacy_role public.app_role;
+  v_role public.app_role;
   v_open_view boolean;
-  v_can boolean;
+  v_row public.organization_module_permissions;
 begin
   if not exists (
     select 1 from public.organizations o where o.id = _org_id and not o.suspended
@@ -1423,56 +1489,61 @@ begin
     return false;
   end if;
 
-  select custom_role_id, role into v_custom_role_id, v_legacy_role
-  from public.organization_members
+  select role into v_role from public.organization_members
   where organization_id = _org_id and user_id = auth.uid();
-
-  if v_legacy_role is null then
+  if v_role is null then
     return false;
   end if;
 
-  if _level = 'view' then
+  if v_role = 'owner' then
+    return true;
+  end if;
+
+  if _level in ('view', 'read') then
     select open_view into v_open_view from public.permission_modules where key = _module_key;
     if coalesce(v_open_view, false) then
       return true;
     end if;
   end if;
 
-  if v_custom_role_id is not null then
-    select case _level
-      when 'create' then can_create
-      when 'manage' then can_manage
-      else can_view
-    end into v_can
-    from public.organization_role_permissions
-    where role_id = v_custom_role_id and module_key = _module_key;
-    return coalesce(v_can, false);
+  select * into v_row from public.organization_module_permissions
+  where organization_id = _org_id and user_id = auth.uid() and module_key = _module_key;
+
+  if v_row is null then
+    return false;
   end if;
 
-  select case _level
-    when 'create' then can_create
-    when 'manage' then can_manage
-    else can_view
-  end into v_can
-  from public.default_role_permissions
-  where role = v_legacy_role and module_key = _module_key;
-  return coalesce(v_can, false);
+  return coalesce(case _level
+    when 'create' then v_row.can_create
+    when 'view' then v_row.can_read
+    when 'read' then v_row.can_read
+    when 'update' then v_row.can_update
+    when 'delete' then v_row.can_delete
+    when 'manage' then (v_row.can_update and v_row.can_delete)
+    else v_row.can_read
+  end, false);
 end;
 $$;
 revoke all on function public.has_module_permission(uuid, text, text) from public;
 grant execute on function public.has_module_permission(uuid, text, text) to authenticated;
 
--- Raccourci de confort pour l'UI (migration 065) : récupère en un seul
--- appel les permissions de l'utilisateur courant sur tous les modules
--- d'une organisation, plutôt que 33 appels scalaires à
--- has_module_permission(). RLS reste la seule barrière réelle.
+-- Raccourci de confort pour l'UI (migration 065, étendu migration 084) :
+-- récupère en un seul appel les permissions de l'utilisateur courant sur
+-- tous les modules d'une organisation, plutôt que N appels scalaires à
+-- has_module_permission(). RLS reste la seule barrière réelle. can_read/
+-- can_update/can_delete ajoutés pour l'écran Équipe (matrice CRUD) ;
+-- can_view/can_manage conservés pour ne rien casser côté nav (ZegCaisse/
+-- ZegHotel/ZegResto/ZegERP, qui ne lisent que can_view).
 create or replace function public.my_module_permissions(p_organization_id uuid)
-returns table (module_key text, can_view boolean, can_create boolean, can_manage boolean)
+returns table (module_key text, can_view boolean, can_create boolean, can_manage boolean, can_read boolean, can_update boolean, can_delete boolean)
 language sql stable security definer set search_path = public as $$
   select m.key,
     public.has_module_permission(p_organization_id, m.key, 'view'),
     public.has_module_permission(p_organization_id, m.key, 'create'),
-    public.has_module_permission(p_organization_id, m.key, 'manage')
+    public.has_module_permission(p_organization_id, m.key, 'manage'),
+    public.has_module_permission(p_organization_id, m.key, 'read'),
+    public.has_module_permission(p_organization_id, m.key, 'update'),
+    public.has_module_permission(p_organization_id, m.key, 'delete')
   from public.permission_modules m
   where m.app_module = (select app_module from public.organizations where id = p_organization_id);
 $$;
@@ -3411,8 +3482,10 @@ create table if not exists public.resto_zones (
 create index if not exists idx_resto_zones_org on public.resto_zones(organization_id);
 alter table public.resto_zones enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view') — resto_salle
+-- est open_view=true, comportement identique à l'ancienne liste de rôles.
 create policy resto_zones_select on public.resto_zones for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_salle', 'view'));
 create policy resto_zones_write on public.resto_zones for all to authenticated
   using (public.has_module_permission(organization_id, 'resto_salle', 'manage'))
   with check (public.has_module_permission(organization_id, 'resto_salle', 'manage'));
@@ -3437,8 +3510,9 @@ alter table public.resto_tables enable row level security;
 -- du service — server/cook peuvent le lire (plan de salle, KDS) mais seul
 -- server (avec owner/manager) peut l'écrire ; cook n'a pas besoin d'écrire
 -- sur les tables (son écran est le KDS, pas le plan de salle).
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_tables_select on public.resto_tables for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_salle', 'view'));
 create policy resto_tables_insert on public.resto_tables for insert to authenticated
   with check (public.has_module_permission(organization_id, 'resto_salle', 'manage'));
 -- Carve-out préservé (migration 069) : server peut changer le statut d'une
@@ -3459,8 +3533,9 @@ create table if not exists public.resto_menu_categories (
 create index if not exists idx_resto_menu_categories_org on public.resto_menu_categories(organization_id);
 alter table public.resto_menu_categories enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_menu_categories_select on public.resto_menu_categories for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_menu', 'view'));
 create policy resto_menu_categories_write on public.resto_menu_categories for all to authenticated
   using (public.has_module_permission(organization_id, 'resto_menu', 'manage'))
   with check (public.has_module_permission(organization_id, 'resto_menu', 'manage'));
@@ -3486,8 +3561,9 @@ create index if not exists idx_resto_menu_items_org on public.resto_menu_items(o
 create index if not exists idx_resto_menu_items_category on public.resto_menu_items(category_id);
 alter table public.resto_menu_items enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_menu_items_select on public.resto_menu_items for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_menu', 'view'));
 create policy resto_menu_items_write on public.resto_menu_items for all to authenticated
   using (public.has_module_permission(organization_id, 'resto_menu', 'manage'))
   with check (public.has_module_permission(organization_id, 'resto_menu', 'manage'));
@@ -3501,8 +3577,9 @@ create table if not exists public.resto_modifiers (
 create index if not exists idx_resto_modifiers_org on public.resto_modifiers(organization_id);
 alter table public.resto_modifiers enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_modifiers_select on public.resto_modifiers for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_menu', 'view'));
 create policy resto_modifiers_write on public.resto_modifiers for all to authenticated
   using (public.has_module_permission(organization_id, 'resto_menu', 'manage'))
   with check (public.has_module_permission(organization_id, 'resto_menu', 'manage'));
@@ -3521,11 +3598,12 @@ alter table public.resto_modifier_options enable row level security;
 -- à un modifier, qui en a une) — la RLS remonte via un sous-select sur
 -- resto_modifiers. Pas de dépendance circulaire : has_any_role_in_organization()
 -- ne référence jamais resto_modifier_options ni resto_menu_item_modifiers.
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_modifier_options_select on public.resto_modifier_options for select to authenticated
   using (exists (
     select 1 from public.resto_modifiers m
     where m.id = modifier_id
-      and public.has_any_role_in_organization(m.organization_id, array['owner','manager','accountant','server','cook']::public.app_role[])
+      and public.has_module_permission(m.organization_id, 'resto_menu', 'view')
   ));
 create policy resto_modifier_options_write on public.resto_modifier_options for all to authenticated
   using (exists (
@@ -3546,11 +3624,12 @@ create table if not exists public.resto_menu_item_modifiers (
 );
 alter table public.resto_menu_item_modifiers enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_menu_item_modifiers_select on public.resto_menu_item_modifiers for select to authenticated
   using (exists (
     select 1 from public.resto_menu_items i
     where i.id = menu_item_id
-      and public.has_any_role_in_organization(i.organization_id, array['owner','manager','accountant','server','cook']::public.app_role[])
+      and public.has_module_permission(i.organization_id, 'resto_menu', 'view')
   ));
 create policy resto_menu_item_modifiers_write on public.resto_menu_item_modifiers for all to authenticated
   using (exists (
@@ -3581,8 +3660,9 @@ create index if not exists idx_resto_orders_org on public.resto_orders(organizat
 create index if not exists idx_resto_orders_table on public.resto_orders(table_id);
 alter table public.resto_orders enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_orders_select on public.resto_orders for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_commandes', 'view'));
 create policy resto_orders_insert on public.resto_orders for insert to authenticated
   with check (public.has_module_permission(organization_id, 'resto_commandes', 'create'));
 create policy resto_orders_update on public.resto_orders for update to authenticated
@@ -3611,8 +3691,9 @@ create index if not exists idx_resto_order_courses_org on public.resto_order_cou
 create index if not exists idx_resto_order_courses_order on public.resto_order_courses(order_id);
 alter table public.resto_order_courses enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_order_courses_select on public.resto_order_courses for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_commandes', 'view'));
 create policy resto_order_courses_insert on public.resto_order_courses for insert to authenticated
   with check (public.has_module_permission(organization_id, 'resto_commandes', 'create'));
 create policy resto_order_courses_update on public.resto_order_courses for update to authenticated
@@ -3652,8 +3733,9 @@ alter table public.resto_order_items enable row level security;
 -- exclusivement par mark_resto_order_item_statut() (migration 043, RPC
 -- security definer étroite — cook n'a aucun accès UPDATE direct à cette
 -- table, pour ne pas exposer prix_unitaire/quantite/etc. à sa policy).
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_order_items_select on public.resto_order_items for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_commandes', 'view'));
 create policy resto_order_items_insert on public.resto_order_items for insert to authenticated
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 create policy resto_order_items_update on public.resto_order_items for update to authenticated
@@ -3679,8 +3761,9 @@ create index if not exists idx_resto_kitchen_tickets_org on public.resto_kitchen
 create unique index if not exists idx_resto_kitchen_tickets_course_unique on public.resto_kitchen_tickets(course_id) where course_id is not null;
 alter table public.resto_kitchen_tickets enable row level security;
 
+-- Migration 084 : converti vers has_module_permission('view').
 create policy resto_kitchen_tickets_select on public.resto_kitchen_tickets for select to authenticated
-  using (public.has_any_role_in_organization(organization_id, array['owner','manager','accountant','server','cook']::public.app_role[]));
+  using (public.has_module_permission(organization_id, 'resto_cuisine', 'view'));
 create policy resto_kitchen_tickets_insert on public.resto_kitchen_tickets for insert to authenticated
   with check (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 -- update inclut cook : c'est lui qui fait avancer le ticket depuis le KDS.
