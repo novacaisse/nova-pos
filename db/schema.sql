@@ -1801,11 +1801,15 @@ create trigger on_auth_user_created
 -- contrôle de la boutique) — bloqués si le niveau résultant serait
 -- négatif. 'adjustment' reste volontairement non gardé : correction
 -- manuelle explicite (inventaire physique), pas une opération commerciale.
+-- Migration 073 : le garde-fou reste total pour 'out'/'transfer', mais
+-- devient conditionnel pour 'sale' — organization_settings.data.allow_oversell
+-- (Paramètres ZegCaisse) permet de vendre en rupture, stock résultant négatif.
 create or replace function public.apply_stock_movement()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   delta numeric(14,3);
   v_new_qty numeric(14,3);
+  v_allow_oversell boolean;
 begin
   delta := case new.type
     when 'in' then new.quantity
@@ -1823,7 +1827,15 @@ begin
   returning quantity into v_new_qty;
 
   if new.type in ('sale', 'out', 'transfer') and v_new_qty < 0 then
-    raise exception 'Stock insuffisant pour ce produit (quantité disponible dépassée).';
+    if new.type = 'sale' then
+      select coalesce((data->>'allow_oversell')::boolean, false) into v_allow_oversell
+      from public.organization_settings where organization_id = new.organization_id;
+    else
+      v_allow_oversell := false;
+    end if;
+    if not v_allow_oversell then
+      raise exception 'Stock insuffisant pour ce produit (quantité disponible dépassée).';
+    end if;
   end if;
 
   return new;

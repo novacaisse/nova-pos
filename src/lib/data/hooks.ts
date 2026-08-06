@@ -1463,6 +1463,8 @@ export type ShopSettingsData = {
   expense_categories?: string[];
   tax_rates?: TaxRate[];
   permissions?: Partial<TeamPermissions>;
+  allow_oversell?: boolean;
+  auto_print_receipt?: boolean;
 };
 export type ShopSettings = {
   organization_id: string;

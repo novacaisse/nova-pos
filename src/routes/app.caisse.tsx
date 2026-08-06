@@ -85,6 +85,12 @@ function CaissePage() {
   // Bascule Bloc 15 : activé par défaut, comportement inchangé sauf si le
   // owner désactive explicitement la remise pour le rôle Caissier.
   const canDiscount = myRole !== "cashier" || perms.cashier_can_discount;
+  // Paramètres > Vente & caisse : par défaut la vente d'un article à 0 en
+  // stock reste bloquée (apply_stock_movement(), migration 073) — activé
+  // ici, le PDV laisse l'ajouter et encaisser, le SQL laisse le stock
+  // passer négatif.
+  const { data: shopSettings } = useShopSettings();
+  const allowOversell = shopSettings?.data.allow_oversell ?? false;
 
   // Entrée directe depuis Ventes ("Modifier" sur un brouillon) : ?holdId=
   // reprend ce ticket précis puis nettoie l'URL pour ne pas re-déclencher
@@ -307,7 +313,9 @@ function CaissePage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-              {filteredProducts.map((p) => <ProductCard key={p.id} product={p} onAdd={() => addProduct(p)} />)}
+              {filteredProducts.map((p) => (
+                <ProductCard key={p.id} product={p} allowOversell={allowOversell} onAdd={() => addProduct(p)} />
+              ))}
             </div>
           )}
         </div>
@@ -489,8 +497,12 @@ function CaissePage() {
         {showScanner && (
           <BarcodeScannerDialog onClose={() => setShowScanner(false)} onDetect={(code) => {
             const p = products.find((pr) => pr.barcode === code || pr.sku === code);
-            if (p) { addProduct(p); setShowScanner(false); }
-            else alert(`Aucun produit ne correspond au code « ${code} ».`);
+            if (!p) { alert(`Aucun produit ne correspond au code « ${code} ».`); return; }
+            if (p.stock <= 0 && !allowOversell) {
+              alert("Rupture de stock — activez la vente en rupture dans Paramètres > Vente & caisse pour forcer l'ajout.");
+              return;
+            }
+            addProduct(p); setShowScanner(false);
           }} />
         )}
         {showRecentSales && (
@@ -517,14 +529,17 @@ function CategoryPill({ label, active, onClick, count }: { label: string; active
   );
 }
 
-function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () => void }) {
+function ProductCard({ product, allowOversell, onAdd }: { product: ProductWithStock; allowOversell: boolean; onAdd: () => void }) {
   const formatXOF = useFormatMoney();
   const outOfStock = product.stock <= 0;
   const low = !outOfStock && product.stock <= product.low_stock_threshold;
+  const blocked = outOfStock && !allowOversell;
   return (
-    <motion.button whileTap={{ scale: 0.96 }} onClick={onAdd}
-      className={cn("group flex flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all hover:shadow-elegant",
-        outOfStock ? "border-destructive/50 hover:border-destructive" : "border-border hover:border-primary/40")}>
+    <motion.button whileTap={{ scale: blocked ? 1 : 0.96 }} onClick={blocked ? undefined : onAdd} disabled={blocked}
+      title={blocked ? "Rupture de stock — activez la vente en rupture dans Paramètres > Vente & caisse pour forcer l'ajout." : undefined}
+      className={cn("group flex flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all",
+        blocked ? "cursor-not-allowed opacity-70" : "hover:shadow-elegant",
+        outOfStock ? "border-destructive/50" : "border-border hover:border-primary/40")}>
       <div className="relative grid aspect-square place-items-center bg-gradient-to-br from-muted to-background text-5xl sm:text-6xl">
         {product.image_url ? (
           <img src={product.image_url} alt={product.name} className={cn("h-full w-full object-cover", outOfStock && "opacity-50 grayscale")} />
@@ -533,7 +548,7 @@ function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () 
         )}
         {outOfStock ? (
           <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-destructive px-2 py-0.5 text-[10px] font-bold text-destructive-foreground">
-            <AlertTriangle className="h-3 w-3" /> Rupture
+            <AlertTriangle className="h-3 w-3" /> {allowOversell ? "Rupture · vente autorisée" : "Rupture"}
           </span>
         ) : low ? (
           <span className="absolute right-2 top-2 rounded-full bg-warning/90 px-2 py-0.5 text-[10px] font-bold text-warning-foreground">Stock {product.stock}</span>
