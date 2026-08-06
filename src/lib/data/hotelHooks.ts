@@ -1091,11 +1091,16 @@ export function useHotelCorporateInvoices() {
 }
 
 // ============ HOUSEKEEPING ============
+// refetchInterval 1 min (migration 078, tâche générée directement par
+// trigger au check-out) — la gouvernante voit une nouvelle tâche arriver
+// sans recharger la page ; l'appelant (HousekeepingPage) compare la
+// longueur d'une requête à l'autre pour déclencher le son d'alerte.
 export function useHotelHousekeepingTasks(date: string) {
   const organizationId = useOrganizationId();
   return useQuery({
     queryKey: ["hotel_housekeeping_tasks", organizationId, date],
     enabled: !!organizationId,
+    refetchInterval: 60_000,
     queryFn: async (): Promise<(HotelHousekeepingTask & { room: HotelRoom | null })[]> => {
       const { data, error } = await supabase.from("hotel_housekeeping_tasks")
         .select("*, room:hotel_rooms(*)").eq("organization_id", organizationId!).eq("task_date", date)
@@ -1105,9 +1110,10 @@ export function useHotelHousekeepingTasks(date: string) {
     },
   });
 }
-// Génère les tâches du jour : une tâche "turnover" pour chaque chambre
-// marquée "dirty" qui n'a pas déjà de tâche ouverte ce jour-là — évite les
-// doublons si le bouton est cliqué deux fois.
+// Filet de sécurité manuel (migration 078 automatise déjà la création au
+// check-out via trigger) — reste utile pour une chambre marquée "dirty"
+// par un autre moyen (note manuelle, import...) sans passer par un
+// check-out suivi. Même garde-fou anti-doublon qu'avant.
 export function useGenerateHousekeepingTasks() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({

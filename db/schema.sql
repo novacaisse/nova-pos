@@ -3203,6 +3203,56 @@ drop policy if exists hotel_housekeeping_delete on public.hotel_housekeeping_tas
 create policy hotel_housekeeping_delete on public.hotel_housekeeping_tasks for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
 
+-- Statut chambre automatique + génération automatique des tâches de ménage
+-- (migration 078) : housekeeping_status et hotel_housekeeping_tasks ne
+-- bougeaient jamais tout seuls jusqu'ici (bouton "Générer les tâches du
+-- jour" + marquage manuel "propre" par chambre). 'out_of_service' n'est
+-- jamais écrasé par ces triggers.
+create or replace function public.hotel_room_dirty_on_checkout()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_room record;
+begin
+  if new.status = 'checked_out' and old.status is distinct from 'checked_out' then
+    for v_room in
+      select room_id from public.hotel_reservation_rooms where reservation_id = new.id
+    loop
+      update public.hotel_rooms
+      set housekeeping_status = 'dirty'
+      where id = v_room.room_id and housekeeping_status <> 'out_of_service';
+
+      insert into public.hotel_housekeeping_tasks (organization_id, room_id, task_date, kind)
+      select new.organization_id, v_room.room_id, current_date, 'turnover'
+      where not exists (
+        select 1 from public.hotel_housekeeping_tasks
+        where room_id = v_room.room_id and task_date = current_date and status <> 'done'
+      );
+    end loop;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_hotel_room_dirty_on_checkout on public.hotel_reservations;
+create trigger trg_hotel_room_dirty_on_checkout
+  after update on public.hotel_reservations
+  for each row execute function public.hotel_room_dirty_on_checkout();
+
+create or replace function public.hotel_room_clean_on_task_done()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.status = 'done' and old.status is distinct from 'done' and new.kind in ('cleaning', 'turnover') then
+    update public.hotel_rooms
+    set housekeeping_status = 'clean'
+    where id = new.room_id and housekeeping_status <> 'out_of_service';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_hotel_room_clean_on_task_done on public.hotel_housekeeping_tasks;
+create trigger trg_hotel_room_clean_on_task_done
+  after update on public.hotel_housekeeping_tasks
+  for each row execute function public.hotel_room_clean_on_task_done();
+
 create table if not exists public.hotel_maintenance_tickets (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
