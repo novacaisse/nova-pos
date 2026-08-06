@@ -16,7 +16,10 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useProvisionOrganization } from "@/lib/data/hooks";
 
-const SECTORS = ["Épicerie", "Superette", "Restaurant", "Boulangerie", "Mode", "Pharmacie", "Quincaillerie", "Beauté", "Autre"];
+// "Restaurant" et "Beauté" retirés (audit ZegOS v2) : ces secteurs relèvent
+// de ZegResto et n'ont pas leur place dans l'inscription ZegCaisse — les
+// options restantes couvrent ce que couvre réellement le commerce/détail.
+const SECTORS = ["Épicerie", "Supérette", "Boutique de vêtements", "Boulangerie/Pâtisserie", "Pharmacie", "Quincaillerie", "Électronique/Téléphonie", "Librairie/Papeterie", "Autre"];
 const COUNTRIES = ["Bénin", "Burkina Faso", "Côte d'Ivoire", "Mali", "Sénégal", "Togo", "Niger", "Guinée"];
 
 const APPS = [
