@@ -3253,6 +3253,17 @@ create trigger trg_hotel_room_clean_on_task_done
   after update on public.hotel_housekeeping_tasks
   for each row execute function public.hotel_room_clean_on_task_done();
 
+-- Fonctions trigger uniquement (lisent NEW/OLD, invalides hors contexte
+-- trigger) — jamais destinées à être appelées directement. Les privilèges
+-- par défaut du projet Supabase accordent EXECUTE à anon/authenticated sur
+-- toute nouvelle fonction de public, indépendamment du rôle PUBLIC ; il
+-- faut donc les viser explicitement pour fermer leur exposition en tant
+-- qu'endpoints RPC PostgREST (migration 079). Le déclenchement normal par
+-- les triggers n'est pas affecté (l'exécuteur de requête invoque une
+-- fonction trigger indépendamment des privilèges EXECUTE du rôle appelant).
+revoke all on function public.hotel_room_dirty_on_checkout() from public, anon, authenticated;
+revoke all on function public.hotel_room_clean_on_task_done() from public, anon, authenticated;
+
 create table if not exists public.hotel_maintenance_tickets (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
@@ -6936,13 +6947,13 @@ create policy reservation_payments_select on public.reservation_payments for sel
 create policy reservation_payments_insert on public.reservation_payments for insert to authenticated
   with check (public.has_module_permission(organization_id, 'reservations', 'manage'));
 
--- add_reservation_payment (migration 074) : même schéma que
--- add_sale_payment() (migration 024) — incrément atomique sous le verrou de
--- ligne de l'UPDATE, security invoker (les policies RLS ci-dessus et
--- reservations_update s'appliquent normalement).
+-- add_reservation_payment (migration 074, search_path figé migration 079) :
+-- même schéma que add_sale_payment() (migration 024) — incrément atomique
+-- sous le verrou de ligne de l'UPDATE, security invoker (les policies RLS
+-- ci-dessus et reservations_update s'appliquent normalement).
 create or replace function public.add_reservation_payment(p_reservation_id uuid, p_amount numeric, p_method public.payment_method)
 returns public.reservations
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 declare
   v_organization_id uuid;
   v_reservation public.reservations;
