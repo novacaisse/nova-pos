@@ -633,6 +633,19 @@ projet, sans que personne ne le sache avant cet audit.
   trigger géré par la plateforme Supabase elle-même, pas une fonction
   créée par une migration de ce dépôt.
 
+**Corrigé (migration 081)** — la migration 080 avait un oubli sur ces 12
+fonctions trigger : `revoke ... from anon, authenticated` sans `public`.
+Contrairement à `find_user_id_by_email` (déjà `revoke ... from public`
+depuis la migration 004) et aux 2 fonctions de la migration 079 (qui
+incluaient déjà `public`), ces 12 n'avaient jamais eu leur grant `PUBLIC`
+par défaut retiré. `anon`/`authenticated` héritant implicitement de
+`PUBLIC`, le revoke nommé de la 080 n'a rien changé au résultat observable
+(`has_function_privilege` restait `true`) tant que `PUBLIC` gardait le
+sien — repéré en vérifiant `proacl` après exécution de la 080
+(`{=X/postgres,...}`, l'entrée à rôle vide étant celle de `PUBLIC`).
+Migration 081 : `revoke all ... from public, anon, authenticated;` sur les
+12.
+
 **Reste à traiter séparément** (documenté dans `AUDIT_ANON_RPC_2026-08.md`,
 non appliqué) : ~45 fonctions `security definer` restent accessibles à
 `anon` au niveau du grant, mais protégées individuellement par un contrôle

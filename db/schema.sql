@@ -1807,8 +1807,8 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 -- Fonction trigger uniquement (NEW invalide hors contexte trigger) —
 -- inutilement exposée comme endpoint RPC par défaut (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.handle_new_user() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.handle_new_user() from public, anon, authenticated;
 
 -- Garde-fou anti-survente (migration 026) : seuls 'sale'/'out'/'transfer'
 -- représentent une sortie réelle de stock (marchandise qui quitte le
@@ -1860,8 +1860,8 @@ create trigger trg_stock_mov
   after insert on public.stock_movements
   for each row execute function public.apply_stock_movement();
 -- Fonction trigger uniquement — voir handle_new_user() ci-dessus (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.apply_stock_movement() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.apply_stock_movement() from public, anon, authenticated;
 
 -- create_sale() (migration 026) : useCreateSale enchaînait 4 écritures
 -- client séparées (sales, sale_items, payments, stock_movements) sans
@@ -1986,8 +1986,8 @@ create trigger trg_notify_big_sale
   after insert on public.sales
   for each row execute function public.notify_big_sale();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.notify_big_sale() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.notify_big_sale() from public, anon, authenticated;
 
 create or replace function public.notify_stock_level()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -2016,8 +2016,8 @@ create trigger trg_notify_stock_level
   after insert or update of quantity on public.stock_levels
   for each row execute function public.notify_stock_level();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.notify_stock_level() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.notify_stock_level() from public, anon, authenticated;
 
 create or replace function public.notify_new_member()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -2043,8 +2043,8 @@ create trigger trg_notify_new_member
   after insert on public.organization_members
   for each row execute function public.notify_new_member();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.notify_new_member() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.notify_new_member() from public, anon, authenticated;
 
 -- =============== STORAGE ===============
 -- Bucket pour le logo boutique : public en lecture (affiché sur tickets et
@@ -2645,8 +2645,8 @@ create trigger trg_hotel_resv_room_insert
   before insert on public.hotel_reservation_rooms
   for each row execute function public.hotel_sync_reservation_room_on_insert();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.hotel_sync_reservation_room_on_insert() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.hotel_sync_reservation_room_on_insert() from public, anon, authenticated;
 
 -- Répercute tout changement de dates/statut/billing_unit de la
 -- réservation sur les lignes hotel_reservation_rooms existantes (ex.
@@ -2675,8 +2675,8 @@ create trigger trg_hotel_reservations_sync
   after update on public.hotel_reservations
   for each row execute function public.hotel_sync_reservation_room_on_update();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.hotel_sync_reservation_room_on_update() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.hotel_sync_reservation_room_on_update() from public, anon, authenticated;
 
 -- Communications automatisées (ZegHotel Phase 5, migration 032) — table
 -- notifications strictement interne (user_id référence auth.users, un
@@ -2706,8 +2706,8 @@ create trigger trg_notify_hotel_reservation_created
   after insert on public.hotel_reservations
   for each row execute function public.notify_hotel_reservation_created();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.notify_hotel_reservation_created() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.notify_hotel_reservation_created() from public, anon, authenticated;
 
 create or replace function public.notify_hotel_checkout()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -2731,8 +2731,8 @@ create trigger trg_notify_hotel_checkout
   after update on public.hotel_reservations
   for each row execute function public.notify_hotel_checkout();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.notify_hotel_checkout() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.notify_hotel_checkout() from public, anon, authenticated;
 
 -- Migration 020i — ZegHotel, étape 4/4 (partie facturation) : folios,
 -- charges et paiements. À exécuter après 020f/020g/020h.
@@ -4518,8 +4518,8 @@ create trigger trg_erp_warehouses_single_default
   for each row when (new.is_default)
   execute function public.enforce_single_default_erp_warehouse();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.enforce_single_default_erp_warehouse() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.enforce_single_default_erp_warehouse() from public, anon, authenticated;
 
 create table if not exists public.erp_products (
   id uuid primary key default gen_random_uuid(),
@@ -4750,8 +4750,8 @@ create trigger trg_erp_stock_movements_apply
   after insert on public.erp_stock_movements
   for each row execute function public.apply_erp_stock_movement();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.apply_erp_stock_movement() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.apply_erp_stock_movement() from public, anon, authenticated;
 
 -- send_erp_stock_transfer() : crée les mouvements 'transfer_out'
 -- (décrémente le dépôt source, bloqué par le trigger si stock
@@ -6173,8 +6173,8 @@ create trigger trg_erp_cash_transactions_apply
   after insert on public.erp_cash_transactions
   for each row execute function public.apply_erp_cash_transaction();
 -- Fonction trigger uniquement — voir handle_new_user() (audit
--- AUDIT_ANON_RPC_2026-08.md, migration 080).
-revoke execute on function public.apply_erp_cash_transaction() from anon, authenticated;
+-- AUDIT_ANON_RPC_2026-08.md, migrations 080/081 — 081 corrige le revoke public oublié dans 080).
+revoke all on function public.apply_erp_cash_transaction() from public, anon, authenticated;
 
 -- confirm_erp_fund_transfer() : crée la paire transfer_out/transfer_in et
 -- passe le transfert "confirmed".
