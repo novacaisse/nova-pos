@@ -122,7 +122,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
     { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
     { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
-    { title: "Point de vente interne", url: "/app/hotel/pos-interne", icon: "Coffee" },
+    { title: "Point de vente", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
     { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
   ],

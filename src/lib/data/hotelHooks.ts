@@ -946,6 +946,35 @@ export function usePostHotelPosCharge() {
   });
 }
 
+// Vente payée tout de suite (pas de note de séjour) — migration 077,
+// pendant immédiat de post_hotel_pos_charge() ci-dessus pour un client de
+// passage (bar/restaurant/piscine côté hôtel).
+export type HotelPosSaleItem = { product_id: string | null; name: string; quantity: number; unit_price: number };
+export type HotelPosSale = {
+  id: string; organization_id: string; reference: string; items: HotelPosSaleItem[];
+  subtotal: number; discount: number; total: number;
+  payment_method: "cash" | "mobile_money" | "card" | "credit" | "mixed";
+  paid: number; created_at: string;
+};
+export function useCreateHotelPosSale() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { items: HotelPosSaleItem[]; discount: number; paymentMethod: HotelPosSale["payment_method"]; paid: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("create_hotel_pos_sale", {
+        p_organization_id: organizationId, p_items: input.items, p_discount: input.discount,
+        p_payment_method: input.paymentMethod, p_paid: input.paid,
+      });
+      if (error) throw error;
+      return data as HotelPosSale;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
+    },
+  });
+}
+
 export function folioBalance(folio: HotelFolioDetail): number {
   const charges = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
   const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
