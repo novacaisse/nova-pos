@@ -11,6 +11,7 @@ import {
   useShopSettings, useUpdateShopSettings, useTeamPermissions, DEFAULT_TEAM_PERMISSIONS,
   useUpdateMemberCustomRole, usePermissionModules, useOrganizationRoles, useOrganizationRolePermissions,
   useUpsertOrganizationRole, useDeleteOrganizationRole, useUpsertRolePermissions,
+  useSales, useFormatMoney,
   type ShopMember, type TeamPermissions, type OrganizationRole, type OrganizationRolePermission,
 } from "@/lib/data/hooks";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -42,6 +43,7 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
   const updateCustomRole = useUpdateMemberCustomRole();
   const removeMember = useRemoveMember();
   const [inviting, setInviting] = useState(false);
+  const [viewingActivity, setViewingActivity] = useState<ShopMember | null>(null);
   const { data: customRoles = [] } = useOrganizationRoles();
 
   const isOwner = myRole === "owner";
@@ -107,6 +109,7 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
                   {members.map((m) => (
                     <MemberRow key={m.id} member={m} isOwner={isOwner} isSelf={m.user_id === user?.id} roles={roles}
                       customRoles={customRolesAppModule ? customRoles : undefined}
+                      onViewActivity={customRolesAppModule === "pos" ? () => setViewingActivity(m) : undefined}
                       onRoleChange={(role) => updateRole.mutate({ memberId: m.id, role })}
                       onCustomRoleChange={(customRoleId) => updateCustomRole.mutate({ memberId: m.id, customRoleId })}
                       onRemove={() => {
@@ -163,6 +166,7 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
       </div>
 
       {inviting && <CreateMemberModal onClose={() => setInviting(false)} roles={roles} defaultRole={defaultRole} />}
+      {viewingActivity && <MemberActivityDialog member={viewingActivity} onClose={() => setViewingActivity(null)} />}
     </div>
   );
 }
@@ -223,9 +227,10 @@ function TogglesPanel({ isOwner }: { isOwner: boolean }) {
   );
 }
 
-function MemberRow({ member, isOwner, isSelf, roles, customRoles, onRoleChange, onCustomRoleChange, onRemove }: {
+function MemberRow({ member, isOwner, isSelf, roles, customRoles, onViewActivity, onRoleChange, onCustomRoleChange, onRemove }: {
   member: ShopMember; isOwner: boolean; isSelf: boolean; roles: AppRole[];
   customRoles?: OrganizationRole[];
+  onViewActivity?: () => void;
   onRoleChange: (role: AppRole) => void; onCustomRoleChange?: (customRoleId: string | null) => void; onRemove: () => void;
 }) {
   // Un membre garde un seul rôle (organization_members.role) partagé entre
@@ -241,7 +246,7 @@ function MemberRow({ member, isOwner, isSelf, roles, customRoles, onRoleChange, 
   const roleBelongsHere = roles.includes(member.role);
   const canEdit = isOwner && !isSelf && roleBelongsHere;
   return (
-    <tr className="border-t border-border/60 hover:bg-muted/40">
+    <tr onClick={onViewActivity} className={cn("border-t border-border/60 hover:bg-muted/40", onViewActivity && "cursor-pointer")}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-primary to-primary-glow text-xs font-bold text-primary-foreground">
@@ -254,7 +259,7 @@ function MemberRow({ member, isOwner, isSelf, roles, customRoles, onRoleChange, 
           <div className="font-semibold">{member.profile?.full_name || "—"}{isSelf && <span className="ml-1 text-xs font-normal text-muted-foreground">(vous)</span>}</div>
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
         {canEdit ? (
           <select value={member.role} onChange={(e) => onRoleChange(e.target.value as AppRole)}
             className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
@@ -268,7 +273,7 @@ function MemberRow({ member, isOwner, isSelf, roles, customRoles, onRoleChange, 
         )}
       </td>
       {customRoles && (
-        <td className="px-4 py-3">
+        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
           {isOwner && !isSelf ? (
             <select value={member.custom_role_id ?? ""} onChange={(e) => onCustomRoleChange?.(e.target.value || null)}
               className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
@@ -284,7 +289,7 @@ function MemberRow({ member, isOwner, isSelf, roles, customRoles, onRoleChange, 
       )}
       <td className="px-4 py-3 text-xs text-muted-foreground">{member.profile?.phone || "—"}</td>
       <td className="px-4 py-3 text-xs text-muted-foreground">{new Date(member.created_at).toLocaleDateString("fr-FR")}</td>
-      <td className="px-4 py-3 text-right">
+      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
         {isOwner && !isSelf && (
           <button onClick={onRemove} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10">
             <Trash2 className="h-4 w-4" />
@@ -292,6 +297,60 @@ function MemberRow({ member, isOwner, isSelf, roles, customRoles, onRoleChange, 
         )}
       </td>
     </tr>
+  );
+}
+
+// Activité d'un membre (ZegCaisse uniquement, voir customRolesAppModule ===
+// "pos" côté appelant) — dérivée des 200 dernières ventes de l'organisation
+// (useSales) filtrées côté client par cashier_id, pas une nouvelle table ni
+// un journal d'activité dédié.
+function MemberActivityDialog({ member, onClose }: { member: ShopMember; onClose: () => void }) {
+  const formatXOF = useFormatMoney();
+  const { data: sales = [], isLoading } = useSales(200);
+  const mine = sales.filter((s) => s.cashier_id === member.user_id);
+  const total = mine.reduce((s, sale) => s + Number(sale.total), 0);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <div className="font-display text-lg font-bold">{member.profile?.full_name || "—"}</div>
+            <div className="text-xs text-muted-foreground">{ROLE_LABEL[member.role]} · membre depuis le {new Date(member.created_at).toLocaleDateString("fr-FR")}</div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-4 p-5">
+          {member.profile?.phone && (
+            <div className="flex justify-between text-sm"><span className="text-muted-foreground">Téléphone</span><span>{member.profile.phone}</span></div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-border p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ventes récentes</div>
+              <div className="mt-1 text-xl font-bold">{mine.length}</div>
+            </div>
+            <div className="rounded-xl border border-border p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Chiffre d'affaires</div>
+              <div className="mt-1 text-xl font-bold">{formatXOF(total)}</div>
+            </div>
+          </div>
+          <div className="max-h-64 space-y-1.5 overflow-y-auto">
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+            ) : mine.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                Aucune vente enregistrée par ce membre sur les 200 dernières ventes de l'organisation.
+              </div>
+            ) : mine.slice(0, 20).map((s) => (
+              <div key={s.id} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2 text-xs">
+                <span className="font-mono">{s.reference}</span>
+                <span className="text-muted-foreground">{new Date(s.created_at).toLocaleString("fr-FR")}</span>
+                <span className="font-bold">{formatXOF(Number(s.total))}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

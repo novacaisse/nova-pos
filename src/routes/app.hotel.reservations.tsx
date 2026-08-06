@@ -99,13 +99,23 @@ function ReservationsPage() {
   }, [openCreate, canWrite]);
 
   // Réservations actives par chambre (cancelled/no_show ne bloquent plus le planning).
+  // Horaire (check_in = check_out) : la case du jour ne s'affiche pas si on
+  // compare directement les dates (même piège que la contrainte anti-
+  // chevauchement en base, cf. schema.sql) — on étend "end" d'un jour pour
+  // que la réservation occupe sa journée dans la grille, comme greatest()
+  // côté SQL.
   const bookingsByRoom = useMemo(() => {
-    const map = new Map<string, { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string }[]>();
+    const map = new Map<string, { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string; isHourly: boolean; checkInAt: string | null; checkOutAt: string | null }[]>();
     for (const res of reservations) {
       for (const rr of res.reservation_rooms) {
         if (rr.status === "cancelled" || rr.status === "no_show") continue;
+        const isHourly = rr.billing_unit === "hour";
         const arr = map.get(rr.room_id) ?? [];
-        arr.push({ start: rr.check_in, end: rr.check_out, status: rr.status, reservationId: res.id, guestName: res.guest?.full_name ?? "—" });
+        arr.push({
+          start: rr.check_in, end: isHourly ? addDays(rr.check_in, 1) : rr.check_out, status: rr.status,
+          reservationId: res.id, guestName: res.guest?.full_name ?? "—", isHourly,
+          checkInAt: rr.check_in_at, checkOutAt: rr.check_out_at,
+        });
         map.set(rr.room_id, arr);
       }
     }
@@ -180,7 +190,7 @@ function ReservationsPage() {
 
 function RoomRow({ room, days, bookings, canWrite, onEmptyClick, onBookingClick }: {
   room: HotelRoom & { room_type?: any }; days: string[];
-  bookings: { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string }[];
+  bookings: { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string; isHourly: boolean; checkInAt: string | null; checkOutAt: string | null }[];
   canWrite: boolean;
   onEmptyClick: (date: string) => void;
   onBookingClick: (reservationId: string) => void;
@@ -203,12 +213,15 @@ function RoomRow({ room, days, bookings, canWrite, onEmptyClick, onBookingClick 
     } else {
       let span = 1;
       while (i + span < days.length && covers(days[i + span])?.reservationId === b.reservationId) span++;
+      const hourLabel = b.isHourly && b.checkInAt && b.checkOutAt
+        ? `${new Date(b.checkInAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}–${new Date(b.checkOutAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
+        : null;
       cells.push(
         <td key={days[i]} colSpan={span} className="border-b border-border/60 px-0.5 py-1">
           <button onClick={() => onBookingClick(b.reservationId)}
             className={cn("flex h-7 w-full items-center justify-center truncate rounded-md border px-1.5 text-[11px] font-semibold", STATUS_COLOR[b.status])}
-            title={`${b.guestName} — ${STATUS_LABEL[b.status]}`}>
-            {b.guestName}
+            title={`${b.guestName} — ${STATUS_LABEL[b.status]}${hourLabel ? ` — ${hourLabel}` : ""}`}>
+            {hourLabel ? `${hourLabel} · ${b.guestName}` : b.guestName}
           </button>
         </td>,
       );
@@ -235,36 +248,10 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const [checkOut, setCheckOut] = useState(addDays(defaultDate, 1));
   const { data: roomTypes = [] } = useHotelRoomTypes();
   const { data: rooms = [] } = useHotelRooms();
-  const { data: overlapping = [] } = useHotelReservations(checkIn, checkOut);
   const { data: corporateAccounts = [] } = useHotelCorporateAccounts();
   const { data: ratePlans = [] } = useHotelRatePlans();
   const { data: seasonalRates = [] } = useHotelSeasonalRates();
-
-  const bookedRoomIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const res of overlapping) for (const rr of res.reservation_rooms) {
-      if (rr.status === "cancelled" || rr.status === "no_show") continue;
-      if (checkIn < rr.check_out && checkOut > rr.check_in) set.add(rr.room_id);
-    }
-    return set;
-  }, [overlapping, checkIn, checkOut]);
-
-  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>(defaultRoomId ? [defaultRoomId] : []);
-  const [guestSearch, setGuestSearch] = useState("");
-  const [guestId, setGuestId] = useState<string | null>(null);
-  const [newGuestName, setNewGuestName] = useState("");
-  const [newGuestPhone, setNewGuestPhone] = useState("");
-  const [adults, setAdults] = useState(1);
-  const [children, setChildren] = useState(0);
-  const [channel, setChannel] = useState("direct");
   const [ratePlanId, setRatePlanId] = useState("");
-  const [corporateId, setCorporateId] = useState("");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const { data: guestResults = [] } = useHotelGuests(guestSearch);
-  const upsertGuest = useUpsertHotelGuest();
-  const create = useCreateHotelReservation();
 
   // Nuitée ET horaire (ZegHotel Phase 1) : billing_unit porté par la
   // formule tarifaire choisie — "Standard" (aucune formule) reste toujours
@@ -280,6 +267,52 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const hourlyHours = isHourly && checkOutAt && checkInAt
     ? Math.max(1, Math.ceil((new Date(checkOutAt).getTime() - new Date(checkInAt).getTime()) / 3_600_000))
     : 0;
+
+  // Fenêtre de recherche des chevauchements : pour une réservation horaire,
+  // checkOut === checkIn (forcé ci-dessus), donc interroger avec cette même
+  // borne raterait les réservations qui démarrent ce jour-là (cf. hotelHooks
+  // useHotelReservations, filtre check_in < rangeEnd) — on étend d'un jour,
+  // même trick que le greatest() de la contrainte SQL.
+  const overlapRangeEnd = checkOut > checkIn ? checkOut : addDays(checkIn, 1);
+  const { data: overlapping = [] } = useHotelReservations(checkIn, overlapRangeEnd);
+
+  const bookedRoomIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const res of overlapping) for (const rr of res.reservation_rooms) {
+      if (rr.status === "cancelled" || rr.status === "no_show") continue;
+      const rrEnd = rr.check_out > rr.check_in ? rr.check_out : addDays(rr.check_in, 1);
+      const dateOverlap = checkIn < rrEnd && overlapRangeEnd > rr.check_in;
+      if (!dateOverlap) continue;
+      // Chevauchement date à date confirmé — si les deux réservations sont
+      // horaires le même jour, encore falloir que les créneaux se croisent
+      // (deux passages horaires dans la même journée peuvent coexister).
+      if (isHourly && rr.billing_unit === "hour" && rr.check_in === checkIn && checkInAt && checkOutAt && rr.check_in_at && rr.check_out_at) {
+        const timeOverlap = checkInAt < rr.check_out_at && checkOutAt > rr.check_in_at;
+        if (!timeOverlap) continue;
+      }
+      set.add(rr.room_id);
+    }
+    return set;
+  }, [overlapping, checkIn, overlapRangeEnd, isHourly, checkInAt, checkOutAt]);
+
+  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>(defaultRoomId ? [defaultRoomId] : []);
+  const [guestSearch, setGuestSearch] = useState("");
+  const [guestId, setGuestId] = useState<string | null>(null);
+  const [selectedGuestName, setSelectedGuestName] = useState<string | null>(null);
+  const [addingGuest, setAddingGuest] = useState(false);
+  const [newGuestName, setNewGuestName] = useState("");
+  const [newGuestPhone, setNewGuestPhone] = useState("");
+  const [newGuestEmail, setNewGuestEmail] = useState("");
+  const [adults, setAdults] = useState(1);
+  const [children, setChildren] = useState(0);
+  const [channel, setChannel] = useState("direct");
+  const [corporateId, setCorporateId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: guestResults = [] } = useHotelGuests(guestSearch);
+  const upsertGuest = useUpsertHotelGuest();
+  const create = useCreateHotelReservation();
 
   const nights = Math.max(1, (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
   const roomOf = (id: string) => rooms.find((r) => r.id === id);
@@ -299,21 +332,35 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
 
   const inp = "w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
 
+  // Création immédiate (comme CustomerDialog côté ZegCaisse, app.caisse.tsx)
+  // plutôt que différée à la soumission finale : la réception voit tout de
+  // suite que le client est créé et peut vérifier son nom avant de
+  // continuer, au lieu de découvrir une éventuelle erreur seulement au clic
+  // sur "Créer la réservation".
+  const createAndSelectGuest = async () => {
+    setError(null);
+    try {
+      if (!newGuestName.trim()) throw new Error("Le nom du client est requis.");
+      const g = await upsertGuest.mutateAsync({
+        full_name: newGuestName.trim(),
+        phone: newGuestPhone.trim() || undefined,
+        email: newGuestEmail.trim() || undefined,
+      });
+      setGuestId(g.id); setSelectedGuestName(g.full_name);
+      setAddingGuest(false); setNewGuestName(""); setNewGuestPhone(""); setNewGuestEmail(""); setGuestSearch("");
+    } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
+  };
+
   const submit = async () => {
     setError(null);
     try {
-      let gId = guestId;
-      if (!gId) {
-        if (!newGuestName.trim()) throw new Error("Sélectionnez ou créez un client.");
-        const g = await upsertGuest.mutateAsync({ full_name: newGuestName.trim(), phone: newGuestPhone.trim() || undefined });
-        gId = g.id;
-      }
+      if (!guestId) throw new Error("Sélectionnez ou créez un client.");
       if (!selectedRoomIds.length) throw new Error("Sélectionnez au moins une chambre.");
       if (isHourly && checkInAt && checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
         throw new Error("L'heure de départ doit être après l'heure d'arrivée.");
       }
       const reservation = await create.mutateAsync({
-        guest_id: gId, check_in: checkIn, check_out: checkOut,
+        guest_id: guestId, check_in: checkIn, check_out: checkOut,
         rate_plan_id: ratePlanId || null, corporate_account_id: corporateId || null,
         channel, adults, children, notes: notes.trim() || undefined,
         // rate_amount = null quand la réception n'a pas touché le champ :
@@ -322,7 +369,16 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
         check_in_at: checkInAt, check_out_at: checkOutAt,
       });
       onCreated(reservation.id);
-    } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
+    } catch (e: any) {
+      // 23P01 = exclusion_violation (contraintes hotel_resv_rooms_excl /
+      // _hourly_excl, schema.sql) — la chambre a été réservée entre-temps
+      // par quelqu'un d'autre sur ce créneau ; message clair plutôt que le
+      // texte Postgres brut.
+      const message = e?.code === "23P01"
+        ? "Une des chambres sélectionnées vient d'être réservée sur ce créneau par quelqu'un d'autre. Rafraîchissez et réessayez."
+        : e?.message ?? "Erreur inconnue";
+      setError(message);
+    }
   };
 
   return (
@@ -359,8 +415,24 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Client *</span>
             {guestId ? (
               <div className="flex items-center justify-between rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
-                <span className="flex items-center gap-2"><User className="h-4 w-4 text-primary" /> {guestResults.find((g) => g.id === guestId)?.full_name ?? "Client sélectionné"}</span>
-                <button onClick={() => setGuestId(null)} className="text-xs text-muted-foreground hover:text-foreground">Changer</button>
+                <span className="flex items-center gap-2"><User className="h-4 w-4 text-primary" /> {selectedGuestName ?? "Client sélectionné"}</span>
+                <button onClick={() => { setGuestId(null); setSelectedGuestName(null); }} className="text-xs text-muted-foreground hover:text-foreground">Changer</button>
+              </div>
+            ) : addingGuest ? (
+              <div className="space-y-2 rounded-xl border border-border p-3">
+                <input value={newGuestName} autoFocus onChange={(e) => setNewGuestName(e.target.value)} placeholder="Nom *" className={inp} />
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={newGuestPhone} onChange={(e) => setNewGuestPhone(e.target.value)} placeholder="Téléphone" className={inp} />
+                  <input value={newGuestEmail} onChange={(e) => setNewGuestEmail(e.target.value)} placeholder="Email" className={inp} />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => { setAddingGuest(false); setNewGuestName(""); setNewGuestPhone(""); setNewGuestEmail(""); }}
+                    className="h-9 flex-1 rounded-xl border border-border bg-card text-xs font-semibold">Retour</button>
+                  <button onClick={createAndSelectGuest} disabled={!newGuestName.trim() || upsertGuest.isPending}
+                    className="flex h-9 flex-[2] items-center justify-center gap-1.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground disabled:opacity-40">
+                    {upsertGuest.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Créer et sélectionner
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-2">
@@ -368,17 +440,17 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
                 {guestSearch.trim() && guestResults.length > 0 && (
                   <div className="max-h-32 overflow-y-auto rounded-xl border border-border">
                     {guestResults.map((g) => (
-                      <button key={g.id} onClick={() => { setGuestId(g.id); setGuestSearch(""); }}
+                      <button key={g.id} onClick={() => { setGuestId(g.id); setSelectedGuestName(g.full_name); setGuestSearch(""); }}
                         className="block w-full px-3 py-2 text-left text-sm hover:bg-muted">
                         {g.full_name} {g.phone && <span className="text-xs text-muted-foreground">— {g.phone}</span>}
                       </button>
                     ))}
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <input value={newGuestName} onChange={(e) => setNewGuestName(e.target.value)} placeholder="Nouveau client : nom" className={inp} />
-                  <input value={newGuestPhone} onChange={(e) => setNewGuestPhone(e.target.value)} placeholder="Téléphone" className={inp} />
-                </div>
+                <button onClick={() => setAddingGuest(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2 text-xs font-semibold text-muted-foreground hover:border-primary hover:text-primary">
+                  <User className="h-3.5 w-3.5" /> Nouveau client
+                </button>
               </div>
             )}
           </div>

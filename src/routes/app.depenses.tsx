@@ -76,13 +76,13 @@ function DepensesPage() {
               </thead>
               <tbody>
                 {filtered.map((e) => (
-                  <tr key={e.id} className="border-t border-border/60 hover:bg-muted/40">
+                  <tr key={e.id} onClick={() => setEdit(e)} className="cursor-pointer border-t border-border/60 hover:bg-muted/40">
                     <td className="px-4 py-3 font-medium">{e.label}</td>
                     <td className="px-4 py-3"><span className="rounded-full bg-muted px-2 py-0.5 text-xs">{e.category ?? "—"}</span></td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{e.paid_at}</td>
                     <td className="px-4 py-3 text-xs">{e.method ?? "—"}</td>
                     <td className="tabular px-4 py-3 text-right font-bold text-destructive">-{formatXOF(Number(e.amount))}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button onClick={() => setEdit(e)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Edit3 className="h-4 w-4" /></button>
                         <button onClick={() => setDel(e)} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>

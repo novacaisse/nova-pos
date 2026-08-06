@@ -15,16 +15,22 @@ import { UserMenu } from "@/components/app/UserMenu";
 import { BottomNav } from "@/components/app/BottomNav";
 import { PwaInstallBanner } from "@/components/app/PwaInstallBanner";
 import { TrialBanner } from "@/components/app/TrialBanner";
+import { TrialExpiredModuleLock, TrialExpiredPopup, isAllowedWhenTrialExpired } from "@/components/app/TrialExpiredBlock";
+import { TrialPromoPopup } from "@/components/app/TrialPromoPopup";
 import { OnboardingFlow } from "@/components/app/OnboardingFlow";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useMyRole, useReconcilePendingSubscriptionPayments } from "@/lib/data/hooks";
+import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
+import { getTrialInfo } from "@/lib/trial";
 
 export const Route = createFileRoute("/app")({
   // Sans ce head() dédié, /app/* hérite du titre par défaut de __root.tsx
   // ("NovaCaisse — La caisse moderne…"), volontairement inchangé pour les
-  // pages publiques (landing) — l'espace connecté a besoin du sien.
-  head: () => ({ meta: [{ title: "ZegCaisse" }] }),
+  // pages publiques (landing) — l'espace connecté a besoin du sien. "zegOS"
+  // plutôt que "ZegCaisse" : /app/* couvre les 4 applications, pas
+  // seulement ZegCaisse (même PWA installable pour toutes, voir manifest).
+  head: () => ({ meta: [{ title: "zegOS" }] }),
   component: AppLayout,
 });
 
@@ -67,7 +73,11 @@ function AppLayout() {
     if (hotelOnlyOrg || hotelOnlyRole) { navigate({ to: "/app/hotel" }); return; }
     const restoOnlyOrg = activeApps.includes("resto") && !activeApps.includes("pos");
     const restoOnlyRole = myRole === "server" || myRole === "cook";
-    if (restoOnlyOrg || restoOnlyRole) navigate({ to: "/app/resto" });
+    if (restoOnlyOrg || restoOnlyRole) { navigate({ to: "/app/resto" }); return; }
+    // ZegERP réutilise les rôles stock/cashier (partagés avec ZegCaisse) —
+    // seul currentOrganization.app_module (source de vérité unique par
+    // organisation) permet de distinguer sans ambiguïté, pas le rôle.
+    if (currentOrganization.app_module === "erp") navigate({ to: "/app/erp" });
   }, [pathname, currentOrganization, shopLoading, myRole, navigate]);
 
   if (loading || !user) {
@@ -97,13 +107,27 @@ function AppLayout() {
     return <SuspendedScreen onSignOut={signOut} />;
   }
 
-  // ZegCaisse, ZegHôtel et ZegResto sont trois applications 100% autonomes
-  // (audit isolation ZegOS, Partie A ; étendu à ZegResto) — la recherche
-  // globale et le raccourci d'action rapide du header ne doivent jamais
-  // montrer du contenu ou des routes d'une autre application selon le
-  // contexte courant.
-  const inHotelContext = pathname.startsWith("/app/hotel");
-  const inRestoContext = pathname.startsWith("/app/resto");
+  // ZegCaisse, ZegHôtel, ZegResto et ZegERP sont quatre applications 100%
+  // autonomes — la recherche globale et le raccourci d'action rapide du
+  // header ne doivent jamais montrer du contenu ou des routes d'une autre
+  // application. Dérivé de organizations.app_module (une organisation = une
+  // seule app, source de vérité unique), PAS du préfixe d'URL : ce dernier
+  // ne matchait que /app/hotel|resto/*, jamais les routes partagées
+  // (/app/profil, /app/notifications, /app/nova, /app/abonnement...) — bug
+  // corrigé ici, une organisation ZegHotel/ZegResto/ZegERP y voyait le
+  // header ZegCaisse (recherche produits/ventes, bouton "PDV").
+  const appModule = currentOrganization?.app_module;
+  const inHotelContext = appModule === "hotel";
+  const inRestoContext = appModule === "resto";
+  const inErpContext = appModule === "erp";
+
+  // Au-delà de la lecture seule (useReadOnlyMode bloque déjà les actions
+  // d'écriture aux points d'entrée), l'essai/abonnement expiré verrouille
+  // maintenant les modules eux-mêmes : seuls le tableau de bord et
+  // Abonnement restent ouverts, partout où readOnly.reason est visible.
+  const { readOnly } = useReadOnlyMode();
+  const moduleLocked = readOnly && !isAllowedWhenTrialExpired(pathname);
+  const trial = getTrialInfo(currentOrganization);
 
   return (
     <SidebarProvider defaultOpen>
@@ -120,7 +144,9 @@ function AppLayout() {
               <SidebarTrigger className="hidden h-10 w-10 rounded-xl md:inline-flex" />
               <div className="hidden sm:block"><ShopSelector /></div>
               <div className="ml-2 hidden max-w-md flex-1 md:block">
-                {inHotelContext ? <HotelGlobalSearch /> : inRestoContext ? <RestoGlobalSearch /> : <GlobalSearch />}
+                {inHotelContext ? <HotelGlobalSearch /> : inRestoContext ? <RestoGlobalSearch />
+                  : inErpContext ? null /* pas encore de recherche globale ZegERP dédiée — masquée plutôt que d'interroger les tables ZegCaisse */
+                  : <GlobalSearch />}
               </div>
               <div className="ml-auto flex items-center gap-2">
                 {inHotelContext ? (
@@ -134,6 +160,12 @@ function AppLayout() {
                     className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
                     aria-label="Nouvelle commande">
                     <UtensilsCrossed className="h-4 w-4" /> Nouvelle commande
+                  </Link>
+                ) : inErpContext ? (
+                  <Link to="/app/erp/pos"
+                    className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:flex"
+                    aria-label="Aller au point de vente">
+                    <ShoppingCart className="h-4 w-4" /> POS
                   </Link>
                 ) : (
                   <Link to="/app/caisse"
@@ -151,7 +183,7 @@ function AppLayout() {
           </div>
 
           <main className="flex-1 min-w-0 pb-16 md:pb-0">
-            <Outlet />
+            {moduleLocked ? <TrialExpiredModuleLock /> : <Outlet />}
           </main>
         </div>
 
@@ -159,6 +191,8 @@ function AppLayout() {
           <BottomNav />
         </div>
         <PwaInstallBanner />
+        {readOnly && <TrialExpiredPopup organizationId={currentOrganization?.id} />}
+        {trial.onTrial && !trial.expired && <TrialPromoPopup organizationId={currentOrganization?.id} daysLeft={trial.daysLeft} />}
       </div>
     </SidebarProvider>
   );

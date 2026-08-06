@@ -21,7 +21,7 @@ function InscriptionPage() {
   const { signUp } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", phone: "" });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [k]: e.target.value });
@@ -33,7 +33,7 @@ function InscriptionPage() {
     setError(null);
     setLoading(true);
 
-    const { error: signErr } = await signUp(form.email.trim(), form.password, form.name.trim());
+    const { error: signErr } = await signUp(form.email.trim(), form.password, form.name.trim(), form.phone.trim());
     if (signErr) { setError(signErr); setLoading(false); return; }
 
     navigate({ to: "/app" });
@@ -53,6 +53,7 @@ function InscriptionPage() {
 
           <div className="space-y-3">
             <Field label="Nom complet *" value={form.name} onChange={set("name")} />
+            <Field label="Téléphone personnel" type="tel" value={form.phone} onChange={set("phone")} placeholder="+229 …" />
             <Field label="Email *" type="email" value={form.email} onChange={set("email")} />
             <Field label="Mot de passe *" type="password" value={form.password} onChange={set("password")} placeholder="6 caractères minimum" />
           </div>

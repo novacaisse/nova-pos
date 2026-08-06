@@ -17,6 +17,7 @@ import {
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
 import { THERMAL_CSS, renderA4Document, openPrintWindow } from "@/lib/printDoc";
+import { BarcodeScannerDialog } from "@/components/app/BarcodeScannerDialog";
 
 export const Route = createFileRoute("/app/caisse")({
   validateSearch: (search: Record<string, unknown>): { holdId?: string } => ({
@@ -85,6 +86,12 @@ function CaissePage() {
   // Bascule Bloc 15 : activé par défaut, comportement inchangé sauf si le
   // owner désactive explicitement la remise pour le rôle Caissier.
   const canDiscount = myRole !== "cashier" || perms.cashier_can_discount;
+  // Paramètres > Vente & caisse : par défaut la vente d'un article à 0 en
+  // stock reste bloquée (apply_stock_movement(), migration 073) — activé
+  // ici, le PDV laisse l'ajouter et encaisser, le SQL laisse le stock
+  // passer négatif.
+  const { data: shopSettings } = useShopSettings();
+  const allowOversell = shopSettings?.data.allow_oversell ?? false;
 
   // Entrée directe depuis Ventes ("Modifier" sur un brouillon) : ?holdId=
   // reprend ce ticket précis puis nettoie l'URL pour ne pas re-déclencher
@@ -307,7 +314,9 @@ function CaissePage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-              {filteredProducts.map((p) => <ProductCard key={p.id} product={p} onAdd={() => addProduct(p)} />)}
+              {filteredProducts.map((p) => (
+                <ProductCard key={p.id} product={p} allowOversell={allowOversell} onAdd={() => addProduct(p)} />
+              ))}
             </div>
           )}
         </div>
@@ -489,8 +498,12 @@ function CaissePage() {
         {showScanner && (
           <BarcodeScannerDialog onClose={() => setShowScanner(false)} onDetect={(code) => {
             const p = products.find((pr) => pr.barcode === code || pr.sku === code);
-            if (p) { addProduct(p); setShowScanner(false); }
-            else alert(`Aucun produit ne correspond au code « ${code} ».`);
+            if (!p) { alert(`Aucun produit ne correspond au code « ${code} ».`); return; }
+            if (p.stock <= 0 && !allowOversell) {
+              alert("Rupture de stock — activez la vente en rupture dans Paramètres > Vente & caisse pour forcer l'ajout.");
+              return;
+            }
+            addProduct(p); setShowScanner(false);
           }} />
         )}
         {showRecentSales && (
@@ -517,14 +530,17 @@ function CategoryPill({ label, active, onClick, count }: { label: string; active
   );
 }
 
-function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () => void }) {
+function ProductCard({ product, allowOversell, onAdd }: { product: ProductWithStock; allowOversell: boolean; onAdd: () => void }) {
   const formatXOF = useFormatMoney();
   const outOfStock = product.stock <= 0;
   const low = !outOfStock && product.stock <= product.low_stock_threshold;
+  const blocked = outOfStock && !allowOversell;
   return (
-    <motion.button whileTap={{ scale: 0.96 }} onClick={onAdd}
-      className={cn("group flex flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all hover:shadow-elegant",
-        outOfStock ? "border-destructive/50 hover:border-destructive" : "border-border hover:border-primary/40")}>
+    <motion.button whileTap={{ scale: blocked ? 1 : 0.96 }} onClick={blocked ? undefined : onAdd} disabled={blocked}
+      title={blocked ? "Rupture de stock — activez la vente en rupture dans Paramètres > Vente & caisse pour forcer l'ajout." : undefined}
+      className={cn("group flex flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all",
+        blocked ? "cursor-not-allowed opacity-70" : "hover:shadow-elegant",
+        outOfStock ? "border-destructive/50" : "border-border hover:border-primary/40")}>
       <div className="relative grid aspect-square place-items-center bg-gradient-to-br from-muted to-background text-5xl sm:text-6xl">
         {product.image_url ? (
           <img src={product.image_url} alt={product.name} className={cn("h-full w-full object-cover", outOfStock && "opacity-50 grayscale")} />
@@ -533,7 +549,7 @@ function ProductCard({ product, onAdd }: { product: ProductWithStock; onAdd: () 
         )}
         {outOfStock ? (
           <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-destructive px-2 py-0.5 text-[10px] font-bold text-destructive-foreground">
-            <AlertTriangle className="h-3 w-3" /> Rupture
+            <AlertTriangle className="h-3 w-3" /> {allowOversell ? "Rupture · vente autorisée" : "Rupture"}
           </span>
         ) : low ? (
           <span className="absolute right-2 top-2 rounded-full bg-warning/90 px-2 py-0.5 text-[10px] font-bold text-warning-foreground">Stock {product.stock}</span>
@@ -861,6 +877,14 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
     setTimeout(() => { w.print(); w.close(); }, 200);
   };
 
+  // Paramètres > Vente & caisse > Impression automatique — déclenche le
+  // même print() qu'un clic manuel, une seule fois par reçu (le ticket
+  // reste affiché derrière la fenêtre d'impression, l'utilisateur peut
+  // toujours cliquer "Imprimer le reçu" pour une seconde copie).
+  useEffect(() => {
+    if (settings?.data.auto_print_receipt) print();
+  }, [receipt.ticket]);
+
   return (
     <DialogShell onClose={onClose} maxWidth="max-w-sm">
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
@@ -909,87 +933,6 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
         <button onClick={print} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:opacity-90">
           <Printer className="h-4 w-4" /> Imprimer le reçu
         </button>
-      </div>
-    </DialogShell>
-  );
-}
-
-/* ============ Scanner code-barres (BarcodeDetector natif) ============ */
-// Le bouton scanner n'avait jusqu'ici aucun gestionnaire — remplacé par un
-// vrai scan caméra via l'API native BarcodeDetector (Chrome/Edge/Android,
-// couvre l'immense majorité du matériel POS/mobile visé ici). Pas de
-// nouvelle dépendance npm ajoutée pour ça : sur un navigateur qui ne
-// supporte pas l'API (Safari/iOS notamment), un message clair oriente vers
-// la recherche texte plutôt que de planter silencieusement.
-function BarcodeScannerDialog({ onClose, onDetect }: { onClose: () => void; onDetect: (code: string) => void }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const supported = typeof window !== "undefined" && "BarcodeDetector" in window;
-
-  useEffect(() => {
-    if (!supported) return;
-    let stream: MediaStream | null = null;
-    let raf = 0;
-    let stopped = false;
-    const detector = new (window as any).BarcodeDetector({
-      formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
-    });
-
-    const tick = async () => {
-      if (stopped || !videoRef.current) return;
-      try {
-        const codes = await detector.detect(videoRef.current);
-        if (codes.length > 0) {
-          stopped = true;
-          onDetect(codes[0].rawValue);
-          return;
-        }
-      } catch {
-        // Frame pas encore prête ou erreur ponctuelle de décodage — on continue.
-      }
-      raf = requestAnimationFrame(tick);
-    };
-
-    (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-        raf = requestAnimationFrame(tick);
-      } catch (e: any) {
-        setError(e?.message ?? "Impossible d'accéder à la caméra.");
-      }
-    })();
-
-    return () => {
-      stopped = true;
-      cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, [supported, onDetect]);
-
-  return (
-    <DialogShell onClose={onClose} maxWidth="max-w-sm">
-      <div className="flex items-center justify-between border-b border-border px-5 py-4">
-        <div className="font-display text-lg font-bold">Scanner un code-barres</div>
-        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
-      </div>
-      <div className="p-5">
-        {!supported ? (
-          <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">
-            Le scan par caméra n'est pas pris en charge par ce navigateur. Utilisez la recherche par nom, SKU ou code-barres à la place.
-          </div>
-        ) : error ? (
-          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">{error}</div>
-        ) : (
-          <div className="relative overflow-hidden rounded-xl bg-black">
-            <video ref={videoRef} muted playsInline className="w-full" />
-            <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-primary/80" />
-          </div>
-        )}
-        <p className="mt-3 text-center text-xs text-muted-foreground">Visez le code-barres du produit avec la caméra.</p>
       </div>
     </DialogShell>
   );

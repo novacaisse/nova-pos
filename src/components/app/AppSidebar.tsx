@@ -121,9 +121,9 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Maintenance", url: "/app/hotel/maintenance", icon: "Wrench" },
     { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
     { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
-    { title: "Point de vente interne", url: "/app/hotel/pos-interne", icon: "Coffee" },
+    { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
+    { title: "Point de vente", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
-    { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
   ],
   // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu ;
   // Phase 2 : Commandes + Cuisine) — réservations/rapports rejoignent ce
@@ -207,14 +207,14 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // Comptes entreprise (ZegHotel Phase 4, migration 031) : housekeeping
   // n'a RLS-wise aucun accès (données financières hors de son périmètre).
   "/app/hotel/corporate": ["housekeeping"],
+  // Produits & Stock : lecture ouverte à tout membre (products_select),
+  // écriture réservée par has_module_permission('produits') — housekeeping
+  // masqué en cohérence avec les autres modules hors de son périmètre.
+  "/app/hotel/produits": ["housekeeping"],
   // Point de vente interne (ZegHotel Phase 7, migration 033) :
   // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
   // front_desk — housekeeping/accountant masqués ici en cohérence.
   "/app/hotel/pos-interne": ["housekeeping", "accountant"],
-  // Canaux de distribution (ZegHotel Phase 8, migration 034) : hotel_channels_all
-  // n'accorde qu'owner/manager (table existante depuis 020g) — masqué pour
-  // les autres rôles hôtel en cohérence.
-  "/app/hotel/canaux": ["housekeeping", "accountant", "front_desk"],
   // ZegResto : le Cuisinier n'a accès qu'au KDS (/app/resto/cuisine,
   // Phase 2) — masqué de tout le reste de la nav resto. Le Serveur a accès
   // au plan de salle et à la prise de commande mais pas au menu, aux
@@ -299,9 +299,13 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   "/app/hotel/maintenance": "hotel_maintenance",
   "/app/hotel/clients": "hotel_clients",
   "/app/hotel/corporate": "hotel_corporate",
+  // "produits" (pas un module hôtel dédié) : products/categories sont des
+  // tables partagées avec ZegCaisse, gardées par ce même module_key
+  // (has_module_permission ne filtre pas par app_module) — même clé que
+  // POS_MODULE_FOR_URL ci-dessus.
+  "/app/hotel/produits": "produits",
   "/app/hotel/pos-interne": "hotel_pos_interne",
   "/app/hotel/rapports": "hotel_rapports",
-  "/app/hotel/canaux": "hotel_canaux",
   "/app/hotel/parametres": "hotel_parametres",
 };
 // Idem ZegResto (Équipe Phase D-2, migrations 068/069).

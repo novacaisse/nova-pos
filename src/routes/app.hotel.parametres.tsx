@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Store, Coins, Plus, BedDouble } from "lucide-react";
+import { Store, Coins, Plus, BedDouble, Save, Wallet } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { OrgIdentityTab } from "@/components/app/OrgIdentityTab";
 import { HotelTarificationTab } from "@/components/app/HotelTarificationTab";
-import { AddOrganizationDialog } from "@/components/app/AddOrganizationDialog";
+import { AddOrganizationDialog, CURRENCIES } from "@/components/app/AddOrganizationDialog";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
-import { useMyRole, useProvisionOrganization } from "@/lib/data/hooks";
+import { useMyRole, useProvisionOrganization, useUpdateShop } from "@/lib/data/hooks";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/hotel/parametres")({
@@ -23,15 +23,22 @@ export const Route = createFileRoute("/app/hotel/parametres")({
 
 function HotelParametresPage() {
   const { openAdd } = Route.useSearch();
-  const [tab, setTab] = useState<"etablissement" | "tarification">("etablissement");
-  const { organizations } = useOrganization();
+  const [tab, setTab] = useState<"etablissement" | "tarification" | "devise">("etablissement");
+  const { organizations, currentOrganization } = useOrganization();
   const { data: myRole } = useMyRole();
+  const canManage = myRole === "owner" || myRole === "manager";
   const [showAddShop, setShowAddShop] = useState(false);
   const createShop = useProvisionOrganization();
+  const updateShop = useUpdateShop();
+  const [currency, setCurrency] = useState("XOF");
 
   useEffect(() => {
     if (openAdd) { setTab("etablissement"); setShowAddShop(true); }
   }, [openAdd]);
+
+  useEffect(() => {
+    if (currentOrganization) setCurrency(currentOrganization.currency);
+  }, [currentOrganization]);
 
   // Seuls les établissements ZegHotel du compte — jamais les boutiques
   // ZegCaisse, même si elles partagent le même propriétaire (isolation).
@@ -47,6 +54,7 @@ function HotelParametresPage() {
             {([
               { k: "etablissement", label: "Établissement", icon: Store },
               { k: "tarification", label: "Tarification", icon: Coins },
+              { k: "devise", label: "Devise", icon: Wallet },
             ] as const).map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
                 className={cn("flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -84,6 +92,30 @@ function HotelParametresPage() {
             </>
           )}
           {tab === "tarification" && <HotelTarificationTab />}
+          {tab === "devise" && (
+            <div className="rounded-2xl border border-border bg-card p-6">
+              <h2 className="mb-4 font-display text-lg font-bold">Devise</h2>
+              <p className="mb-4 text-xs text-muted-foreground">
+                Devise principale de l'établissement (abonnement, sélecteur d'organisation). Pour une devise
+                secondaire affichée sur les factures, voir Tarification &gt; Taxe de séjour &amp; devise secondaire.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Devise principale</div>
+                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={!canManage}
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-60">
+                    {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+              </div>
+              {canManage && (
+                <button onClick={() => updateShop.mutate({ currency })} disabled={updateShop.isPending}
+                  className="mt-6 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                  <Save className="h-4 w-4" /> Enregistrer
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

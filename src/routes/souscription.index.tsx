@@ -1,14 +1,21 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, Loader2, Smartphone, ArrowRight, AlertTriangle } from "lucide-react";
+import { Check, Loader2, Smartphone, ArrowRight, AlertTriangle, Sparkles } from "lucide-react";
 import { invokeFn } from "@/lib/data/invokeFn";
 import { BrandLogo } from "@/components/app/BrandLogo";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useProfile, formatMoney } from "@/lib/data/hooks";
 import { usePlans } from "@/lib/data/adminHooks";
+import { getTrialInfo } from "@/lib/trial";
 import { cn } from "@/lib/utils";
+
+// Doit rester identique à TRIAL_DISCOUNT côté Edge Function
+// (create-subscription-payment) — purement pour l'affichage ici, le
+// serveur recalcule et applique la vraie réduction indépendamment de ce
+// que le client montre ou envoie.
+const TRIAL_DISCOUNT = 5000;
 
 type SouscriptionSearch = { plan?: string };
 
@@ -59,7 +66,10 @@ function SouscriptionPage() {
   }, [appPlans, planFromUrl, planId]);
 
   const plan = useMemo(() => appPlans.find((p) => p.id === planId) ?? null, [appPlans, planId]);
-  const total = plan ? (period === "mensuel" ? plan.price_month : plan.price_year) : 0;
+  const basePrice = plan ? (period === "mensuel" ? plan.price_month : plan.price_year) : 0;
+  const trial = getTrialInfo(currentOrganization);
+  const discount = trial.onTrial && !trial.expired ? Math.min(TRIAL_DISCOUNT, basePrice) : 0;
+  const total = basePrice - discount;
 
   const launchPayment = async () => {
     if (!currentOrganization || !plan || !phone.trim() || !fullName.trim()) return;
@@ -163,11 +173,23 @@ function SouscriptionPage() {
                   </div>
                 </div>
 
-                <div className="mt-6 rounded-2xl bg-muted/60 p-5">
+                {discount > 0 && (
+                  <div className="mt-5 flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs text-primary">
+                    <Sparkles className="h-4 w-4 shrink-0" />
+                    <span><b>-{formatMoney(discount, plan.currency)}</b> appliqués automatiquement — offre valable pendant votre essai gratuit, {trial.daysLeft <= 1 ? "dernier jour" : `encore ${trial.daysLeft} jours`}.</span>
+                  </div>
+                )}
+                <div className="mt-3 rounded-2xl bg-muted/60 p-5">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{plan.name} · {period}</span>
-                    <span className="tabular font-semibold">{formatMoney(total, plan.currency)}</span>
+                    <span className="tabular font-semibold">{formatMoney(basePrice, plan.currency)}</span>
                   </div>
+                  {discount > 0 && (
+                    <div className="mt-1 flex items-center justify-between text-sm text-primary">
+                      <span>Réduction essai gratuit</span>
+                      <span className="tabular font-semibold">-{formatMoney(discount, plan.currency)}</span>
+                    </div>
+                  )}
                   <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3 font-display text-lg font-bold">
                     <span>Total à payer</span>
                     <span className="tabular text-primary">{formatMoney(total, plan.currency)}</span>
@@ -209,6 +231,11 @@ function SouscriptionPage() {
                 </label>
 
                 <div className="mt-5 rounded-2xl bg-muted/60 p-4 text-sm">
+                  {discount > 0 && (
+                    <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-primary">
+                      <Sparkles className="h-3.5 w-3.5" /> Réduction essai gratuit incluse (-{formatMoney(discount, plan.currency)})
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Montant</span>
                     <span className="tabular font-display font-bold text-primary">{formatMoney(total, plan.currency)}</span>

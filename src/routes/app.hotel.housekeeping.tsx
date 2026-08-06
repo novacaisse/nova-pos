@@ -1,9 +1,11 @@
 // Maintenance sortie en module propre (ZegHotel Phase 3, /app/hotel/maintenance) —
 // cet écran ne gère plus que les tâches de ménage du jour.
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 import { Sparkle, Loader2, CheckCircle2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useMyRole } from "@/lib/data/hooks";
+import { playKdsSound } from "@/lib/kdsSound";
 import {
   useHotelHousekeepingTasks, useGenerateHousekeepingTasks, useUpdateHousekeepingTaskStatus,
   type HousekeepingTaskStatus,
@@ -28,13 +30,23 @@ function HousekeepingPage() {
 
   const pendingCount = tasks.filter((t) => t.status !== "done").length;
 
+  const knownTaskIds = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (loadingTasks) return;
+    const ids = new Set(tasks.map((t) => t.id));
+    if (knownTaskIds.current && [...ids].some((id) => !knownTaskIds.current!.has(id))) {
+      playKdsSound("chime", 0.5);
+    }
+    knownTaskIds.current = ids;
+  }, [tasks, loadingTasks]);
+
   return (
     <div>
-      <PageHeader title="Housekeeping" subtitle="Tâches de ménage du jour"
+      <PageHeader title="Housekeeping" subtitle="Tâches de ménage du jour — se rafraîchit automatiquement chaque minute"
         actions={canManage && (
           <button onClick={() => generate.mutate(today)} disabled={generate.isPending}
             className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90 disabled:opacity-60">
-            {generate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkle className="h-4 w-4" />} Générer les tâches du jour
+            {generate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkle className="h-4 w-4" />} Regénérer (filet de sécurité)
           </button>
         )}
       />

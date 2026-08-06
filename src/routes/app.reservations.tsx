@@ -6,12 +6,13 @@
 // main propre d'un ticket en attente).
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, X, Loader2, AlertCircle, Search, Trash2, CheckCircle2, XCircle, CalendarRange } from "lucide-react";
+import { Plus, X, Loader2, AlertCircle, Search, Trash2, CheckCircle2, XCircle, CalendarRange, Banknote, Smartphone, CreditCard } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
   useReservations, useUpsertReservation, useUpdateReservationStatus, useDeleteReservation,
   useCustomers, useProducts, useMyRole, useFormatMoney,
-  type Reservation, type ReservationItem, type ReservationStatus, type Customer,
+  useReservationPayments, useAddReservationPayment,
+  type Reservation, type ReservationItem, type ReservationStatus, type Customer, type Sale,
 } from "@/lib/data/hooks";
 import { cn, selectOnFocus } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ function ReservationsPage() {
   const updateStatus = useUpdateReservationStatus();
   const remove = useDeleteReservation();
   const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState<Reservation | null>(null);
   const [filter, setFilter] = useState<ReservationStatus | "all">("pending");
 
   const filtered = filter === "all" ? reservations : reservations.filter((r) => r.status === filter);
@@ -69,7 +71,8 @@ function ReservationsPage() {
               {filtered.map((r) => {
                 const reste = Math.max(0, Number(r.total) - Number(r.deposit));
                 return (
-                  <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div key={r.id} onClick={() => setViewing(r)}
+                    className="flex cursor-pointer flex-wrap items-center justify-between gap-3 py-3 hover:bg-muted/40">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <div className="font-semibold">{r.customer_name}</div>
@@ -85,7 +88,7 @@ function ReservationsPage() {
                       <div className="tabular text-xs text-muted-foreground">Avance {formatXOF(Number(r.deposit))}{reste > 0 && ` · Reste ${formatXOF(reste)}`}</div>
                     </div>
                     {canManage && r.status === "pending" && (
-                      <div className="flex shrink-0 items-center gap-1.5">
+                      <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => updateStatus.mutate({ id: r.id, status: "fulfilled" })} title="Marquer honorée"
                           className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-success/10 hover:text-success"><CheckCircle2 className="h-4 w-4" /></button>
                         <button onClick={() => updateStatus.mutate({ id: r.id, status: "cancelled" })} title="Annuler"
@@ -93,7 +96,7 @@ function ReservationsPage() {
                       </div>
                     )}
                     {canManage && r.status !== "pending" && (
-                      <button onClick={() => { if (confirm("Supprimer cette réservation ?")) remove.mutate(r.id); }}
+                      <button onClick={(e) => { e.stopPropagation(); if (confirm("Supprimer cette réservation ?")) remove.mutate(r.id); }}
                         className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
                     )}
                   </div>
@@ -104,6 +107,140 @@ function ReservationsPage() {
         </div>
       </div>
       {creating && <ReservationDialog onClose={() => setCreating(false)} />}
+      {viewing && (
+        <ReservationViewDialog
+          reservation={viewing}
+          canManage={canManage}
+          onClose={() => setViewing(null)}
+          onMarkFulfilled={() => { updateStatus.mutate({ id: viewing.id, status: "fulfilled" }); setViewing(null); }}
+          onCancel={() => { updateStatus.mutate({ id: viewing.id, status: "cancelled" }); setViewing(null); }}
+          onDelete={() => { if (confirm("Supprimer cette réservation ?")) { remove.mutate(viewing.id); setViewing(null); } }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReservationViewDialog({ reservation: r, canManage, onClose, onMarkFulfilled, onCancel, onDelete }: {
+  reservation: Reservation; canManage: boolean; onClose: () => void;
+  onMarkFulfilled: () => void; onCancel: () => void; onDelete: () => void;
+}) {
+  const formatXOF = useFormatMoney();
+  const reste = Math.max(0, Number(r.total) - Number(r.deposit));
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <div className="font-display text-lg font-bold">{r.customer_name}</div>
+            <div className="text-xs text-muted-foreground">{r.reference}</div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-3 p-5 text-sm">
+          <div className="flex items-center gap-2">
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase", STATUS_CLASS[r.status])}>{STATUS_LABEL[r.status]}</span>
+            <span className="text-xs text-muted-foreground">Retrait le {new Date(r.reservation_date).toLocaleDateString("fr-FR")}</span>
+          </div>
+          {r.customer_phone && <div className="flex justify-between"><span className="text-muted-foreground">Téléphone</span><span>{r.customer_phone}</span></div>}
+          <div className="space-y-1.5 rounded-xl border border-border p-3">
+            {r.items.map((it, i) => (
+              <div key={i} className="flex justify-between text-xs">
+                <span>{it.name} × {it.quantity}</span><span className="font-semibold">{formatXOF(it.quantity * it.unit_price)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-bold">{formatXOF(Number(r.total))}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Versé à ce jour</span><span>{formatXOF(Number(r.deposit))}</span></div>
+          {reste > 0 && <div className="flex justify-between text-warning"><span>Reste dû</span><span className="font-bold">{formatXOF(reste)}</span></div>}
+
+          {canManage && r.status === "pending" && <InstallmentPayments reservation={r} reste={reste} />}
+        </div>
+        {canManage && (
+          <div className="flex gap-2 border-t border-border p-3">
+            {r.status === "pending" ? (
+              <>
+                <button onClick={onCancel} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-semibold text-destructive hover:bg-destructive/10">
+                  <XCircle className="h-4 w-4" /> Annuler
+                </button>
+                <button onClick={onMarkFulfilled} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:opacity-90">
+                  <CheckCircle2 className="h-4 w-4" /> Marquer honorée
+                </button>
+              </>
+            ) : (
+              <button onClick={onDelete} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-semibold text-destructive hover:bg-destructive/10">
+                <Trash2 className="h-4 w-4" /> Supprimer
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const INSTALLMENT_METHODS: { k: Sale["payment_method"]; label: string; icon: typeof Banknote }[] = [
+  { k: "cash", label: "Espèces", icon: Banknote },
+  { k: "mobile_money", label: "Mobile Money", icon: Smartphone },
+  { k: "card", label: "Carte", icon: CreditCard },
+];
+
+// Paiements échelonnés (migration 074) : reservations.deposit reste le
+// total versé (somme des installments), reservation_payments journalise
+// chaque versement individuel — historique affiché ici.
+function InstallmentPayments({ reservation, reste }: { reservation: Reservation; reste: number }) {
+  const formatXOF = useFormatMoney();
+  const { data: payments = [], isLoading } = useReservationPayments(reservation.id);
+  const addPayment = useAddReservationPayment();
+  const [amount, setAmount] = useState(reste);
+  const [method, setMethod] = useState<Sale["payment_method"]>("cash");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    try {
+      await addPayment.mutateAsync({ reservationId: reservation.id, amount, method });
+      setAmount(0);
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur enregistrement du paiement.");
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-border p-3">
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Paiements échelonnés</div>
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement…</div>
+      ) : payments.length > 0 && (
+        <div className="space-y-1">
+          {payments.map((p) => (
+            <div key={p.id} className="flex justify-between text-xs text-muted-foreground">
+              <span>{new Date(p.created_at).toLocaleDateString("fr-FR")}</span>
+              <span className="font-semibold text-foreground">{formatXOF(Number(p.amount))}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {reste > 0 && (
+        <div className="space-y-2 pt-1">
+          <div className="flex gap-2">
+            <input type="number" onFocus={selectOnFocus} min={1} max={reste} value={amount || ""}
+              onChange={(e) => setAmount(Number(e.target.value) || 0)}
+              className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-sm" placeholder="Montant" />
+            {INSTALLMENT_METHODS.map((m) => (
+              <button key={m.k} type="button" onClick={() => setMethod(m.k)}
+                className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg border", method === m.k ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground")}>
+                <m.icon className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
+          {error && <div className="text-xs text-destructive">{error}</div>}
+          <button onClick={submit} disabled={amount <= 0 || amount > reste || addPayment.isPending}
+            className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-primary text-xs font-bold text-primary-foreground disabled:opacity-40">
+            {addPayment.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Enregistrer le versement
+          </button>
+        </div>
+      )}
     </div>
   );
 }

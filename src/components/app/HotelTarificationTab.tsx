@@ -3,7 +3,7 @@
 // base, grilles saisonnières, plans tarifaires, taxe de séjour, devise
 // secondaire) et les comptes entreprise, sans dépendre du support.
 import { useState } from "react";
-import { Plus, Trash2, Loader2, Save, Building2 } from "lucide-react";
+import { Plus, Trash2, Loader2, Save, Building2, Ban } from "lucide-react";
 import { useFormatMoney } from "@/lib/data/hooks";
 import { selectOnFocus } from "@/lib/utils";
 import {
@@ -12,6 +12,7 @@ import {
   useHotelRatePlans, useUpsertHotelRatePlan, useDeleteHotelRatePlan,
   useHotelSettings, useUpdateHotelSettings,
   useHotelCorporateAccounts, useUpsertHotelCorporateAccount, useDeleteHotelCorporateAccount,
+  useHotelRateRestrictions, useUpsertHotelRateRestriction, useDeleteHotelRateRestriction,
 } from "@/lib/data/hotelHooks";
 
 const inp = "w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
@@ -52,6 +53,18 @@ export function HotelTarificationTab() {
   const upsertCorporate = useUpsertHotelCorporateAccount();
   const deleteCorporate = useDeleteHotelCorporateAccount();
   const [newCorporate, setNewCorporate] = useState({ name: "", contact_name: "", contact_email: "", negotiated_discount_pct: 0 });
+
+  // Restrictions de vente (hotel_check_rate_restrictions(), migration 027)
+  // — déjà appliquées côté serveur à la création d'une réservation, mais
+  // jusqu'ici sans aucun écran pour les configurer (hooks prêts dans
+  // hotelHooks.ts, jamais branchés). room_type_id vide = s'applique à tous
+  // les types de chambre.
+  const { data: restrictions = [] } = useHotelRateRestrictions();
+  const upsertRestriction = useUpsertHotelRateRestriction();
+  const deleteRestriction = useDeleteHotelRateRestriction();
+  const [newRestriction, setNewRestriction] = useState({
+    room_type_id: "", start_date: "", end_date: "", min_stay: 0, stop_sell: false, closed_to_arrival: false,
+  });
 
   if (roomTypes.length === 0) {
     return (
@@ -193,6 +206,50 @@ export function HotelTarificationTab() {
             <input type="number" onFocus={selectOnFocus} placeholder="Remise %" value={newCorporate.negotiated_discount_pct} onChange={(e) => setNewCorporate((s) => ({ ...s, negotiated_discount_pct: Number(e.target.value) }))} className={inp} />
             <button disabled={!newCorporate.name.trim() || upsertCorporate.isPending}
               onClick={() => { upsertCorporate.mutate(newCorporate); setNewCorporate({ name: "", contact_name: "", contact_email: "", negotiated_discount_pct: 0 }); }}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-4 w-4" /></button>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-border bg-card p-6">
+        <h2 className="mb-1 flex items-center gap-2 font-display text-lg font-bold"><Ban className="h-5 w-5 text-primary" /> Restrictions de vente</h2>
+        <p className="mb-4 text-xs text-muted-foreground">
+          Séjour minimum, stop-vente ou fermeture aux arrivées sur une période — appliquées automatiquement à la
+          création d'une réservation. Laissez « Tous types » pour couvrir toute la propriété.
+        </p>
+        <div className="mb-3 space-y-2">
+          {restrictions.length === 0 && <div className="text-sm text-muted-foreground">Aucune restriction active.</div>}
+          {restrictions.map((r) => (
+            <div key={r.id} className="flex items-center justify-between rounded-xl border border-border/60 p-3 text-sm">
+              <span>
+                {roomTypes.find((t) => t.id === r.room_type_id)?.name ?? "Tous types"} · {new Date(r.start_date).toLocaleDateString("fr-FR")} → {new Date(r.end_date).toLocaleDateString("fr-FR")}
+                {r.min_stay ? ` · min. ${r.min_stay} nuit${r.min_stay > 1 ? "s" : ""}` : ""}
+                {r.stop_sell && " · stop-vente"}
+                {r.closed_to_arrival && " · fermé à l'arrivée"}
+              </span>
+              <button onClick={() => deleteRestriction.mutate(r.id)} className="text-destructive hover:opacity-70"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+          <select value={newRestriction.room_type_id} onChange={(e) => setNewRestriction((s) => ({ ...s, room_type_id: e.target.value }))} className={inp}>
+            <option value="">Tous types</option>{roomTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <input type="date" value={newRestriction.start_date} onChange={(e) => setNewRestriction((s) => ({ ...s, start_date: e.target.value }))} className={inp} />
+          <input type="date" value={newRestriction.end_date} onChange={(e) => setNewRestriction((s) => ({ ...s, end_date: e.target.value }))} className={inp} />
+          <input type="number" onFocus={selectOnFocus} min={0} placeholder="Séjour min. (nuits)" value={newRestriction.min_stay}
+            onChange={(e) => setNewRestriction((s) => ({ ...s, min_stay: Number(e.target.value) }))} className={inp} />
+          <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={newRestriction.stop_sell} onChange={(e) => setNewRestriction((s) => ({ ...s, stop_sell: e.target.checked }))} /> Stop-vente</label>
+          <div className="flex gap-2">
+            <label className="flex flex-1 items-center gap-1.5 text-xs"><input type="checkbox" checked={newRestriction.closed_to_arrival} onChange={(e) => setNewRestriction((s) => ({ ...s, closed_to_arrival: e.target.checked }))} /> Fermé arrivée</label>
+            <button disabled={!newRestriction.start_date || !newRestriction.end_date || upsertRestriction.isPending}
+              onClick={() => {
+                upsertRestriction.mutate({
+                  room_type_id: newRestriction.room_type_id || null, start_date: newRestriction.start_date, end_date: newRestriction.end_date,
+                  min_stay: newRestriction.min_stay || null, stop_sell: newRestriction.stop_sell, closed_to_arrival: newRestriction.closed_to_arrival,
+                });
+                setNewRestriction({ room_type_id: "", start_date: "", end_date: "", min_stay: 0, stop_sell: false, closed_to_arrival: false });
+              }}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-4 w-4" /></button>
           </div>
         </div>

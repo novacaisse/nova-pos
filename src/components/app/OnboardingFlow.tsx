@@ -16,16 +16,23 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useProvisionOrganization } from "@/lib/data/hooks";
 
-const SECTORS = ["Épicerie", "Superette", "Restaurant", "Boulangerie", "Mode", "Pharmacie", "Quincaillerie", "Beauté", "Autre"];
+// "Restaurant" et "Beauté" retirés (audit ZegOS v2) : ces secteurs relèvent
+// de ZegResto et n'ont pas leur place dans l'inscription ZegCaisse — les
+// options restantes couvrent ce que couvre réellement le commerce/détail.
+const SECTORS = ["Épicerie", "Supérette", "Boutique de vêtements", "Boulangerie/Pâtisserie", "Pharmacie", "Quincaillerie", "Électronique/Téléphonie", "Librairie/Papeterie", "Autre"];
 const COUNTRIES = ["Bénin", "Burkina Faso", "Côte d'Ivoire", "Mali", "Sénégal", "Togo", "Niger", "Guinée"];
 
-const APPS = [
+// Exportés pour ApplicationsPanel.tsx (Profil > Applications) — active un
+// nouvel Zeg* depuis un compte qui a déjà au moins une organisation,
+// réutilisant les mêmes formulaires de configuration que le premier
+// parcours (organizations.length === 0).
+export const APPS = [
   { key: "pos", name: "ZegCaisse", desc: "Caisse, stock, ventes et facturation", icon: Store, available: true },
   { key: "hotel", name: "ZegHotel", desc: "Réservations, chambres et facturation hôtelière", icon: BedDouble, available: true },
   { key: "resto", name: "ZegResto", desc: "Salle, commandes, cuisine et réservations restaurant", icon: UtensilsCrossed, available: true },
   { key: "erp", name: "ZegERP", desc: "Stock, achats, ventes, finance, comptabilité, RH", icon: Boxes, available: true },
 ] as const;
-type AppKey = (typeof APPS)[number]["key"];
+export type AppKey = (typeof APPS)[number]["key"];
 
 export function OnboardingFlow({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [step, setStep] = useState<"pick-app" | "setup-pos" | "setup-hotel" | "setup-resto" | "setup-erp">("pick-app");
@@ -88,14 +95,14 @@ function AppPicker({ onPick, onSignOut }: { onPick: (key: AppKey) => void; onSig
   );
 }
 
-function PosSetupForm({ onBack }: { onBack: () => void }) {
+export function PosSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     shop: "", sector: SECTORS[0], country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -124,7 +131,6 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -181,11 +187,6 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
         </div>
 
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (gérant)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
-        </div>
-
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -208,14 +209,14 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
 // le champ "Secteur" (retail-only, sans objet pour un hôtel) — libellés
 // adaptés. provision_organization() est générique (p_app), aucune
 // migration n'est nécessaire pour ce second parcours.
-function HotelSetupForm({ onBack }: { onBack: () => void }) {
+export function HotelSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -244,7 +245,6 @@ function HotelSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -299,11 +299,6 @@ function HotelSetupForm({ onBack }: { onBack: () => void }) {
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
         </div>
 
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (propriétaire)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
-        </div>
-
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -327,14 +322,14 @@ function HotelSetupForm({ onBack }: { onBack: () => void }) {
 // (p_app), aucune modification de fonction nécessaire pour ce 3e parcours
 // (seul organizations.app_module a dû gagner 'resto' comme valeur possible,
 // migration 036).
-function RestoSetupForm({ onBack }: { onBack: () => void }) {
+export function RestoSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -363,7 +358,6 @@ function RestoSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -418,11 +412,6 @@ function RestoSetupForm({ onBack }: { onBack: () => void }) {
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
         </div>
 
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (propriétaire)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
-        </div>
-
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -446,14 +435,14 @@ function RestoSetupForm({ onBack }: { onBack: () => void }) {
 // générique (p_app) : seul organizations.app_module a dû gagner 'erp'
 // comme valeur possible (migration 047) — aucune modification de fonction
 // nécessaire pour ce 4e parcours.
-function ErpSetupForm({ onBack }: { onBack: () => void }) {
+export function ErpSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -482,7 +471,6 @@ function ErpSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -535,11 +523,6 @@ function ErpSetupForm({ onBack }: { onBack: () => void }) {
           <SelectField label="Pays" value={form.country} onChange={set("country")} options={COUNTRIES} />
           <Field label="Ville *" value={form.city} onChange={set("city")} placeholder="Ex : Cotonou" />
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
-        </div>
-
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (propriétaire)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
         </div>
 
         {error && (

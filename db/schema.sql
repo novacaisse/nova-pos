@@ -661,7 +661,11 @@ declare
   v_acct_sub public.account_subscriptions%rowtype;
   v_org_plan text;
   v_org_trial_ends timestamptz;
-  v_sub_status text;
+  -- Migration 072 : text auto-caste jamais implicitement vers un enum à
+  -- l'insertion (contrairement à un littéral de chaîne, résolu par le
+  -- contexte) — déclarée directement dans le type cible pour éviter le
+  -- même bug ("column status is of type subscription_status...").
+  v_sub_status public.subscription_status;
   v_sub_amount numeric;
 begin
   if v_uid is null then
@@ -1778,11 +1782,14 @@ create policy app_settings_update on public.app_settings for update to authentic
   with check (public.is_super_admin());
 
 -- =============== TRIGGERS ===============
+-- Migration 075 : lit aussi raw_user_meta_data->>'phone' (passé par
+-- signUp() comme full_name) — "Téléphone personnel" est collecté à
+-- l'inscription, pas dans la configuration d'organisation qui suit.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, full_name)
-  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email))
+  insert into public.profiles (id, full_name, phone)
+  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email), new.raw_user_meta_data->>'phone')
   on conflict (id) do nothing;
   return new;
 end $$;
@@ -1797,11 +1804,15 @@ create trigger on_auth_user_created
 -- contrôle de la boutique) — bloqués si le niveau résultant serait
 -- négatif. 'adjustment' reste volontairement non gardé : correction
 -- manuelle explicite (inventaire physique), pas une opération commerciale.
+-- Migration 073 : le garde-fou reste total pour 'out'/'transfer', mais
+-- devient conditionnel pour 'sale' — organization_settings.data.allow_oversell
+-- (Paramètres ZegCaisse) permet de vendre en rupture, stock résultant négatif.
 create or replace function public.apply_stock_movement()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   delta numeric(14,3);
   v_new_qty numeric(14,3);
+  v_allow_oversell boolean;
 begin
   delta := case new.type
     when 'in' then new.quantity
@@ -1819,7 +1830,15 @@ begin
   returning quantity into v_new_qty;
 
   if new.type in ('sale', 'out', 'transfer') and v_new_qty < 0 then
-    raise exception 'Stock insuffisant pour ce produit (quantité disponible dépassée).';
+    if new.type = 'sale' then
+      select coalesce((data->>'allow_oversell')::boolean, false) into v_allow_oversell
+      from public.organization_settings where organization_id = new.organization_id;
+    else
+      v_allow_oversell := false;
+    end if;
+    if not v_allow_oversell then
+      raise exception 'Stock insuffisant pour ce produit (quantité disponible dépassée).';
+    end if;
   end if;
 
   return new;
@@ -3036,6 +3055,81 @@ $$;
 revoke all on function public.post_hotel_pos_charge(uuid, uuid, jsonb) from public;
 grant execute on function public.post_hotel_pos_charge(uuid, uuid, jsonb) to authenticated;
 
+-- =============== hotel_pos_sales (migration 077) ===============
+-- Pendant immédiat de post_hotel_pos_charge() ci-dessus : un passant/client
+-- de passage qui paie tout de suite (pas de note de séjour) — indépendante
+-- de `sales` (ZegCaisse), tables préfixées par app comme le reste du socle.
+create table if not exists public.hotel_pos_sales (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reference text not null,
+  items jsonb not null default '[]'::jsonb,
+  subtotal numeric(14,2) not null default 0,
+  discount numeric(14,2) not null default 0,
+  total numeric(14,2) not null default 0,
+  payment_method public.payment_method not null default 'cash',
+  paid numeric(14,2) not null default 0,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_pos_sales_org on public.hotel_pos_sales(organization_id);
+alter table public.hotel_pos_sales enable row level security;
+create policy hotel_pos_sales_select on public.hotel_pos_sales for select to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_pos_interne', 'view'));
+create policy hotel_pos_sales_insert on public.hotel_pos_sales for insert to authenticated
+  with check (public.has_module_permission(organization_id, 'hotel_pos_interne', 'create'));
+
+create or replace function public.create_hotel_pos_sale(
+  p_organization_id uuid,
+  p_items jsonb,
+  p_discount numeric,
+  p_payment_method public.payment_method,
+  p_paid numeric
+) returns public.hotel_pos_sales
+language plpgsql security definer set search_path = public as $$
+declare
+  v_item jsonb;
+  v_product_id uuid;
+  v_quantity numeric(14,3);
+  v_subtotal numeric(14,2) := 0;
+  v_total numeric(14,2);
+  v_reference text;
+  v_sale public.hotel_pos_sales;
+begin
+  if not public.has_module_permission(p_organization_id, 'hotel_pos_interne', 'create') then
+    raise exception 'Accès refusé.';
+  end if;
+  if p_items is null or jsonb_array_length(p_items) = 0 then
+    raise exception 'Aucun article à vendre.';
+  end if;
+
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_subtotal := v_subtotal + (v_item->>'quantity')::numeric * (v_item->>'unit_price')::numeric;
+  end loop;
+  v_total := greatest(0, v_subtotal - coalesce(p_discount, 0));
+
+  v_reference := 'HP-' || to_char(now(), 'YYMMDD') || '-' || substr(md5(random()::text), 1, 4);
+
+  insert into public.hotel_pos_sales (organization_id, reference, items, subtotal, discount, total, payment_method, paid, created_by)
+  values (p_organization_id, v_reference, p_items, v_subtotal, coalesce(p_discount, 0), v_total, p_payment_method, coalesce(p_paid, v_total), auth.uid())
+  returning * into v_sale;
+
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_product_id := nullif(v_item->>'product_id', '')::uuid;
+    v_quantity := (v_item->>'quantity')::numeric;
+    if v_product_id is not null then
+      insert into public.stock_movements (organization_id, product_id, type, quantity, reason, reference, created_by)
+      values (p_organization_id, v_product_id, 'sale', v_quantity, 'POS ZegHotel', v_reference, auth.uid());
+    end if;
+  end loop;
+
+  return v_sale;
+end;
+$$;
+
+revoke all on function public.create_hotel_pos_sale(uuid, jsonb, numeric, public.payment_method, numeric) from public;
+grant execute on function public.create_hotel_pos_sale(uuid, jsonb, numeric, public.payment_method, numeric) to authenticated;
+
 -- Nommée hotel_payments (pas payments) : public.payments existe déjà
 -- côté ZegCaisse (paiements de vente) — collision directe évitée.
 create table if not exists public.hotel_payments (
@@ -3108,6 +3202,56 @@ create policy hotel_housekeeping_update on public.hotel_housekeeping_tasks for u
 drop policy if exists hotel_housekeeping_delete on public.hotel_housekeeping_tasks;
 create policy hotel_housekeeping_delete on public.hotel_housekeeping_tasks for delete to authenticated
   using (public.has_any_role_in_organization(organization_id, array['owner','manager']::public.app_role[]));
+
+-- Statut chambre automatique + génération automatique des tâches de ménage
+-- (migration 078) : housekeeping_status et hotel_housekeeping_tasks ne
+-- bougeaient jamais tout seuls jusqu'ici (bouton "Générer les tâches du
+-- jour" + marquage manuel "propre" par chambre). 'out_of_service' n'est
+-- jamais écrasé par ces triggers.
+create or replace function public.hotel_room_dirty_on_checkout()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_room record;
+begin
+  if new.status = 'checked_out' and old.status is distinct from 'checked_out' then
+    for v_room in
+      select room_id from public.hotel_reservation_rooms where reservation_id = new.id
+    loop
+      update public.hotel_rooms
+      set housekeeping_status = 'dirty'
+      where id = v_room.room_id and housekeeping_status <> 'out_of_service';
+
+      insert into public.hotel_housekeeping_tasks (organization_id, room_id, task_date, kind)
+      select new.organization_id, v_room.room_id, current_date, 'turnover'
+      where not exists (
+        select 1 from public.hotel_housekeeping_tasks
+        where room_id = v_room.room_id and task_date = current_date and status <> 'done'
+      );
+    end loop;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_hotel_room_dirty_on_checkout on public.hotel_reservations;
+create trigger trg_hotel_room_dirty_on_checkout
+  after update on public.hotel_reservations
+  for each row execute function public.hotel_room_dirty_on_checkout();
+
+create or replace function public.hotel_room_clean_on_task_done()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.status = 'done' and old.status is distinct from 'done' and new.kind in ('cleaning', 'turnover') then
+    update public.hotel_rooms
+    set housekeeping_status = 'clean'
+    where id = new.room_id and housekeeping_status <> 'out_of_service';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_hotel_room_clean_on_task_done on public.hotel_housekeeping_tasks;
+create trigger trg_hotel_room_clean_on_task_done
+  after update on public.hotel_housekeeping_tasks
+  for each row execute function public.hotel_room_clean_on_task_done();
 
 create table if not exists public.hotel_maintenance_tickets (
   id uuid primary key default gen_random_uuid(),
@@ -6770,6 +6914,63 @@ create policy reservations_update on public.reservations for update to authentic
   with check (public.has_module_permission(organization_id, 'reservations', 'manage'));
 create policy reservations_delete on public.reservations for delete to authenticated
   using (public.has_module_permission(organization_id, 'reservations', 'manage'));
+
+-- =============== reservation_payments (migration 074) ===============
+-- Paiements échelonnés : reservations.deposit était un unique versement
+-- figé à la création — reservation_payments journalise chaque versement
+-- (comme `payments` pour les ventes), add_reservation_payment() (plus bas)
+-- l'incrémente atomiquement.
+create table if not exists public.reservation_payments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reservation_id uuid not null references public.reservations(id) on delete cascade,
+  amount numeric(14,2) not null check (amount > 0),
+  method public.payment_method not null default 'cash',
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_reservation_payments_reservation on public.reservation_payments(reservation_id);
+alter table public.reservation_payments enable row level security;
+create policy reservation_payments_select on public.reservation_payments for select to authenticated
+  using (public.has_module_permission(organization_id, 'reservations', 'view'));
+create policy reservation_payments_insert on public.reservation_payments for insert to authenticated
+  with check (public.has_module_permission(organization_id, 'reservations', 'manage'));
+
+-- add_reservation_payment (migration 074) : même schéma que
+-- add_sale_payment() (migration 024) — incrément atomique sous le verrou de
+-- ligne de l'UPDATE, security invoker (les policies RLS ci-dessus et
+-- reservations_update s'appliquent normalement).
+create or replace function public.add_reservation_payment(p_reservation_id uuid, p_amount numeric, p_method public.payment_method)
+returns public.reservations
+language plpgsql as $$
+declare
+  v_organization_id uuid;
+  v_reservation public.reservations;
+begin
+  if p_amount <= 0 then
+    raise exception 'Le montant doit être positif.';
+  end if;
+
+  select organization_id into v_organization_id from public.reservations where id = p_reservation_id;
+  if v_organization_id is null then
+    raise exception 'Réservation introuvable.';
+  end if;
+
+  insert into public.reservation_payments (organization_id, reservation_id, amount, method, created_by)
+  values (v_organization_id, p_reservation_id, p_amount, p_method, auth.uid());
+
+  update public.reservations
+  set deposit = deposit + p_amount,
+      updated_at = now()
+  where id = p_reservation_id
+  returning * into v_reservation;
+
+  return v_reservation;
+end;
+$$;
+
+revoke all on function public.add_reservation_payment(uuid, numeric, public.payment_method) from public;
+grant execute on function public.add_reservation_payment(uuid, numeric, public.payment_method) to authenticated;
 
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,

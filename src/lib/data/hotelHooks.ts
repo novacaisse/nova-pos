@@ -57,12 +57,6 @@ export type HotelSettings = {
   occupancy_pricing_enabled: boolean; occupancy_pricing_threshold_pct: number;
   occupancy_pricing_adjustment_pct: number; updated_at: string;
 };
-export type HotelChannel = {
-  id: string; organization_id: string; name: string; is_active: boolean;
-  external_id: string | null; created_at: string;
-  // Migration 034 — ZegHotel Phase 8 : gestion manuelle par canal.
-  notes: string | null; manual_rate: number | null;
-};
 export type HotelGuest = {
   id: string; organization_id: string; full_name: string; email: string | null;
   phone: string | null; id_document_type: string | null; id_document_number: string | null;
@@ -402,43 +396,6 @@ export function useUpdateHotelSettings() {
   });
 }
 
-// ============ CHANNELS (Phase 8 — gestion manuelle, pas de sync API) ============
-export function useHotelChannels() {
-  const organizationId = useOrganizationId();
-  return useQuery({
-    queryKey: ["hotel_channels", organizationId],
-    enabled: !!organizationId,
-    queryFn: async (): Promise<HotelChannel[]> => {
-      const { data, error } = await supabase.from("hotel_channels")
-        .select("*").eq("organization_id", organizationId!).order("name");
-      if (error) throw error;
-      return data as HotelChannel[];
-    },
-  });
-}
-export function useUpsertHotelChannel() {
-  const organizationId = useOrganizationId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (c: Partial<HotelChannel> & { name: string }) => {
-      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
-      const { data, error } = await supabase.from("hotel_channels")
-        .upsert({ ...c, organization_id: organizationId }).select().single();
-      if (error) throw error; return data;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_channels", organizationId] }),
-  });
-}
-export function useDeleteHotelChannel() {
-  const organizationId = useOrganizationId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("hotel_channels").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_channels", organizationId] }),
-  });
-}
-
 // ============ GUESTS ============
 export function useHotelGuests(search?: string) {
   const organizationId = useOrganizationId();
@@ -550,10 +507,27 @@ export function useHotelGuestStays(guestId: string | null) {
         }
       }
 
-      return (reservations ?? []).map((r: any) => ({
-        reservation_id: r.id, check_in: r.check_in, check_out: r.check_out, status: r.status, billing_unit: r.billing_unit,
-        total: totalByFolio.get(folioIdByReservation.get(r.id) ?? "") ?? 0,
-      }));
+      // Proforma (même logique que printHotelInvoice, app.hotel.reservations.tsx) :
+      // avant check-in la note n'a encore aucune charge "room" postée — sans
+      // ce repli, un séjour "à venir" affiche 0 F dans l'historique alors
+      // qu'un tarif est déjà fixé sur hotel_reservation_rooms.
+      const roomTotalByReservation = new Map<string, number>();
+      const { data: resvRooms, error: resvRoomsErr } = await supabase.from("hotel_reservation_rooms")
+        .select("reservation_id, rate_amount, status").in("reservation_id", reservationIds);
+      if (resvRoomsErr) throw resvRoomsErr;
+      for (const rr of (resvRooms ?? []) as any[]) {
+        if (rr.status === "cancelled" || rr.status === "no_show") continue;
+        roomTotalByReservation.set(rr.reservation_id, (roomTotalByReservation.get(rr.reservation_id) ?? 0) + rr.rate_amount);
+      }
+
+      return (reservations ?? []).map((r: any) => {
+        const folioId = folioIdByReservation.get(r.id);
+        const postedTotal = folioId ? totalByFolio.get(folioId) : undefined;
+        return {
+          reservation_id: r.id, check_in: r.check_in, check_out: r.check_out, status: r.status, billing_unit: r.billing_unit,
+          total: postedTotal ?? roomTotalByReservation.get(r.id) ?? 0,
+        };
+      });
     },
   });
 }
@@ -571,10 +545,16 @@ export function useHotelReservations(rangeStart: string, rangeEnd: string) {
     queryKey: ["hotel_reservations", organizationId, rangeStart, rangeEnd],
     enabled: !!organizationId,
     queryFn: async (): Promise<HotelReservationRow[]> => {
+      // check_out.gt.rangeStart couvre les réservations nuitée classiques ;
+      // check_in.gte.rangeStart couvre en plus les réservations horaires
+      // (check_in = check_out le même jour, donc jamais > rangeStart tel
+      // quel) sans avoir à distinguer billing_unit ici — un séjour qui
+      // démarre dans la fenêtre y est toujours visible.
       const { data, error } = await supabase.from("hotel_reservations")
         .select("*, guest:hotel_guests(*), reservation_rooms:hotel_reservation_rooms(*, room:hotel_rooms(*))")
         .eq("organization_id", organizationId!)
-        .lt("check_in", rangeEnd).gt("check_out", rangeStart)
+        .lt("check_in", rangeEnd)
+        .or(`check_out.gt.${rangeStart},check_in.gte.${rangeStart}`)
         .order("check_in");
       if (error) throw error;
       return data as any;
@@ -946,6 +926,35 @@ export function usePostHotelPosCharge() {
   });
 }
 
+// Vente payée tout de suite (pas de note de séjour) — migration 077,
+// pendant immédiat de post_hotel_pos_charge() ci-dessus pour un client de
+// passage (bar/restaurant/piscine côté hôtel).
+export type HotelPosSaleItem = { product_id: string | null; name: string; quantity: number; unit_price: number };
+export type HotelPosSale = {
+  id: string; organization_id: string; reference: string; items: HotelPosSaleItem[];
+  subtotal: number; discount: number; total: number;
+  payment_method: "cash" | "mobile_money" | "card" | "credit" | "mixed";
+  paid: number; created_at: string;
+};
+export function useCreateHotelPosSale() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { items: HotelPosSaleItem[]; discount: number; paymentMethod: HotelPosSale["payment_method"]; paid: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.rpc("create_hotel_pos_sale", {
+        p_organization_id: organizationId, p_items: input.items, p_discount: input.discount,
+        p_payment_method: input.paymentMethod, p_paid: input.paid,
+      });
+      if (error) throw error;
+      return data as HotelPosSale;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products", organizationId] });
+      qc.invalidateQueries({ queryKey: ["stock_movements", organizationId] });
+    },
+  });
+}
+
 export function folioBalance(folio: HotelFolioDetail): number {
   const charges = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
   const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
@@ -961,17 +970,61 @@ export function nightsInRange(reservations: HotelReservationRow[] | undefined, r
   for (const res of reservations ?? []) {
     for (const rr of res.reservation_rooms) {
       if (rr.status === "cancelled" || rr.status === "no_show") continue;
+      // Horaire (check_in = check_out) : comptée comme 1 nuit sur sa seule
+      // journée — sans ce repli, checkOut === checkIn donnait un intervalle
+      // vide (n = 0) et les réservations horaires disparaissaient purement
+      // et simplement de l'occupation/ADR/RevPAR/revenu des rapports (même
+      // piège que la contrainte SQL, cf. schema.sql).
+      const effectiveCheckOut = rr.check_out > rr.check_in ? rr.check_out : addDaysISO(rr.check_in, 1);
       const start = rr.check_in < rangeStart ? rangeStart : rr.check_in;
-      const end = rr.check_out > rangeEnd ? rangeEnd : rr.check_out;
+      const end = effectiveCheckOut > rangeEnd ? rangeEnd : effectiveCheckOut;
       const n = Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 86400000);
       if (n > 0) {
         nights += n;
-        const totalNights = Math.max(1, (new Date(rr.check_out).getTime() - new Date(rr.check_in).getTime()) / 86400000);
+        const totalNights = Math.max(1, (new Date(effectiveCheckOut).getTime() - new Date(rr.check_in).getTime()) / 86400000);
         revenue += (rr.rate_amount / totalNights) * n;
       }
     }
   }
   return { nights, revenue };
+}
+function addDaysISO(iso: string, n: number) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+
+// ============ RAPPORTS (détail) ============
+// Encaissements par mode de paiement sur la période (app.hotel.rapports.tsx)
+// — hotel_payments porte organization_id/created_at directement, pas
+// besoin de repasser par les folios/réservations pour filtrer par période.
+export function useHotelPaymentsInRange(rangeStart: string, rangeEnd: string) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_payments_range", organizationId, rangeStart, rangeEnd],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelPayment[]> => {
+      const { data, error } = await supabase.from("hotel_payments")
+        .select("*").eq("organization_id", organizationId!)
+        .gte("created_at", `${rangeStart}T00:00:00`).lt("created_at", `${rangeEnd}T00:00:00`);
+      if (error) throw error;
+      return data as HotelPayment[];
+    },
+  });
+}
+// Charges "extra" (hors chambre) sur la période — pourboire de room
+// service, minibar, blanchisserie… posées directement sur les folios
+// (post_hotel_pos_charge notamment, migration 033) : jusqu'ici invisibles
+// des rapports, qui ne lisaient que hotel_reservation_rooms.rate_amount.
+export function useHotelFolioExtrasInRange(rangeStart: string, rangeEnd: string) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_folio_extras_range", organizationId, rangeStart, rangeEnd],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelFolioCharge[]> => {
+      const { data, error } = await supabase.from("hotel_folio_charges")
+        .select("*").eq("organization_id", organizationId!).neq("kind", "room")
+        .gte("charge_date", rangeStart).lt("charge_date", rangeEnd);
+      if (error) throw error;
+      return data as HotelFolioCharge[];
+    },
+  });
 }
 // Recalcule le solde depuis la base (pas depuis l'objet folio déjà en
 // mémoire côté client) avant de clôturer — sans ce garde-fous, une note
@@ -1105,11 +1158,16 @@ export function useHotelCorporateInvoices() {
 }
 
 // ============ HOUSEKEEPING ============
+// refetchInterval 1 min (migration 078, tâche générée directement par
+// trigger au check-out) — la gouvernante voit une nouvelle tâche arriver
+// sans recharger la page ; l'appelant (HousekeepingPage) compare la
+// longueur d'une requête à l'autre pour déclencher le son d'alerte.
 export function useHotelHousekeepingTasks(date: string) {
   const organizationId = useOrganizationId();
   return useQuery({
     queryKey: ["hotel_housekeeping_tasks", organizationId, date],
     enabled: !!organizationId,
+    refetchInterval: 60_000,
     queryFn: async (): Promise<(HotelHousekeepingTask & { room: HotelRoom | null })[]> => {
       const { data, error } = await supabase.from("hotel_housekeeping_tasks")
         .select("*, room:hotel_rooms(*)").eq("organization_id", organizationId!).eq("task_date", date)
@@ -1119,9 +1177,10 @@ export function useHotelHousekeepingTasks(date: string) {
     },
   });
 }
-// Génère les tâches du jour : une tâche "turnover" pour chaque chambre
-// marquée "dirty" qui n'a pas déjà de tâche ouverte ce jour-là — évite les
-// doublons si le bouton est cliqué deux fois.
+// Filet de sécurité manuel (migration 078 automatise déjà la création au
+// check-out via trigger) — reste utile pour une chambre marquée "dirty"
+// par un autre moyen (note manuelle, import...) sans passer par un
+// check-out suivi. Même garde-fou anti-doublon qu'avant.
 export function useGenerateHousekeepingTasks() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({

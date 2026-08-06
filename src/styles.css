@@ -73,6 +73,13 @@
 }
 
 :root {
+  /* Sans ceci, les contrôles natifs (scrollbars, <select>, checkboxes,
+     inputs date/time) gardent le chrome clair de l'OS même sous .dark —
+     l'app bascule sur classe, pas sur prefers-color-scheme, donc le
+     navigateur ne le sait pas sans cette déclaration explicite. Très
+     visible sur desktop (grosses scrollbars/selects natifs), peu sur
+     mobile Safari qui reskin ces contrôles. */
+  color-scheme: light;
   --radius: 0.75rem;
 
   --background: oklch(0.99 0.005 90);
@@ -128,6 +135,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.16 0.02 210);
   --foreground: oklch(0.96 0.005 90);
 

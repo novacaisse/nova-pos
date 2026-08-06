@@ -102,14 +102,27 @@ Deno.serve(async (req) => {
     // account_subscriptions se retrouverait avec le plan_id d'une autre
     // application (Phase 5/moneyfusion.ts en hérite ensuite aveuglément).
     const { data: organization, error: orgErr } = await admin
-      .from("organizations").select("app_module").eq("id", organization_id).maybeSingle();
+      .from("organizations").select("app_module, plan, trial_ends_at").eq("id", organization_id).maybeSingle();
     if (orgErr || !organization) return json({ error: "Boutique introuvable." }, 404);
     if (plan.app_module !== organization.app_module) {
       return json({ error: "Cette formule n'est pas disponible pour cette application." }, 400);
     }
 
-    const totalPrice = period === "year" ? Number(plan.price_year) : Number(plan.price_month);
-    if (!totalPrice || totalPrice <= 0) return json({ error: "Prix invalide pour cette formule." }, 400);
+    const basePrice = period === "year" ? Number(plan.price_year) : Number(plan.price_month);
+    if (!basePrice || basePrice <= 0) return json({ error: "Prix invalide pour cette formule." }, 400);
+
+    // Réduction essai gratuit (5 000 F, toutes devises confondues — même
+    // logique que getTrialInfo côté client, jamais recalculée à partir
+    // d'un état envoyé par le client) : uniquement si l'organisation est
+    // encore en essai ET que trial_ends_at n'est pas dépassé au moment de
+    // CET appel serveur — fenêtre de conversion rapide, jamais rejouable
+    // après coup ni falsifiable depuis le navigateur.
+    const TRIAL_DISCOUNT = 5000;
+    const onTrial = organization.plan === "trial"
+      && !!organization.trial_ends_at
+      && new Date(organization.trial_ends_at).getTime() > Date.now();
+    const discount = onTrial ? Math.min(TRIAL_DISCOUNT, basePrice) : 0;
+    const totalPrice = basePrice - discount;
 
     // Réutilise l'unique ligne subscriptions de la boutique (créée à
     // l'inscription) plutôt que d'en créer une nouvelle à chaque paiement.
@@ -125,7 +138,7 @@ Deno.serve(async (req) => {
         organization_id, subscription_id: subscription.id,
         amount: totalPrice, currency: plan.currency,
         method: "mobile_money", status: "pending", provider: "moneyfusion",
-        metadata: { plan_id, period },
+        metadata: { plan_id, period, base_price: basePrice, trial_discount: discount },
       })
       .select().single();
     if (payErr || !payment) {

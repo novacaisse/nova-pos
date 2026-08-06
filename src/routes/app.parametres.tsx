@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Store, Coins, Receipt, ArrowLeftRight, Save, Plus, FileText, Loader2,
-  Trash2, Search, Download,
+  Trash2, Search, Download, ShoppingCart,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { PageSkeleton } from "@/components/app/PageSkeleton";
@@ -52,7 +52,7 @@ export const Route = createFileRoute("/app/parametres")({
 
 function ParametresPage() {
   const { openAdd } = Route.useSearch();
-  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "transfer" | "export">("shop");
+  const [tab, setTab] = useState<"shop" | "currency" | "taxes" | "ticket" | "vente" | "transfer" | "export">("shop");
   const { organizations, currentOrganization } = useOrganization();
   const { data: settings, isLoading: settingsLoading } = useShopSettings();
   const { data: currentSubscription } = useSubscription();
@@ -66,6 +66,8 @@ function ParametresPage() {
   const [currency, setCurrency] = useState("XOF");
   const [taxIncluded, setTaxIncluded] = useState(true);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
+  const [allowOversell, setAllowOversell] = useState(false);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
   const [showAddShop, setShowAddShop] = useState(false);
   const createShop = useProvisionOrganization();
 
@@ -83,6 +85,8 @@ function ParametresPage() {
     setFooter(settings.receipt_footer ?? "");
     setTaxIncluded(settings.tax_included);
     setTaxRates(settings.data.tax_rates ?? []);
+    setAllowOversell(settings.data.allow_oversell ?? false);
+    setAutoPrintReceipt(settings.data.auto_print_receipt ?? false);
   }, [settings]);
 
   const saveTicket = async () => {
@@ -115,6 +119,16 @@ function ParametresPage() {
     }
   };
 
+  const saveVente = async () => {
+    try {
+      await updateSettings.mutateAsync({
+        data: { ...(settings?.data ?? {}), allow_oversell: allowOversell, auto_print_receipt: autoPrintReceipt },
+      });
+    } catch (e: any) {
+      alert("Erreur enregistrement des réglages de vente : " + (e?.message ?? "inconnue"));
+    }
+  };
+
   if (!currentOrganization) {
     return <div className="grid h-full place-items-center p-10 text-sm text-muted-foreground">Sélectionnez une organisation.</div>;
   }
@@ -132,6 +146,7 @@ function ParametresPage() {
               { k: "currency", label: "Devise", icon: Coins },
               { k: "taxes", label: "Taxes", icon: Receipt },
               { k: "ticket", label: "Ticket de caisse", icon: FileText },
+              { k: "vente", label: "Vente & caisse", icon: ShoppingCart },
               { k: "transfer", label: "Transfert de stock", icon: ArrowLeftRight },
               { k: "export", label: "Export / Sauvegarde", icon: Download },
             ] as const).map((t) => (
@@ -301,6 +316,43 @@ function ParametresPage() {
                   <div className="text-center text-[10px] text-gray-600">{footer}</div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {tab === "vente" && (
+            <div className="rounded-2xl border border-border bg-card p-6">
+              <h2 className="mb-4 font-display text-lg font-bold">Vente & caisse</h2>
+
+              <label className="flex items-center justify-between gap-4 rounded-xl border border-border p-3 text-sm">
+                <span>
+                  <span className="block">Autoriser la vente d'un article en rupture de stock</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Une fois activé, le PDV laisse ajouter et encaisser un article même à 0 en stock — le stock passe
+                    négatif (affiché "-") jusqu'à un réapprovisionnement ou un ajustement manuel.
+                  </span>
+                </span>
+                <input type="checkbox" checked={allowOversell} disabled={!canManage}
+                  onChange={(e) => setAllowOversell(e.target.checked)} className="h-5 w-5 shrink-0 accent-primary" />
+              </label>
+
+              <label className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-border p-3 text-sm">
+                <span>
+                  <span className="block">Impression automatique du reçu</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Lance l'impression du ticket dès qu'un encaissement est validé, sans avoir à cliquer sur
+                    « Imprimer le reçu ».
+                  </span>
+                </span>
+                <input type="checkbox" checked={autoPrintReceipt} disabled={!canManage}
+                  onChange={(e) => setAutoPrintReceipt(e.target.checked)} className="h-5 w-5 shrink-0 accent-primary" />
+              </label>
+
+              {canManage && (
+                <button onClick={saveVente} disabled={updateSettings.isPending}
+                  className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+                  <Save className="h-4 w-4" /> Enregistrer
+                </button>
+              )}
             </div>
           )}
 

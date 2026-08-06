@@ -791,6 +791,42 @@ export function useUpdateReservationStatus() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["reservations", organizationId] }),
   });
 }
+// Paiements échelonnés (migration 074) : reservations.deposit reste le
+// total versé à ce jour (somme des installments), reservation_payments
+// journalise chaque versement individuel pour l'historique affiché au
+// client/caissier.
+export type ReservationPayment = {
+  id: string; reservation_id: string; amount: number;
+  method: Sale["payment_method"]; created_at: string;
+};
+export function useReservationPayments(reservationId: string | undefined) {
+  return useQuery({
+    queryKey: ["reservation_payments", reservationId],
+    enabled: !!reservationId,
+    queryFn: async (): Promise<ReservationPayment[]> => {
+      const { data, error } = await supabase.from("reservation_payments")
+        .select("*").eq("reservation_id", reservationId!).order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as ReservationPayment[];
+    },
+  });
+}
+export function useAddReservationPayment() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ reservationId, amount, method }: { reservationId: string; amount: number; method: Sale["payment_method"] }) => {
+      if (amount <= 0) throw new Error("Le montant doit être positif.");
+      const { error } = await supabase.rpc("add_reservation_payment", {
+        p_reservation_id: reservationId, p_amount: amount, p_method: method,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_data, { reservationId }) => {
+      qc.invalidateQueries({ queryKey: ["reservations", organizationId] });
+      qc.invalidateQueries({ queryKey: ["reservation_payments", reservationId] });
+    },
+  });
+}
 export function useDeleteReservation() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
@@ -1463,6 +1499,8 @@ export type ShopSettingsData = {
   expense_categories?: string[];
   tax_rates?: TaxRate[];
   permissions?: Partial<TeamPermissions>;
+  allow_oversell?: boolean;
+  auto_print_receipt?: boolean;
 };
 export type ShopSettings = {
   organization_id: string;

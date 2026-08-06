@@ -922,6 +922,32 @@ export function useRestoDashboardStats() {
   });
 }
 
+// Indicateurs "période" du tableau de bord (sélecteur universel, même
+// pattern que ZegHotel Phase 6) — volontairement séparé de
+// useRestoDashboardStats (occupation des tables/commandes en cours restent
+// des instantanés "maintenant", jamais dépendants d'une période) et plus
+// léger que useRestoReportData (pas de détail par serveur/catégorie/
+// ingrédient, juste CA + nombre de commandes pour les cartes du dashboard).
+export function useRestoPeriodStats(from: Date, to: Date) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["resto_dashboard_period", organizationId, from.toISOString(), to.toISOString()],
+    enabled: !!organizationId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("resto_bills")
+        .select("total")
+        .eq("organization_id", organizationId!).eq("statut", "payee")
+        .gte("created_at", from.toISOString()).lte("created_at", to.toISOString());
+      if (error) throw error;
+      const bills = data ?? [];
+      return {
+        revenue: bills.reduce((s, b) => s + Number(b.total), 0),
+        orderCount: bills.length,
+      };
+    },
+  });
+}
+
 export type RestoReportServerRow = { nom: string; orderCount: number; ca: number };
 export type RestoReportCategoryRow = { nom: string; quantite: number; ca: number };
 export type RestoReportPeakHour = { hour: number; orderCount: number };

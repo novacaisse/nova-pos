@@ -40,6 +40,7 @@ function DevisPage() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"all" | QuoteStatus>("all");
   const [editing, setEditing] = useState<QuoteWithItems | null>(null);
+  const [viewing, setViewing] = useState<QuoteWithItems | null>(null);
   const [creating, setCreating] = useState(false);
   const [converting, setConverting] = useState<QuoteWithItems | null>(null);
 
@@ -135,7 +136,8 @@ function DevisPage() {
               </thead>
               <tbody>
                 {filtered.map((q) => (
-                  <tr key={q.id} className="border-t border-border/60 hover:bg-muted/40">
+                  <tr key={q.id} onClick={() => (canManage ? setEditing(q) : setViewing(q))}
+                    className="cursor-pointer border-t border-border/60 hover:bg-muted/40">
                     <td className="px-4 py-3 font-mono text-xs font-semibold">{q.reference}</td>
                     <td className="px-4 py-3 font-medium">{q.customers?.name ?? "—"}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{new Date(q.created_at).toLocaleDateString("fr-FR")}</td>
@@ -150,7 +152,7 @@ function DevisPage() {
                       )}>{QUOTE_STATUS_LABEL[q.status]}</span>
                     </td>
                     <td className="tabular px-4 py-3 text-right font-bold">{formatXOF(q.total)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button onClick={() => printQuote(q)} title="Imprimer / PDF"
                           className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted">
@@ -200,8 +202,49 @@ function DevisPage() {
         {converting && (
           <ConvertDialog quote={converting} onClose={() => setConverting(null)} />
         )}
+        {viewing && (
+          <QuoteViewDialog quote={viewing} onClose={() => setViewing(null)} onPrint={() => printQuote(viewing)} />
+        )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// Popup lecture seule (rôles sans canManage — cashier notamment) : même
+// contenu que l'aperçu d'impression, sans passer par le formulaire
+// d'édition des lignes réservé à owner/manager.
+function QuoteViewDialog({ quote, onClose, onPrint }: { quote: QuoteWithItems; onClose: () => void; onPrint: () => void }) {
+  const formatXOF = useFormatMoney();
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="font-display text-lg font-bold">{quote.reference}</div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-3 p-5 text-sm">
+          <div className="flex justify-between"><span className="text-muted-foreground">Client</span><span className="font-semibold">{quote.customers?.name ?? "—"}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Statut</span><span className="font-semibold">{QUOTE_STATUS_LABEL[quote.status]}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Valide jusqu'au</span><span>{quote.valid_until ? new Date(quote.valid_until).toLocaleDateString("fr-FR") : "—"}</span></div>
+          <div className="space-y-1.5 rounded-xl border border-border p-3">
+            {quote.quote_items.map((l, i) => (
+              <div key={i} className="flex justify-between text-xs">
+                <span>{l.name} × {l.quantity}</span><span className="font-semibold">{formatXOF(l.total)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between text-base font-bold"><span>Total</span><span>{formatXOF(quote.total)}</span></div>
+        </div>
+        <div className="flex gap-2 border-t border-border p-3">
+          <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Fermer</button>
+          <button onClick={onPrint} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:opacity-90">
+            <Printer className="h-4 w-4" /> Imprimer / PDF
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
