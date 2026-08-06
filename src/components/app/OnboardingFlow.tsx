@@ -98,7 +98,7 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     shop: "", sector: SECTORS[0], country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -127,7 +127,6 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -184,11 +183,6 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
         </div>
 
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (gérant)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
-        </div>
-
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -218,7 +212,7 @@ function HotelSetupForm({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -247,7 +241,6 @@ function HotelSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -302,11 +295,6 @@ function HotelSetupForm({ onBack }: { onBack: () => void }) {
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
         </div>
 
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (propriétaire)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
-        </div>
-
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -337,7 +325,7 @@ function RestoSetupForm({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -366,7 +354,6 @@ function RestoSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -421,11 +408,6 @@ function RestoSetupForm({ onBack }: { onBack: () => void }) {
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
         </div>
 
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (propriétaire)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
-        </div>
-
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -456,7 +438,7 @@ function ErpSetupForm({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", country: COUNTRIES[0], city: "",
-    phone: "", address: "", ownerPhone: "",
+    phone: "", address: "",
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -485,7 +467,6 @@ function ErpSetupForm({ onBack }: { onBack: () => void }) {
         currency: "XOF",
         phone: form.phone,
         address: form.address || `${form.city}, ${form.country}`,
-        ownerPhone: form.ownerPhone || undefined,
       });
     } catch (e: any) {
       setError(e?.message ?? "Impossible de créer l'organisation.");
@@ -538,11 +519,6 @@ function ErpSetupForm({ onBack }: { onBack: () => void }) {
           <SelectField label="Pays" value={form.country} onChange={set("country")} options={COUNTRIES} />
           <Field label="Ville *" value={form.city} onChange={set("city")} placeholder="Ex : Cotonou" />
           <Field label="Adresse complète" value={form.address} onChange={set("address")} placeholder="Rue, quartier…" />
-        </div>
-
-        <div className="mt-5 mb-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Vous (propriétaire)</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Téléphone personnel" value={form.ownerPhone} onChange={set("ownerPhone")} />
         </div>
 
         {error && (

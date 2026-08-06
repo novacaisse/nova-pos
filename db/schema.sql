@@ -1782,11 +1782,14 @@ create policy app_settings_update on public.app_settings for update to authentic
   with check (public.is_super_admin());
 
 -- =============== TRIGGERS ===============
+-- Migration 075 : lit aussi raw_user_meta_data->>'phone' (passé par
+-- signUp() comme full_name) — "Téléphone personnel" est collecté à
+-- l'inscription, pas dans la configuration d'organisation qui suit.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, full_name)
-  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email))
+  insert into public.profiles (id, full_name, phone)
+  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email), new.raw_user_meta_data->>'phone')
   on conflict (id) do nothing;
   return new;
 end $$;
