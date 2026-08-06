@@ -970,17 +970,61 @@ export function nightsInRange(reservations: HotelReservationRow[] | undefined, r
   for (const res of reservations ?? []) {
     for (const rr of res.reservation_rooms) {
       if (rr.status === "cancelled" || rr.status === "no_show") continue;
+      // Horaire (check_in = check_out) : comptée comme 1 nuit sur sa seule
+      // journée — sans ce repli, checkOut === checkIn donnait un intervalle
+      // vide (n = 0) et les réservations horaires disparaissaient purement
+      // et simplement de l'occupation/ADR/RevPAR/revenu des rapports (même
+      // piège que la contrainte SQL, cf. schema.sql).
+      const effectiveCheckOut = rr.check_out > rr.check_in ? rr.check_out : addDaysISO(rr.check_in, 1);
       const start = rr.check_in < rangeStart ? rangeStart : rr.check_in;
-      const end = rr.check_out > rangeEnd ? rangeEnd : rr.check_out;
+      const end = effectiveCheckOut > rangeEnd ? rangeEnd : effectiveCheckOut;
       const n = Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 86400000);
       if (n > 0) {
         nights += n;
-        const totalNights = Math.max(1, (new Date(rr.check_out).getTime() - new Date(rr.check_in).getTime()) / 86400000);
+        const totalNights = Math.max(1, (new Date(effectiveCheckOut).getTime() - new Date(rr.check_in).getTime()) / 86400000);
         revenue += (rr.rate_amount / totalNights) * n;
       }
     }
   }
   return { nights, revenue };
+}
+function addDaysISO(iso: string, n: number) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+
+// ============ RAPPORTS (détail) ============
+// Encaissements par mode de paiement sur la période (app.hotel.rapports.tsx)
+// — hotel_payments porte organization_id/created_at directement, pas
+// besoin de repasser par les folios/réservations pour filtrer par période.
+export function useHotelPaymentsInRange(rangeStart: string, rangeEnd: string) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_payments_range", organizationId, rangeStart, rangeEnd],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelPayment[]> => {
+      const { data, error } = await supabase.from("hotel_payments")
+        .select("*").eq("organization_id", organizationId!)
+        .gte("created_at", `${rangeStart}T00:00:00`).lt("created_at", `${rangeEnd}T00:00:00`);
+      if (error) throw error;
+      return data as HotelPayment[];
+    },
+  });
+}
+// Charges "extra" (hors chambre) sur la période — pourboire de room
+// service, minibar, blanchisserie… posées directement sur les folios
+// (post_hotel_pos_charge notamment, migration 033) : jusqu'ici invisibles
+// des rapports, qui ne lisaient que hotel_reservation_rooms.rate_amount.
+export function useHotelFolioExtrasInRange(rangeStart: string, rangeEnd: string) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_folio_extras_range", organizationId, rangeStart, rangeEnd],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelFolioCharge[]> => {
+      const { data, error } = await supabase.from("hotel_folio_charges")
+        .select("*").eq("organization_id", organizationId!).neq("kind", "room")
+        .gte("charge_date", rangeStart).lt("charge_date", rangeEnd);
+      if (error) throw error;
+      return data as HotelFolioCharge[];
+    },
+  });
 }
 // Recalcule le solde depuis la base (pas depuis l'objet folio déjà en
 // mémoire côté client) avant de clôturer — sans ce garde-fous, une note
