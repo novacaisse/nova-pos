@@ -99,13 +99,23 @@ function ReservationsPage() {
   }, [openCreate, canWrite]);
 
   // Réservations actives par chambre (cancelled/no_show ne bloquent plus le planning).
+  // Horaire (check_in = check_out) : la case du jour ne s'affiche pas si on
+  // compare directement les dates (même piège que la contrainte anti-
+  // chevauchement en base, cf. schema.sql) — on étend "end" d'un jour pour
+  // que la réservation occupe sa journée dans la grille, comme greatest()
+  // côté SQL.
   const bookingsByRoom = useMemo(() => {
-    const map = new Map<string, { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string }[]>();
+    const map = new Map<string, { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string; isHourly: boolean; checkInAt: string | null; checkOutAt: string | null }[]>();
     for (const res of reservations) {
       for (const rr of res.reservation_rooms) {
         if (rr.status === "cancelled" || rr.status === "no_show") continue;
+        const isHourly = rr.billing_unit === "hour";
         const arr = map.get(rr.room_id) ?? [];
-        arr.push({ start: rr.check_in, end: rr.check_out, status: rr.status, reservationId: res.id, guestName: res.guest?.full_name ?? "—" });
+        arr.push({
+          start: rr.check_in, end: isHourly ? addDays(rr.check_in, 1) : rr.check_out, status: rr.status,
+          reservationId: res.id, guestName: res.guest?.full_name ?? "—", isHourly,
+          checkInAt: rr.check_in_at, checkOutAt: rr.check_out_at,
+        });
         map.set(rr.room_id, arr);
       }
     }
@@ -180,7 +190,7 @@ function ReservationsPage() {
 
 function RoomRow({ room, days, bookings, canWrite, onEmptyClick, onBookingClick }: {
   room: HotelRoom & { room_type?: any }; days: string[];
-  bookings: { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string }[];
+  bookings: { start: string; end: string; status: ReservationStatus; reservationId: string; guestName: string; isHourly: boolean; checkInAt: string | null; checkOutAt: string | null }[];
   canWrite: boolean;
   onEmptyClick: (date: string) => void;
   onBookingClick: (reservationId: string) => void;
@@ -203,12 +213,15 @@ function RoomRow({ room, days, bookings, canWrite, onEmptyClick, onBookingClick 
     } else {
       let span = 1;
       while (i + span < days.length && covers(days[i + span])?.reservationId === b.reservationId) span++;
+      const hourLabel = b.isHourly && b.checkInAt && b.checkOutAt
+        ? `${new Date(b.checkInAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}–${new Date(b.checkOutAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
+        : null;
       cells.push(
         <td key={days[i]} colSpan={span} className="border-b border-border/60 px-0.5 py-1">
           <button onClick={() => onBookingClick(b.reservationId)}
             className={cn("flex h-7 w-full items-center justify-center truncate rounded-md border px-1.5 text-[11px] font-semibold", STATUS_COLOR[b.status])}
-            title={`${b.guestName} — ${STATUS_LABEL[b.status]}`}>
-            {b.guestName}
+            title={`${b.guestName} — ${STATUS_LABEL[b.status]}${hourLabel ? ` — ${hourLabel}` : ""}`}>
+            {hourLabel ? `${hourLabel} · ${b.guestName}` : b.guestName}
           </button>
         </td>,
       );
@@ -235,36 +248,10 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const [checkOut, setCheckOut] = useState(addDays(defaultDate, 1));
   const { data: roomTypes = [] } = useHotelRoomTypes();
   const { data: rooms = [] } = useHotelRooms();
-  const { data: overlapping = [] } = useHotelReservations(checkIn, checkOut);
   const { data: corporateAccounts = [] } = useHotelCorporateAccounts();
   const { data: ratePlans = [] } = useHotelRatePlans();
   const { data: seasonalRates = [] } = useHotelSeasonalRates();
-
-  const bookedRoomIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const res of overlapping) for (const rr of res.reservation_rooms) {
-      if (rr.status === "cancelled" || rr.status === "no_show") continue;
-      if (checkIn < rr.check_out && checkOut > rr.check_in) set.add(rr.room_id);
-    }
-    return set;
-  }, [overlapping, checkIn, checkOut]);
-
-  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>(defaultRoomId ? [defaultRoomId] : []);
-  const [guestSearch, setGuestSearch] = useState("");
-  const [guestId, setGuestId] = useState<string | null>(null);
-  const [newGuestName, setNewGuestName] = useState("");
-  const [newGuestPhone, setNewGuestPhone] = useState("");
-  const [adults, setAdults] = useState(1);
-  const [children, setChildren] = useState(0);
-  const [channel, setChannel] = useState("direct");
   const [ratePlanId, setRatePlanId] = useState("");
-  const [corporateId, setCorporateId] = useState("");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const { data: guestResults = [] } = useHotelGuests(guestSearch);
-  const upsertGuest = useUpsertHotelGuest();
-  const create = useCreateHotelReservation();
 
   // Nuitée ET horaire (ZegHotel Phase 1) : billing_unit porté par la
   // formule tarifaire choisie — "Standard" (aucune formule) reste toujours
@@ -280,6 +267,49 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const hourlyHours = isHourly && checkOutAt && checkInAt
     ? Math.max(1, Math.ceil((new Date(checkOutAt).getTime() - new Date(checkInAt).getTime()) / 3_600_000))
     : 0;
+
+  // Fenêtre de recherche des chevauchements : pour une réservation horaire,
+  // checkOut === checkIn (forcé ci-dessus), donc interroger avec cette même
+  // borne raterait les réservations qui démarrent ce jour-là (cf. hotelHooks
+  // useHotelReservations, filtre check_in < rangeEnd) — on étend d'un jour,
+  // même trick que le greatest() de la contrainte SQL.
+  const overlapRangeEnd = checkOut > checkIn ? checkOut : addDays(checkIn, 1);
+  const { data: overlapping = [] } = useHotelReservations(checkIn, overlapRangeEnd);
+
+  const bookedRoomIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const res of overlapping) for (const rr of res.reservation_rooms) {
+      if (rr.status === "cancelled" || rr.status === "no_show") continue;
+      const rrEnd = rr.check_out > rr.check_in ? rr.check_out : addDays(rr.check_in, 1);
+      const dateOverlap = checkIn < rrEnd && overlapRangeEnd > rr.check_in;
+      if (!dateOverlap) continue;
+      // Chevauchement date à date confirmé — si les deux réservations sont
+      // horaires le même jour, encore falloir que les créneaux se croisent
+      // (deux passages horaires dans la même journée peuvent coexister).
+      if (isHourly && rr.billing_unit === "hour" && rr.check_in === checkIn && checkInAt && checkOutAt && rr.check_in_at && rr.check_out_at) {
+        const timeOverlap = checkInAt < rr.check_out_at && checkOutAt > rr.check_in_at;
+        if (!timeOverlap) continue;
+      }
+      set.add(rr.room_id);
+    }
+    return set;
+  }, [overlapping, checkIn, overlapRangeEnd, isHourly, checkInAt, checkOutAt]);
+
+  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>(defaultRoomId ? [defaultRoomId] : []);
+  const [guestSearch, setGuestSearch] = useState("");
+  const [guestId, setGuestId] = useState<string | null>(null);
+  const [newGuestName, setNewGuestName] = useState("");
+  const [newGuestPhone, setNewGuestPhone] = useState("");
+  const [adults, setAdults] = useState(1);
+  const [children, setChildren] = useState(0);
+  const [channel, setChannel] = useState("direct");
+  const [corporateId, setCorporateId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: guestResults = [] } = useHotelGuests(guestSearch);
+  const upsertGuest = useUpsertHotelGuest();
+  const create = useCreateHotelReservation();
 
   const nights = Math.max(1, (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
   const roomOf = (id: string) => rooms.find((r) => r.id === id);
@@ -322,7 +352,16 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
         check_in_at: checkInAt, check_out_at: checkOutAt,
       });
       onCreated(reservation.id);
-    } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
+    } catch (e: any) {
+      // 23P01 = exclusion_violation (contraintes hotel_resv_rooms_excl /
+      // _hourly_excl, schema.sql) — la chambre a été réservée entre-temps
+      // par quelqu'un d'autre sur ce créneau ; message clair plutôt que le
+      // texte Postgres brut.
+      const message = e?.code === "23P01"
+        ? "Une des chambres sélectionnées vient d'être réservée sur ce créneau par quelqu'un d'autre. Rafraîchissez et réessayez."
+        : e?.message ?? "Erreur inconnue";
+      setError(message);
+    }
   };
 
   return (

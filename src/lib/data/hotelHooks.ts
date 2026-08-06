@@ -528,10 +528,16 @@ export function useHotelReservations(rangeStart: string, rangeEnd: string) {
     queryKey: ["hotel_reservations", organizationId, rangeStart, rangeEnd],
     enabled: !!organizationId,
     queryFn: async (): Promise<HotelReservationRow[]> => {
+      // check_out.gt.rangeStart couvre les réservations nuitée classiques ;
+      // check_in.gte.rangeStart couvre en plus les réservations horaires
+      // (check_in = check_out le même jour, donc jamais > rangeStart tel
+      // quel) sans avoir à distinguer billing_unit ici — un séjour qui
+      // démarre dans la fenêtre y est toujours visible.
       const { data, error } = await supabase.from("hotel_reservations")
         .select("*, guest:hotel_guests(*), reservation_rooms:hotel_reservation_rooms(*, room:hotel_rooms(*))")
         .eq("organization_id", organizationId!)
-        .lt("check_in", rangeEnd).gt("check_out", rangeStart)
+        .lt("check_in", rangeEnd)
+        .or(`check_out.gt.${rangeStart},check_in.gte.${rangeStart}`)
         .order("check_in");
       if (error) throw error;
       return data as any;
