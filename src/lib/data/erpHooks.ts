@@ -561,3 +561,28 @@ export function useErpDashboardStats() {
     },
   });
 }
+
+// Indicateurs "période" du tableau de bord (sélecteur universel, même
+// pattern que ZegHotel Phase 6 / ZegResto) — les compteurs de stock
+// ci-dessus (produits, dépôts, transferts, inventaires) restent des
+// instantanés "maintenant", ce bloc porte le seul indicateur réellement
+// période-dépendant : le chiffre d'affaires du POS ERP (F4).
+export function useErpPeriodStats(from: Date, to: Date) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["erp_dashboard_period", organizationId, from.toISOString(), to.toISOString()],
+    enabled: !!organizationId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("erp_pos_sales")
+        .select("total_amount")
+        .eq("organization_id", organizationId!).eq("status", "completed")
+        .gte("completed_at", from.toISOString()).lte("completed_at", to.toISOString());
+      if (error) throw error;
+      const sales = data ?? [];
+      return {
+        revenue: sales.reduce((s, x) => s + Number(x.total_amount), 0),
+        salesCount: sales.length,
+      };
+    },
+  });
+}
