@@ -876,6 +876,14 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt; onClose: () => 
     setTimeout(() => { w.print(); w.close(); }, 200);
   };
 
+  // Paramètres > Vente & caisse > Impression automatique — déclenche le
+  // même print() qu'un clic manuel, une seule fois par reçu (le ticket
+  // reste affiché derrière la fenêtre d'impression, l'utilisateur peut
+  // toujours cliquer "Imprimer le reçu" pour une seconde copie).
+  useEffect(() => {
+    if (settings?.data.auto_print_receipt) print();
+  }, [receipt.ticket]);
+
   return (
     <DialogShell onClose={onClose} maxWidth="max-w-sm">
       <div className="flex items-center justify-between border-b border-border px-5 py-3">

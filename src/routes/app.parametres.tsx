@@ -67,6 +67,7 @@ function ParametresPage() {
   const [taxIncluded, setTaxIncluded] = useState(true);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [allowOversell, setAllowOversell] = useState(false);
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(false);
   const [showAddShop, setShowAddShop] = useState(false);
   const createShop = useProvisionOrganization();
 
@@ -85,6 +86,7 @@ function ParametresPage() {
     setTaxIncluded(settings.tax_included);
     setTaxRates(settings.data.tax_rates ?? []);
     setAllowOversell(settings.data.allow_oversell ?? false);
+    setAutoPrintReceipt(settings.data.auto_print_receipt ?? false);
   }, [settings]);
 
   const saveTicket = async () => {
@@ -120,7 +122,7 @@ function ParametresPage() {
   const saveVente = async () => {
     try {
       await updateSettings.mutateAsync({
-        data: { ...(settings?.data ?? {}), allow_oversell: allowOversell },
+        data: { ...(settings?.data ?? {}), allow_oversell: allowOversell, auto_print_receipt: autoPrintReceipt },
       });
     } catch (e: any) {
       alert("Erreur enregistrement des réglages de vente : " + (e?.message ?? "inconnue"));
@@ -331,6 +333,18 @@ function ParametresPage() {
                 </span>
                 <input type="checkbox" checked={allowOversell} disabled={!canManage}
                   onChange={(e) => setAllowOversell(e.target.checked)} className="h-5 w-5 shrink-0 accent-primary" />
+              </label>
+
+              <label className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-border p-3 text-sm">
+                <span>
+                  <span className="block">Impression automatique du reçu</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Lance l'impression du ticket dès qu'un encaissement est validé, sans avoir à cliquer sur
+                    « Imprimer le reçu ».
+                  </span>
+                </span>
+                <input type="checkbox" checked={autoPrintReceipt} disabled={!canManage}
+                  onChange={(e) => setAutoPrintReceipt(e.target.checked)} className="h-5 w-5 shrink-0 accent-primary" />
               </label>
 
               {canManage && (
