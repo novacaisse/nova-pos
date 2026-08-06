@@ -33,6 +33,7 @@ function ReservationsPage() {
   const updateStatus = useUpdateReservationStatus();
   const remove = useDeleteReservation();
   const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState<Reservation | null>(null);
   const [filter, setFilter] = useState<ReservationStatus | "all">("pending");
 
   const filtered = filter === "all" ? reservations : reservations.filter((r) => r.status === filter);
@@ -69,7 +70,8 @@ function ReservationsPage() {
               {filtered.map((r) => {
                 const reste = Math.max(0, Number(r.total) - Number(r.deposit));
                 return (
-                  <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div key={r.id} onClick={() => setViewing(r)}
+                    className="flex cursor-pointer flex-wrap items-center justify-between gap-3 py-3 hover:bg-muted/40">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <div className="font-semibold">{r.customer_name}</div>
@@ -85,7 +87,7 @@ function ReservationsPage() {
                       <div className="tabular text-xs text-muted-foreground">Avance {formatXOF(Number(r.deposit))}{reste > 0 && ` · Reste ${formatXOF(reste)}`}</div>
                     </div>
                     {canManage && r.status === "pending" && (
-                      <div className="flex shrink-0 items-center gap-1.5">
+                      <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => updateStatus.mutate({ id: r.id, status: "fulfilled" })} title="Marquer honorée"
                           className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-success/10 hover:text-success"><CheckCircle2 className="h-4 w-4" /></button>
                         <button onClick={() => updateStatus.mutate({ id: r.id, status: "cancelled" })} title="Annuler"
@@ -93,7 +95,7 @@ function ReservationsPage() {
                       </div>
                     )}
                     {canManage && r.status !== "pending" && (
-                      <button onClick={() => { if (confirm("Supprimer cette réservation ?")) remove.mutate(r.id); }}
+                      <button onClick={(e) => { e.stopPropagation(); if (confirm("Supprimer cette réservation ?")) remove.mutate(r.id); }}
                         className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
                     )}
                   </div>
@@ -104,6 +106,72 @@ function ReservationsPage() {
         </div>
       </div>
       {creating && <ReservationDialog onClose={() => setCreating(false)} />}
+      {viewing && (
+        <ReservationViewDialog
+          reservation={viewing}
+          canManage={canManage}
+          onClose={() => setViewing(null)}
+          onMarkFulfilled={() => { updateStatus.mutate({ id: viewing.id, status: "fulfilled" }); setViewing(null); }}
+          onCancel={() => { updateStatus.mutate({ id: viewing.id, status: "cancelled" }); setViewing(null); }}
+          onDelete={() => { if (confirm("Supprimer cette réservation ?")) { remove.mutate(viewing.id); setViewing(null); } }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReservationViewDialog({ reservation: r, canManage, onClose, onMarkFulfilled, onCancel, onDelete }: {
+  reservation: Reservation; canManage: boolean; onClose: () => void;
+  onMarkFulfilled: () => void; onCancel: () => void; onDelete: () => void;
+}) {
+  const formatXOF = useFormatMoney();
+  const reste = Math.max(0, Number(r.total) - Number(r.deposit));
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <div className="font-display text-lg font-bold">{r.customer_name}</div>
+            <div className="text-xs text-muted-foreground">{r.reference}</div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-3 p-5 text-sm">
+          <div className="flex items-center gap-2">
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase", STATUS_CLASS[r.status])}>{STATUS_LABEL[r.status]}</span>
+            <span className="text-xs text-muted-foreground">Retrait le {new Date(r.reservation_date).toLocaleDateString("fr-FR")}</span>
+          </div>
+          {r.customer_phone && <div className="flex justify-between"><span className="text-muted-foreground">Téléphone</span><span>{r.customer_phone}</span></div>}
+          <div className="space-y-1.5 rounded-xl border border-border p-3">
+            {r.items.map((it, i) => (
+              <div key={i} className="flex justify-between text-xs">
+                <span>{it.name} × {it.quantity}</span><span className="font-semibold">{formatXOF(it.quantity * it.unit_price)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-bold">{formatXOF(Number(r.total))}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Avance versée</span><span>{formatXOF(Number(r.deposit))}</span></div>
+          {reste > 0 && <div className="flex justify-between text-warning"><span>Reste dû</span><span className="font-bold">{formatXOF(reste)}</span></div>}
+        </div>
+        {canManage && (
+          <div className="flex gap-2 border-t border-border p-3">
+            {r.status === "pending" ? (
+              <>
+                <button onClick={onCancel} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-semibold text-destructive hover:bg-destructive/10">
+                  <XCircle className="h-4 w-4" /> Annuler
+                </button>
+                <button onClick={onMarkFulfilled} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:opacity-90">
+                  <CheckCircle2 className="h-4 w-4" /> Marquer honorée
+                </button>
+              </>
+            ) : (
+              <button onClick={onDelete} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm font-semibold text-destructive hover:bg-destructive/10">
+                <Trash2 className="h-4 w-4" /> Supprimer
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
