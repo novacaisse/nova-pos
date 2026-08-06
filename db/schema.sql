@@ -661,7 +661,11 @@ declare
   v_acct_sub public.account_subscriptions%rowtype;
   v_org_plan text;
   v_org_trial_ends timestamptz;
-  v_sub_status text;
+  -- Migration 072 : text auto-caste jamais implicitement vers un enum à
+  -- l'insertion (contrairement à un littéral de chaîne, résolu par le
+  -- contexte) — déclarée directement dans le type cible pour éviter le
+  -- même bug ("column status is of type subscription_status...").
+  v_sub_status public.subscription_status;
   v_sub_amount numeric;
 begin
   if v_uid is null then
