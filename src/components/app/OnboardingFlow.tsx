@@ -22,13 +22,17 @@ import { useProvisionOrganization } from "@/lib/data/hooks";
 const SECTORS = ["Épicerie", "Supérette", "Boutique de vêtements", "Boulangerie/Pâtisserie", "Pharmacie", "Quincaillerie", "Électronique/Téléphonie", "Librairie/Papeterie", "Autre"];
 const COUNTRIES = ["Bénin", "Burkina Faso", "Côte d'Ivoire", "Mali", "Sénégal", "Togo", "Niger", "Guinée"];
 
-const APPS = [
+// Exportés pour ApplicationsPanel.tsx (Profil > Applications) — active un
+// nouvel Zeg* depuis un compte qui a déjà au moins une organisation,
+// réutilisant les mêmes formulaires de configuration que le premier
+// parcours (organizations.length === 0).
+export const APPS = [
   { key: "pos", name: "ZegCaisse", desc: "Caisse, stock, ventes et facturation", icon: Store, available: true },
   { key: "hotel", name: "ZegHotel", desc: "Réservations, chambres et facturation hôtelière", icon: BedDouble, available: true },
   { key: "resto", name: "ZegResto", desc: "Salle, commandes, cuisine et réservations restaurant", icon: UtensilsCrossed, available: true },
   { key: "erp", name: "ZegERP", desc: "Stock, achats, ventes, finance, comptabilité, RH", icon: Boxes, available: true },
 ] as const;
-type AppKey = (typeof APPS)[number]["key"];
+export type AppKey = (typeof APPS)[number]["key"];
 
 export function OnboardingFlow({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const [step, setStep] = useState<"pick-app" | "setup-pos" | "setup-hotel" | "setup-resto" | "setup-erp">("pick-app");
@@ -91,7 +95,7 @@ function AppPicker({ onPick, onSignOut }: { onPick: (key: AppKey) => void; onSig
   );
 }
 
-function PosSetupForm({ onBack }: { onBack: () => void }) {
+export function PosSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -205,7 +209,7 @@ function PosSetupForm({ onBack }: { onBack: () => void }) {
 // le champ "Secteur" (retail-only, sans objet pour un hôtel) — libellés
 // adaptés. provision_organization() est générique (p_app), aucune
 // migration n'est nécessaire pour ce second parcours.
-function HotelSetupForm({ onBack }: { onBack: () => void }) {
+export function HotelSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -318,7 +322,7 @@ function HotelSetupForm({ onBack }: { onBack: () => void }) {
 // (p_app), aucune modification de fonction nécessaire pour ce 3e parcours
 // (seul organizations.app_module a dû gagner 'resto' comme valeur possible,
 // migration 036).
-function RestoSetupForm({ onBack }: { onBack: () => void }) {
+export function RestoSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -431,7 +435,7 @@ function RestoSetupForm({ onBack }: { onBack: () => void }) {
 // générique (p_app) : seul organizations.app_module a dû gagner 'erp'
 // comme valeur possible (migration 047) — aucune modification de fonction
 // nécessaire pour ce 4e parcours.
-function ErpSetupForm({ onBack }: { onBack: () => void }) {
+export function ErpSetupForm({ onBack }: { onBack: () => void }) {
   const provision = useProvisionOrganization();
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);

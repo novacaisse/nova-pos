@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { User, Lock, Palette, Save, Sun, Moon, Monitor, Loader2, Camera } from "lucide-react";
+import { User, Lock, Palette, Save, Sun, Moon, Monitor, Loader2, Camera, LayoutGrid } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useProfile, useUpdateProfile, useUploadAvatar, useMyRole } from "@/lib/data/hooks";
 import { ROLE_LABEL } from "@/lib/roles";
 import { useTheme, type ThemePref } from "@/lib/theme";
+import { ApplicationsPanel } from "@/components/app/ApplicationsPanel";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/profil")({
@@ -20,7 +21,7 @@ function initials(name: string | null | undefined, email: string | null | undefi
 }
 
 function ProfilPage() {
-  const [tab, setTab] = useState<"info" | "password" | "prefs">("info");
+  const [tab, setTab] = useState<"info" | "password" | "prefs" | "apps">("info");
   const { user, updateEmail, updatePassword } = useAuth();
   const { data: profile, isLoading: profileLoading } = useProfile();
   const updateProfile = useUpdateProfile();
@@ -129,6 +130,7 @@ function ProfilPage() {
                 { k: "info", label: "Informations", icon: User },
                 { k: "password", label: "Mot de passe", icon: Lock },
                 { k: "prefs", label: "Préférences", icon: Palette },
+                { k: "apps", label: "Applications", icon: LayoutGrid },
               ] as const).map((t) => (
                 <button key={t.k} onClick={() => setTab(t.k)}
                   className={cn("flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
@@ -178,6 +180,8 @@ function ProfilPage() {
                 </button>
               </div>
             )}
+
+            {tab === "apps" && <ApplicationsPanel />}
 
             {tab === "prefs" && (
               <div className="space-y-4">
