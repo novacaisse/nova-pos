@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Save, Trash2, Image as ImageIcon, Wand2, Loader2, X } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Image as ImageIcon, Wand2, Loader2, X, ScanLine } from "lucide-react";
 import {
   useUpsertProduct, useDeleteProduct, useUploadProductImage, useSuppliers,
   type ProductWithStock, type Category,
 } from "@/lib/data/hooks";
 import { generateSku, generateBarcode } from "@/lib/generateProductCodes";
+import { BarcodeScannerDialog } from "@/components/app/BarcodeScannerDialog";
 import { cn, selectOnFocus } from "@/lib/utils";
 
 export function ProductForm({ initial, cats, canManage }: {
@@ -26,6 +27,7 @@ export function ProductForm({ initial, cats, canManage }: {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showScanner, setShowScanner] = useState(false);
 
   const inp = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary disabled:opacity-60";
   const price = Number(form.price) || 0;
@@ -160,7 +162,15 @@ export function ProductForm({ initial, cats, canManage }: {
                     </button>
                   )}
                 </div>
-                <input value={form.barcode ?? ""} onChange={(e) => setForm({ ...form, barcode: e.target.value })} disabled={!canManage} className={inp} />
+                <div className="flex gap-2">
+                  <input value={form.barcode ?? ""} onChange={(e) => setForm({ ...form, barcode: e.target.value })} disabled={!canManage} className={inp} />
+                  {canManage && (
+                    <button type="button" onClick={() => setShowScanner(true)} title="Scanner le code-barres"
+                      className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary hover:bg-primary/15">
+                      <ScanLine className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </label>
               <label className="block">
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Catégorie</div>
@@ -233,6 +243,12 @@ export function ProductForm({ initial, cats, canManage }: {
           )}
         </div>
       </div>
+      {showScanner && (
+        <BarcodeScannerDialog onClose={() => setShowScanner(false)} onDetect={(code) => {
+          setForm((f) => ({ ...f, barcode: code }));
+          setShowScanner(false);
+        }} />
+      )}
     </div>
   );
 }
