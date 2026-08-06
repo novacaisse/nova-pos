@@ -298,8 +298,11 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>(defaultRoomId ? [defaultRoomId] : []);
   const [guestSearch, setGuestSearch] = useState("");
   const [guestId, setGuestId] = useState<string | null>(null);
+  const [selectedGuestName, setSelectedGuestName] = useState<string | null>(null);
+  const [addingGuest, setAddingGuest] = useState(false);
   const [newGuestName, setNewGuestName] = useState("");
   const [newGuestPhone, setNewGuestPhone] = useState("");
+  const [newGuestEmail, setNewGuestEmail] = useState("");
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
   const [channel, setChannel] = useState("direct");
@@ -329,21 +332,35 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
 
   const inp = "w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
 
+  // Création immédiate (comme CustomerDialog côté ZegCaisse, app.caisse.tsx)
+  // plutôt que différée à la soumission finale : la réception voit tout de
+  // suite que le client est créé et peut vérifier son nom avant de
+  // continuer, au lieu de découvrir une éventuelle erreur seulement au clic
+  // sur "Créer la réservation".
+  const createAndSelectGuest = async () => {
+    setError(null);
+    try {
+      if (!newGuestName.trim()) throw new Error("Le nom du client est requis.");
+      const g = await upsertGuest.mutateAsync({
+        full_name: newGuestName.trim(),
+        phone: newGuestPhone.trim() || undefined,
+        email: newGuestEmail.trim() || undefined,
+      });
+      setGuestId(g.id); setSelectedGuestName(g.full_name);
+      setAddingGuest(false); setNewGuestName(""); setNewGuestPhone(""); setNewGuestEmail(""); setGuestSearch("");
+    } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
+  };
+
   const submit = async () => {
     setError(null);
     try {
-      let gId = guestId;
-      if (!gId) {
-        if (!newGuestName.trim()) throw new Error("Sélectionnez ou créez un client.");
-        const g = await upsertGuest.mutateAsync({ full_name: newGuestName.trim(), phone: newGuestPhone.trim() || undefined });
-        gId = g.id;
-      }
+      if (!guestId) throw new Error("Sélectionnez ou créez un client.");
       if (!selectedRoomIds.length) throw new Error("Sélectionnez au moins une chambre.");
       if (isHourly && checkInAt && checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
         throw new Error("L'heure de départ doit être après l'heure d'arrivée.");
       }
       const reservation = await create.mutateAsync({
-        guest_id: gId, check_in: checkIn, check_out: checkOut,
+        guest_id: guestId, check_in: checkIn, check_out: checkOut,
         rate_plan_id: ratePlanId || null, corporate_account_id: corporateId || null,
         channel, adults, children, notes: notes.trim() || undefined,
         // rate_amount = null quand la réception n'a pas touché le champ :
@@ -398,8 +415,24 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Client *</span>
             {guestId ? (
               <div className="flex items-center justify-between rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
-                <span className="flex items-center gap-2"><User className="h-4 w-4 text-primary" /> {guestResults.find((g) => g.id === guestId)?.full_name ?? "Client sélectionné"}</span>
-                <button onClick={() => setGuestId(null)} className="text-xs text-muted-foreground hover:text-foreground">Changer</button>
+                <span className="flex items-center gap-2"><User className="h-4 w-4 text-primary" /> {selectedGuestName ?? "Client sélectionné"}</span>
+                <button onClick={() => { setGuestId(null); setSelectedGuestName(null); }} className="text-xs text-muted-foreground hover:text-foreground">Changer</button>
+              </div>
+            ) : addingGuest ? (
+              <div className="space-y-2 rounded-xl border border-border p-3">
+                <input value={newGuestName} autoFocus onChange={(e) => setNewGuestName(e.target.value)} placeholder="Nom *" className={inp} />
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={newGuestPhone} onChange={(e) => setNewGuestPhone(e.target.value)} placeholder="Téléphone" className={inp} />
+                  <input value={newGuestEmail} onChange={(e) => setNewGuestEmail(e.target.value)} placeholder="Email" className={inp} />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => { setAddingGuest(false); setNewGuestName(""); setNewGuestPhone(""); setNewGuestEmail(""); }}
+                    className="h-9 flex-1 rounded-xl border border-border bg-card text-xs font-semibold">Retour</button>
+                  <button onClick={createAndSelectGuest} disabled={!newGuestName.trim() || upsertGuest.isPending}
+                    className="flex h-9 flex-[2] items-center justify-center gap-1.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground disabled:opacity-40">
+                    {upsertGuest.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Créer et sélectionner
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-2">
@@ -407,17 +440,17 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
                 {guestSearch.trim() && guestResults.length > 0 && (
                   <div className="max-h-32 overflow-y-auto rounded-xl border border-border">
                     {guestResults.map((g) => (
-                      <button key={g.id} onClick={() => { setGuestId(g.id); setGuestSearch(""); }}
+                      <button key={g.id} onClick={() => { setGuestId(g.id); setSelectedGuestName(g.full_name); setGuestSearch(""); }}
                         className="block w-full px-3 py-2 text-left text-sm hover:bg-muted">
                         {g.full_name} {g.phone && <span className="text-xs text-muted-foreground">— {g.phone}</span>}
                       </button>
                     ))}
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <input value={newGuestName} onChange={(e) => setNewGuestName(e.target.value)} placeholder="Nouveau client : nom" className={inp} />
-                  <input value={newGuestPhone} onChange={(e) => setNewGuestPhone(e.target.value)} placeholder="Téléphone" className={inp} />
-                </div>
+                <button onClick={() => setAddingGuest(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2 text-xs font-semibold text-muted-foreground hover:border-primary hover:text-primary">
+                  <User className="h-3.5 w-3.5" /> Nouveau client
+                </button>
               </div>
             )}
           </div>
