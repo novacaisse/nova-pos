@@ -57,12 +57,6 @@ export type HotelSettings = {
   occupancy_pricing_enabled: boolean; occupancy_pricing_threshold_pct: number;
   occupancy_pricing_adjustment_pct: number; updated_at: string;
 };
-export type HotelChannel = {
-  id: string; organization_id: string; name: string; is_active: boolean;
-  external_id: string | null; created_at: string;
-  // Migration 034 — ZegHotel Phase 8 : gestion manuelle par canal.
-  notes: string | null; manual_rate: number | null;
-};
 export type HotelGuest = {
   id: string; organization_id: string; full_name: string; email: string | null;
   phone: string | null; id_document_type: string | null; id_document_number: string | null;
@@ -399,43 +393,6 @@ export function useUpdateHotelSettings() {
       if (error) throw error; return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_settings", organizationId] }),
-  });
-}
-
-// ============ CHANNELS (Phase 8 — gestion manuelle, pas de sync API) ============
-export function useHotelChannels() {
-  const organizationId = useOrganizationId();
-  return useQuery({
-    queryKey: ["hotel_channels", organizationId],
-    enabled: !!organizationId,
-    queryFn: async (): Promise<HotelChannel[]> => {
-      const { data, error } = await supabase.from("hotel_channels")
-        .select("*").eq("organization_id", organizationId!).order("name");
-      if (error) throw error;
-      return data as HotelChannel[];
-    },
-  });
-}
-export function useUpsertHotelChannel() {
-  const organizationId = useOrganizationId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (c: Partial<HotelChannel> & { name: string }) => {
-      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
-      const { data, error } = await supabase.from("hotel_channels")
-        .upsert({ ...c, organization_id: organizationId }).select().single();
-      if (error) throw error; return data;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_channels", organizationId] }),
-  });
-}
-export function useDeleteHotelChannel() {
-  const organizationId = useOrganizationId(); const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("hotel_channels").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_channels", organizationId] }),
   });
 }
 

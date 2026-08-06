@@ -79,7 +79,6 @@ import { Route as AppHotelHousekeepingRouteImport } from './routes/app.hotel.hou
 import { Route as AppHotelEquipeRouteImport } from './routes/app.hotel.equipe'
 import { Route as AppHotelCorporateRouteImport } from './routes/app.hotel.corporate'
 import { Route as AppHotelClientsRouteImport } from './routes/app.hotel.clients'
-import { Route as AppHotelCanauxRouteImport } from './routes/app.hotel.canaux'
 import { Route as AppErpVentesRouteImport } from './routes/app.erp.ventes'
 import { Route as AppErpStockRouteImport } from './routes/app.erp.stock'
 import { Route as AppErpRhRouteImport } from './routes/app.erp.rh'
@@ -447,11 +446,6 @@ const AppHotelClientsRoute = AppHotelClientsRouteImport.update({
   path: '/clients',
   getParentRoute: () => AppHotelRoute,
 } as any)
-const AppHotelCanauxRoute = AppHotelCanauxRouteImport.update({
-  id: '/canaux',
-  path: '/canaux',
-  getParentRoute: () => AppHotelRoute,
-} as any)
 const AppErpVentesRoute = AppErpVentesRouteImport.update({
   id: '/ventes',
   path: '/ventes',
@@ -584,7 +578,6 @@ export interface FileRoutesByFullPath {
   '/app/erp/rh': typeof AppErpRhRoute
   '/app/erp/stock': typeof AppErpStockRoute
   '/app/erp/ventes': typeof AppErpVentesRoute
-  '/app/hotel/canaux': typeof AppHotelCanauxRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
@@ -664,7 +657,6 @@ export interface FileRoutesByTo {
   '/app/erp/rh': typeof AppErpRhRoute
   '/app/erp/stock': typeof AppErpStockRoute
   '/app/erp/ventes': typeof AppErpVentesRoute
-  '/app/hotel/canaux': typeof AppHotelCanauxRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
@@ -752,7 +744,6 @@ export interface FileRoutesById {
   '/app/erp/rh': typeof AppErpRhRoute
   '/app/erp/stock': typeof AppErpStockRoute
   '/app/erp/ventes': typeof AppErpVentesRoute
-  '/app/hotel/canaux': typeof AppHotelCanauxRoute
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
@@ -842,7 +833,6 @@ export interface FileRouteTypes {
     | '/app/erp/rh'
     | '/app/erp/stock'
     | '/app/erp/ventes'
-    | '/app/hotel/canaux'
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
@@ -922,7 +912,6 @@ export interface FileRouteTypes {
     | '/app/erp/rh'
     | '/app/erp/stock'
     | '/app/erp/ventes'
-    | '/app/hotel/canaux'
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
@@ -1009,7 +998,6 @@ export interface FileRouteTypes {
     | '/app/erp/rh'
     | '/app/erp/stock'
     | '/app/erp/ventes'
-    | '/app/hotel/canaux'
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
@@ -1547,13 +1535,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHotelClientsRouteImport
       parentRoute: typeof AppHotelRoute
     }
-    '/app/hotel/canaux': {
-      id: '/app/hotel/canaux'
-      path: '/canaux'
-      fullPath: '/app/hotel/canaux'
-      preLoaderRoute: typeof AppHotelCanauxRouteImport
-      parentRoute: typeof AppHotelRoute
-    }
     '/app/erp/ventes': {
       id: '/app/erp/ventes'
       path: '/ventes'
@@ -1743,7 +1724,6 @@ const AppHotelProduitsRouteWithChildren =
   AppHotelProduitsRoute._addFileChildren(AppHotelProduitsRouteChildren)
 
 interface AppHotelRouteChildren {
-  AppHotelCanauxRoute: typeof AppHotelCanauxRoute
   AppHotelClientsRoute: typeof AppHotelClientsRoute
   AppHotelCorporateRoute: typeof AppHotelCorporateRoute
   AppHotelEquipeRoute: typeof AppHotelEquipeRoute
@@ -1759,7 +1739,6 @@ interface AppHotelRouteChildren {
 }
 
 const AppHotelRouteChildren: AppHotelRouteChildren = {
-  AppHotelCanauxRoute: AppHotelCanauxRoute,
   AppHotelClientsRoute: AppHotelClientsRoute,
   AppHotelCorporateRoute: AppHotelCorporateRoute,
   AppHotelEquipeRoute: AppHotelEquipeRoute,

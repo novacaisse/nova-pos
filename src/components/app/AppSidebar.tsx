@@ -124,7 +124,6 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
     { title: "Point de vente", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
-    { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
   ],
   // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu ;
   // Phase 2 : Commandes + Cuisine) — réservations/rapports rejoignent ce
@@ -216,10 +215,6 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
   // front_desk — housekeeping/accountant masqués ici en cohérence.
   "/app/hotel/pos-interne": ["housekeeping", "accountant"],
-  // Canaux de distribution (ZegHotel Phase 8, migration 034) : hotel_channels_all
-  // n'accorde qu'owner/manager (table existante depuis 020g) — masqué pour
-  // les autres rôles hôtel en cohérence.
-  "/app/hotel/canaux": ["housekeeping", "accountant", "front_desk"],
   // ZegResto : le Cuisinier n'a accès qu'au KDS (/app/resto/cuisine,
   // Phase 2) — masqué de tout le reste de la nav resto. Le Serveur a accès
   // au plan de salle et à la prise de commande mais pas au menu, aux
@@ -311,7 +306,6 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   "/app/hotel/produits": "produits",
   "/app/hotel/pos-interne": "hotel_pos_interne",
   "/app/hotel/rapports": "hotel_rapports",
-  "/app/hotel/canaux": "hotel_canaux",
   "/app/hotel/parametres": "hotel_parametres",
 };
 // Idem ZegResto (Équipe Phase D-2, migrations 068/069).

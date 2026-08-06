@@ -21,7 +21,6 @@ import {
   Wrench,
   Building2,
   Coffee,
-  Radio,
   UtensilsCrossed,
   LayoutGrid,
   BookOpen,
@@ -72,8 +71,8 @@ const HOTEL_MORE: Item[] = [
   { label: "Maintenance", to: "/app/hotel/maintenance", icon: Wrench },
   { label: "Clients", to: "/app/hotel/clients", icon: Users },
   { label: "Entreprises", to: "/app/hotel/corporate", icon: Building2 },
-  { label: "POS interne", to: "/app/hotel/pos-interne", icon: Coffee },
-  { label: "Canaux", to: "/app/hotel/canaux", icon: Radio },
+  { label: "POS", to: "/app/hotel/pos-interne", icon: Coffee },
+  { label: "Produits", to: "/app/hotel/produits", icon: Package },
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/hotel/parametres", icon: Settings },
@@ -152,8 +151,8 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   "/app/hotel/clients": "hotel_clients",
   "/app/hotel/corporate": "hotel_corporate",
   "/app/hotel/pos-interne": "hotel_pos_interne",
+  "/app/hotel/produits": "produits",
   "/app/hotel/rapports": "hotel_rapports",
-  "/app/hotel/canaux": "hotel_canaux",
   "/app/hotel/parametres": "hotel_parametres",
 };
 // Idem ZegResto (Équipe Phase D-2, migrations 068/069).
@@ -238,18 +237,15 @@ export function BottomNav() {
     ? ERP_MORE.filter(included)
     : useHotelNav
     ? (myRole === "housekeeping"
-        ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
+        ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne"].includes(m.to))
         // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de
         // hotel_guests_select (données d'identité restreintes à
         // owner/manager/front_desk). POS interne (Phase 7, migration 033) :
         // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
-        // front_desk. Canaux (Phase 8, migration 034) : hotel_channels_all
-        // n'accorde qu'owner/manager. Masqués ici aussi.
+        // front_desk. Masqués ici aussi.
         : myRole === "accountant"
-          ? HOTEL_MORE.filter(included).filter((m) => !["/app/hotel/clients", "/app/hotel/pos-interne", "/app/hotel/canaux"].includes(m.to))
-          : myRole === "front_desk"
-            ? HOTEL_MORE.filter(included).filter((m) => m.to !== "/app/hotel/canaux")
-            : HOTEL_MORE.filter(included))
+          ? HOTEL_MORE.filter(included).filter((m) => !["/app/hotel/clients", "/app/hotel/pos-interne"].includes(m.to))
+          : HOTEL_MORE.filter(included))
     : useRestoNav
       // server : pas d'accès cuisine/menu/paramètres (décision produit
       // ZegResto — le statut du ticket reste visible depuis Commandes).
