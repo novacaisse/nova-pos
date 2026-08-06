@@ -118,3 +118,22 @@ Toutes les données de test ont été créées et vérifiées à l'intérieur de
 ### Résumé honnête
 
 Ce qui est **réellement neuf et vérifié** : la matrice CRUD par membre, son UI, son backfill sans perte, et le fait que les 287 policies existantes en héritent automatiquement. Ce qui **reste identique à avant** (par choix assumé, documenté ci-dessus, pas par oubli) : les 28 verrous owner/manager côté DELETE/INSERT les plus sensibles, la gestion de `organizations`/Storage, et les tables de l'ancien système (non supprimées, orphelines). Si l'intention était de rendre **tout** délégable sans exception, ce travail reste à faire consciemment, module par module, avec le même niveau de test que ci-dessus.
+
+## Addendum — Correctif urgent : matrice non éditable (PR #31)
+
+Bug signalé après merge de la Partie 4 : l'écran ZegCaisse affichait encore, **en plus** de l'écran par membre ci-dessus, un onglet résiduel "Matrice de référence" — l'ancien tableau statique par rôle nommé (S/I/U/D, "non modifiable ici"), jamais retiré lors du chantier "rôles personnalisés" précédent.
+
+**Diagnostic** (sur les 4 apps, en base) : seul `app.equipe.tsx` (ZegCaisse) passait le prop qui affichait ce tableau ; ZegHotel/ZegResto/ZegERP ne l'ont jamais eu. `organization_module_permissions` est bien peuplée **par membre individuel** partout (vérifié : contrainte `unique(organization_id, user_id, module_key)`, aucune colonne de rôle) — pas de problème de structure de données, uniquement un résidu d'UI côté ZegCaisse.
+
+**Correctif** : suppression du tableau statique et du fichier `src/lib/permissionsMatrix.ts` ; le prop `showPermissionsMatrix` devient `showCashierToggles`, recentré sur les 3 bascules ZegCaisse (sans rapport avec les permissions), déplacées dans un onglet "Réglages caissier" séparé. Les 4 apps affichent désormais le même écran Membres + Permissions. **Aucune policy RLS modifiée.**
+
+### Vérification avant merge (Supabase MCP, base réelle, projet `iwpxafuoxixjhioyuhdm`)
+
+- **Policies `organization_module_permissions` inchangées** : toujours exactement 2 (`org_module_perms_select` : soi-même ou owner ; `org_module_perms_write` : `ALL`, owner uniquement, `qual`/`with_check` identiques à la Partie 4).
+- **Test réel sur 2 apps différentes**, via `set local request.jwt.claims` (simulation JWT directe, jamais via l'UI) — reproduisant exactement l'opération que fait `useUpsertModulePermission()` (un `upsert` direct sur la table) :
+  - **ZegCaisse** (organisation réelle, `cashier` réel, module `fournisseurs`) : owner accorde `can_read` → confirmé en `SELECT` direct → `my_module_permissions()` vu par le cashier passe immédiatement de `can_view=false` à `true` (module apparaîtrait dans sa nav) → owner retire l'accès → `can_view` repasse à `false` immédiatement, sans latence ni cache.
+  - **ZegHotel** (organisation réelle "ZETHEL", membre `front_desk` rattaché temporairement pour le test — aucun membre non-owner réel n'existait encore côté ZegHotel en production —, module `hotel_clients`) : même séquence, même résultat (`can_view` false → true → false, reflété immédiatement).
+- **Verrouillage de l'écran d'édition confirmé sur les 2 apps testées** : le membre non-owner (`cashier` sur ZegCaisse, `front_desk` sur ZegHotel) tentant d'écrire directement sur `organization_module_permissions` reçoit `42501 new row violates row-level security policy` — la RLS bloque même un appel direct, pas seulement le bouton caché côté UI (`isOwner && !isSelf` dans `TeamPage.tsx`).
+- **Zéro résidu** : aucune des écritures de test (permissions, rattachement temporaire du membre `front_desk` pour le test ZegHotel) n'a été commitée — confirmé après coup par requête directe sur les deux tables concernées (0 ligne restante).
+
+PR #31 mergée après cette vérification.

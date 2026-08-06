@@ -16,7 +16,6 @@ import {
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useAccountMemberLimit } from "@/lib/data/accountHooks";
 import { ROLE_LABEL, type AppRole } from "@/lib/roles";
-import { PERMISSIONS_MATRIX } from "@/lib/permissionsMatrix";
 import { cn } from "@/lib/utils";
 
 function initials(name: string | null | undefined) {
@@ -26,15 +25,24 @@ function initials(name: string | null | undefined) {
   return src.slice(0, 2).toUpperCase();
 }
 
-export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsMatrix, customRolesAppModule }: {
-  roles: AppRole[]; defaultRole: AppRole; title: string; subtitle: string; showPermissionsMatrix: boolean;
-  // "pos" pour ZegCaisse (seule app branchée pour l'instant — Phase D
-  // ajoutera hotel/resto/erp) : fait apparaître l'onglet "Rôles
-  // personnalisés" et le sélecteur de rôle personnalisé par membre.
-  // Omis = comportement strictement inchangé (ZegHotel aujourd'hui).
+export function TeamPage({ roles, defaultRole, title, subtitle, showCashierToggles, customRolesAppModule }: {
+  roles: AppRole[]; defaultRole: AppRole; title: string; subtitle: string;
+  // Bascules ZegCaisse uniquement (remise, marge, historique limité) — un
+  // réglage de comportement du rôle Caissier, PAS une matrice de
+  // permissions. Onglet séparé et clairement distinct de "Permissions"
+  // pour ne plus jamais être confondu avec elle (voir correctif urgent
+  // "matrice non éditable" — l'ancienne matrice statique par rôle nommé,
+  // affichée ici sous ce même prop, a été supprimée).
+  showCashierToggles?: boolean;
+  // "pos"/"hotel"/"resto"/"erp" : module dont la table
+  // organization_module_permissions gère les droits — fait apparaître
+  // l'onglet "Permissions" (matrice CRUD par membre, migration 084) et le
+  // bouton "Permissions" par ligne. Les 4 apps le fournissent toutes
+  // désormais : ce doit être le SEUL écran de gestion des permissions,
+  // identique sur les 4 apps.
   customRolesAppModule?: string;
 }) {
-  const [tab, setTab] = useState<"members" | "perms" | "roles">("members");
+  const [tab, setTab] = useState<"members" | "roles" | "toggles">("members");
   const { user } = useAuth();
   const { data: myRole } = useMyRole();
   const { data: members = [], isLoading } = useShopMembers();
@@ -73,18 +81,16 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
           <StatCard label="Rôles distincts" value={String(roleCounts)} icon={<Shield className="h-5 w-5" />} accent="accent" />
         </div>
 
-{/* La matrice statique PERMISSIONS_MATRIX (onglet "perms") est spécifique
-    ZegCaisse (voir permissionsMatrix.ts) — gardée derrière
-    showPermissionsMatrix seul. L'onglet "Permissions" (matrice CRUD par
-    membre, migration 084), lui, doit s'afficher dès qu'une app fournit
-    customRolesAppModule, même si elle n'a pas (encore) cette matrice
-    statique (cas ZegHotel). */}
-        {(showPermissionsMatrix || customRolesAppModule) && (
+{/* Même écran "Membres" + "Permissions" sur les 4 apps (ZegCaisse, ZegHotel,
+    ZegResto, ZegERP) — un seul composant partagé, voir customRolesAppModule
+    ci-dessus. "Réglages caissier" (showCashierToggles) est un onglet à part,
+    ZegCaisse uniquement, qui ne gère aucune permission. */}
+        {(customRolesAppModule || showCashierToggles) && (
           <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
-            {(["members", ...(showPermissionsMatrix ? (["perms"] as const) : []), ...(customRolesAppModule ? (["roles"] as const) : [])] as const).map((t) => (
+            {(["members", ...(customRolesAppModule ? (["roles"] as const) : []), ...(showCashierToggles ? (["toggles"] as const) : [])] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={cn("flex-1 rounded-lg px-3 py-2 text-sm font-medium", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-                {t === "members" ? "Membres" : t === "perms" ? "Matrice de référence" : "Permissions"}
+                {t === "members" ? "Membres" : t === "roles" ? "Permissions" : "Réglages caissier"}
               </button>
             ))}
           </div>
@@ -128,42 +134,7 @@ export function TeamPage({ roles, defaultRole, title, subtitle, showPermissionsM
             onEdit={(m) => setEditingPermissionsFor(m)} />
         )}
 
-        {showPermissionsMatrix && tab === "perms" && (
-          <div className="space-y-4">
-            <TogglesPanel isOwner={isOwner} />
-
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="mb-4 text-sm font-semibold">
-              Matrice de permissions réelle (fixée par les règles de sécurité de la base — non modifiable ici)
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Donnée</th>
-                    {roles.map((r) => (
-                      <th key={r} className="px-3 py-2 text-center text-xs font-semibold text-muted-foreground">{ROLE_LABEL[r]}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {PERMISSIONS_MATRIX.map((row) => (
-                    <tr key={row.table} className="border-b border-border/60">
-                      <td className="px-3 py-2 font-medium">{row.label}</td>
-                      {roles.map((r) => (
-                        <td key={r} className="px-3 py-2 text-center font-mono text-xs">{row.cells[r] ?? "—"}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              S = lecture, I = création, U = modification, D = suppression. « — » = aucun accès.
-            </p>
-          </div>
-          </div>
-        )}
+        {showCashierToggles && tab === "toggles" && <TogglesPanel isOwner={isOwner} />}
       </div>
 
       {inviting && <CreateMemberModal onClose={() => setInviting(false)} roles={roles} defaultRole={defaultRole} />}

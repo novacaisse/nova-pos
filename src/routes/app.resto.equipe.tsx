@@ -8,7 +8,6 @@ export const Route = createFileRoute("/app/resto/equipe")({
       defaultRole="server"
       title="Équipe"
       subtitle="Utilisateurs et rôles ZegResto"
-      showPermissionsMatrix={false}
       customRolesAppModule="resto"
     />
   ),

@@ -8,7 +8,7 @@ export const Route = createFileRoute("/app/equipe")({
       defaultRole="cashier"
       title="Équipe"
       subtitle="Utilisateurs, rôles et permissions ZegCaisse"
-      showPermissionsMatrix
+      showCashierToggles
       customRolesAppModule="pos"
     />
   ),
