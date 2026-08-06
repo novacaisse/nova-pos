@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ChevronLeft, ChevronRight, Plus, X, Loader2, User, LogIn, LogOut, Ban, CheckCircle2, Banknote, Printer,
+  ChevronLeft, ChevronRight, Plus, X, Loader2, User, LogIn, LogOut, Ban, CheckCircle2, Banknote, Printer, RotateCcw,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useMyRole, useFormatMoney, useShopSettings } from "@/lib/data/hooks";
@@ -611,6 +611,10 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
   const [payAmount, setPayAmount] = useState(0);
   const [payMethod, setPayMethod] = useState<HotelPaymentMethod>("cash");
   const [depositAmount, setDepositAmount] = useState(0);
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundAmount, setRefundAmount] = useState(0);
+  const [refundMethod, setRefundMethod] = useState<HotelPaymentMethod>("cash");
+  const [refundReason, setRefundReason] = useState("");
 
   return (
     <>
@@ -698,7 +702,15 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                       <div key={c.id} className="flex items-center justify-between text-sm"><span className="text-muted-foreground">{c.description}</span><span>{formatMoney(c.amount * c.quantity)}</span></div>
                     ))}
                     {folio.payments.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between text-sm text-success"><span>Paiement ({p.method})</span><span>- {formatMoney(p.amount)}</span></div>
+                      p.kind === "refund" ? (
+                        <div key={p.id} className="flex items-center justify-between text-sm text-destructive">
+                          <span>Remboursement ({p.method}){p.reference ? ` — ${p.reference}` : ""}</span><span>+ {formatMoney(p.amount)}</span>
+                        </div>
+                      ) : (
+                        <div key={p.id} className="flex items-center justify-between text-sm text-success">
+                          <span>Paiement ({p.method})</span><span>- {formatMoney(p.amount)}</span>
+                        </div>
+                      )
                     ))}
                   </div>
                   <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-sm font-bold">
@@ -728,6 +740,43 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                           onClick={() => run(async () => { await addPayment.mutateAsync({ folio_id: folio.id, amount: payAmount, method: payMethod }); setPayAmount(0); })}
                           className="flex items-center gap-1 rounded-xl bg-success/10 px-3 text-xs font-semibold text-success disabled:opacity-40"><Banknote className="h-3.5 w-3.5" /> Encaisser (manuel)</button>
                       </div>
+                      {/* Remboursement (mission "Onboarding + MoneyFusion +
+                          permissions", Partie 3) : simple écriture au ledger
+                          (kind="refund", déjà pris en compte par
+                          folioBalance()) — aucun appel MoneyFusion, le
+                          transfert d'argent réel se fait hors app (espèces,
+                          virement...), ce champ n'enregistre que la trace. */}
+                      {!refundOpen ? (
+                        <button onClick={() => setRefundOpen(true)}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-destructive/40 px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/5">
+                          <RotateCcw className="h-3.5 w-3.5" /> Rembourser un acompte
+                        </button>
+                      ) : (
+                        <div className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+                          <div className="flex gap-2">
+                            <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value as HotelPaymentMethod)}
+                              className="rounded-xl border border-border bg-background px-2 py-2 text-xs">
+                              <option value="cash">Espèces</option><option value="mobile_money">Mobile Money</option><option value="card">Carte</option><option value="bank_transfer">Virement</option>
+                            </select>
+                            <input type="number" onFocus={selectOnFocus} value={refundAmount || ""} onChange={(e) => setRefundAmount(Number(e.target.value))}
+                              placeholder="Montant remboursé" className="flex-1 rounded-xl border border-border bg-background px-2 py-2 text-xs" />
+                          </div>
+                          <input value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Motif / référence (ex : annulation réservation)"
+                            className="w-full rounded-xl border border-border bg-background px-2 py-2 text-xs" />
+                          <div className="flex gap-2">
+                            <button onClick={() => { setRefundOpen(false); setRefundAmount(0); setRefundReason(""); }}
+                              className="h-9 flex-1 rounded-xl border border-border bg-card text-xs font-semibold">Annuler</button>
+                            <button disabled={busy || !refundAmount}
+                              onClick={() => run(async () => {
+                                await addPayment.mutateAsync({ folio_id: folio.id, amount: refundAmount, method: refundMethod, kind: "refund", reference: refundReason.trim() || undefined });
+                                setRefundOpen(false); setRefundAmount(0); setRefundReason("");
+                              })}
+                              className="flex h-9 flex-[2] items-center justify-center gap-1.5 rounded-xl bg-destructive/10 text-xs font-bold text-destructive disabled:opacity-40">
+                              <RotateCcw className="h-3.5 w-3.5" /> Confirmer le remboursement
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       {/* Lien de paiement Mobile Money réel — le montant du
                           solde est recalculé côté serveur (jamais celui
                           affiché ici), toujours exact au moment du clic. */}
