@@ -121,6 +121,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Maintenance", url: "/app/hotel/maintenance", icon: "Wrench" },
     { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
     { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
+    { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
     { title: "Point de vente interne", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
     { title: "Canaux de distribution", url: "/app/hotel/canaux", icon: "Radio" },
@@ -207,6 +208,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // Comptes entreprise (ZegHotel Phase 4, migration 031) : housekeeping
   // n'a RLS-wise aucun accès (données financières hors de son périmètre).
   "/app/hotel/corporate": ["housekeeping"],
+  // Produits & Stock : lecture ouverte à tout membre (products_select),
+  // écriture réservée par has_module_permission('produits') — housekeeping
+  // masqué en cohérence avec les autres modules hors de son périmètre.
+  "/app/hotel/produits": ["housekeeping"],
   // Point de vente interne (ZegHotel Phase 7, migration 033) :
   // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
   // front_desk — housekeeping/accountant masqués ici en cohérence.
@@ -299,6 +304,11 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   "/app/hotel/maintenance": "hotel_maintenance",
   "/app/hotel/clients": "hotel_clients",
   "/app/hotel/corporate": "hotel_corporate",
+  // "produits" (pas un module hôtel dédié) : products/categories sont des
+  // tables partagées avec ZegCaisse, gardées par ce même module_key
+  // (has_module_permission ne filtre pas par app_module) — même clé que
+  // POS_MODULE_FOR_URL ci-dessus.
+  "/app/hotel/produits": "produits",
   "/app/hotel/pos-interne": "hotel_pos_interne",
   "/app/hotel/rapports": "hotel_rapports",
   "/app/hotel/canaux": "hotel_canaux",

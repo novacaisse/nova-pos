@@ -9,10 +9,15 @@ import { generateSku, generateBarcode } from "@/lib/generateProductCodes";
 import { BarcodeScannerDialog } from "@/components/app/BarcodeScannerDialog";
 import { cn, selectOnFocus } from "@/lib/utils";
 
-export function ProductForm({ initial, cats, canManage }: {
+export function ProductForm({ initial, cats, canManage, basePath = "/app/produits" }: {
   initial: Partial<ProductWithStock>;
   cats: Category[];
   canManage: boolean;
+  // ZegHotel réutilise ce même formulaire (produits/categories/stock sont
+  // des tables partagées, pas propres à ZegCaisse) depuis /app/hotel/produits
+  // — sans ce paramètre, "Annuler"/après-enregistrement renverrait toujours
+  // vers /app/produits, hors contexte pour une organisation ZegHotel.
+  basePath?: string;
 }) {
   const navigate = useNavigate();
   const upsert = useUpsertProduct();
@@ -53,7 +58,7 @@ export function ProductForm({ initial, cats, canManage }: {
         const url = await uploadImage.mutateAsync({ productId: saved.id, file: imageFile });
         await upsert.mutateAsync({ id: saved.id, name: saved.name, price: saved.price, image_url: url });
       }
-      navigate({ to: "/app/produits" });
+      navigate({ to: basePath as never });
     } catch (e: any) {
       setError(e?.message ?? "Impossible d'enregistrer le produit.");
     } finally {
@@ -64,13 +69,13 @@ export function ProductForm({ initial, cats, canManage }: {
   const doDelete = async () => {
     if (!form.id) return;
     await remove.mutateAsync(form.id);
-    navigate({ to: "/app/produits" });
+    navigate({ to: basePath as never });
   };
 
   return (
     <div>
       <div className="flex items-center gap-3 border-b border-border bg-card/50 px-5 py-5 sm:px-8">
-        <button onClick={() => navigate({ to: "/app/produits" })}
+        <button onClick={() => navigate({ to: basePath as never })}
           className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-border hover:bg-muted">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -232,7 +237,7 @@ export function ProductForm({ initial, cats, canManage }: {
 
           {canManage && (
             <div className="flex justify-end gap-2">
-              <button onClick={() => navigate({ to: "/app/produits" })} className="h-11 rounded-xl border border-border bg-card px-5 text-sm font-semibold">
+              <button onClick={() => navigate({ to: basePath as never })} className="h-11 rounded-xl border border-border bg-card px-5 text-sm font-semibold">
                 Annuler
               </button>
               <button onClick={save} disabled={!form.name || !form.price || saving}
