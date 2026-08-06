@@ -507,10 +507,27 @@ export function useHotelGuestStays(guestId: string | null) {
         }
       }
 
-      return (reservations ?? []).map((r: any) => ({
-        reservation_id: r.id, check_in: r.check_in, check_out: r.check_out, status: r.status, billing_unit: r.billing_unit,
-        total: totalByFolio.get(folioIdByReservation.get(r.id) ?? "") ?? 0,
-      }));
+      // Proforma (même logique que printHotelInvoice, app.hotel.reservations.tsx) :
+      // avant check-in la note n'a encore aucune charge "room" postée — sans
+      // ce repli, un séjour "à venir" affiche 0 F dans l'historique alors
+      // qu'un tarif est déjà fixé sur hotel_reservation_rooms.
+      const roomTotalByReservation = new Map<string, number>();
+      const { data: resvRooms, error: resvRoomsErr } = await supabase.from("hotel_reservation_rooms")
+        .select("reservation_id, rate_amount, status").in("reservation_id", reservationIds);
+      if (resvRoomsErr) throw resvRoomsErr;
+      for (const rr of (resvRooms ?? []) as any[]) {
+        if (rr.status === "cancelled" || rr.status === "no_show") continue;
+        roomTotalByReservation.set(rr.reservation_id, (roomTotalByReservation.get(rr.reservation_id) ?? 0) + rr.rate_amount);
+      }
+
+      return (reservations ?? []).map((r: any) => {
+        const folioId = folioIdByReservation.get(r.id);
+        const postedTotal = folioId ? totalByFolio.get(folioId) : undefined;
+        return {
+          reservation_id: r.id, check_in: r.check_in, check_out: r.check_out, status: r.status, billing_unit: r.billing_unit,
+          total: postedTotal ?? roomTotalByReservation.get(r.id) ?? 0,
+        };
+      });
     },
   });
 }
