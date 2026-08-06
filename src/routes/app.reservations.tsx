@@ -6,12 +6,13 @@
 // main propre d'un ticket en attente).
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, X, Loader2, AlertCircle, Search, Trash2, CheckCircle2, XCircle, CalendarRange } from "lucide-react";
+import { Plus, X, Loader2, AlertCircle, Search, Trash2, CheckCircle2, XCircle, CalendarRange, Banknote, Smartphone, CreditCard } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
   useReservations, useUpsertReservation, useUpdateReservationStatus, useDeleteReservation,
   useCustomers, useProducts, useMyRole, useFormatMoney,
-  type Reservation, type ReservationItem, type ReservationStatus, type Customer,
+  useReservationPayments, useAddReservationPayment,
+  type Reservation, type ReservationItem, type ReservationStatus, type Customer, type Sale,
 } from "@/lib/data/hooks";
 import { cn, selectOnFocus } from "@/lib/utils";
 
@@ -150,8 +151,10 @@ function ReservationViewDialog({ reservation: r, canManage, onClose, onMarkFulfi
             ))}
           </div>
           <div className="flex justify-between"><span className="text-muted-foreground">Total</span><span className="font-bold">{formatXOF(Number(r.total))}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Avance versée</span><span>{formatXOF(Number(r.deposit))}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Versé à ce jour</span><span>{formatXOF(Number(r.deposit))}</span></div>
           {reste > 0 && <div className="flex justify-between text-warning"><span>Reste dû</span><span className="font-bold">{formatXOF(reste)}</span></div>}
+
+          {canManage && r.status === "pending" && <InstallmentPayments reservation={r} reste={reste} />}
         </div>
         {canManage && (
           <div className="flex gap-2 border-t border-border p-3">
@@ -172,6 +175,72 @@ function ReservationViewDialog({ reservation: r, canManage, onClose, onMarkFulfi
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const INSTALLMENT_METHODS: { k: Sale["payment_method"]; label: string; icon: typeof Banknote }[] = [
+  { k: "cash", label: "Espèces", icon: Banknote },
+  { k: "mobile_money", label: "Mobile Money", icon: Smartphone },
+  { k: "card", label: "Carte", icon: CreditCard },
+];
+
+// Paiements échelonnés (migration 074) : reservations.deposit reste le
+// total versé (somme des installments), reservation_payments journalise
+// chaque versement individuel — historique affiché ici.
+function InstallmentPayments({ reservation, reste }: { reservation: Reservation; reste: number }) {
+  const formatXOF = useFormatMoney();
+  const { data: payments = [], isLoading } = useReservationPayments(reservation.id);
+  const addPayment = useAddReservationPayment();
+  const [amount, setAmount] = useState(reste);
+  const [method, setMethod] = useState<Sale["payment_method"]>("cash");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    try {
+      await addPayment.mutateAsync({ reservationId: reservation.id, amount, method });
+      setAmount(0);
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur enregistrement du paiement.");
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-border p-3">
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Paiements échelonnés</div>
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement…</div>
+      ) : payments.length > 0 && (
+        <div className="space-y-1">
+          {payments.map((p) => (
+            <div key={p.id} className="flex justify-between text-xs text-muted-foreground">
+              <span>{new Date(p.created_at).toLocaleDateString("fr-FR")}</span>
+              <span className="font-semibold text-foreground">{formatXOF(Number(p.amount))}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {reste > 0 && (
+        <div className="space-y-2 pt-1">
+          <div className="flex gap-2">
+            <input type="number" onFocus={selectOnFocus} min={1} max={reste} value={amount || ""}
+              onChange={(e) => setAmount(Number(e.target.value) || 0)}
+              className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-sm" placeholder="Montant" />
+            {INSTALLMENT_METHODS.map((m) => (
+              <button key={m.k} type="button" onClick={() => setMethod(m.k)}
+                className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg border", method === m.k ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground")}>
+                <m.icon className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
+          {error && <div className="text-xs text-destructive">{error}</div>}
+          <button onClick={submit} disabled={amount <= 0 || amount > reste || addPayment.isPending}
+            className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-primary text-xs font-bold text-primary-foreground disabled:opacity-40">
+            {addPayment.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Enregistrer le versement
+          </button>
+        </div>
+      )}
     </div>
   );
 }

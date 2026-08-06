@@ -6787,6 +6787,63 @@ create policy reservations_update on public.reservations for update to authentic
 create policy reservations_delete on public.reservations for delete to authenticated
   using (public.has_module_permission(organization_id, 'reservations', 'manage'));
 
+-- =============== reservation_payments (migration 074) ===============
+-- Paiements échelonnés : reservations.deposit était un unique versement
+-- figé à la création — reservation_payments journalise chaque versement
+-- (comme `payments` pour les ventes), add_reservation_payment() (plus bas)
+-- l'incrémente atomiquement.
+create table if not exists public.reservation_payments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  reservation_id uuid not null references public.reservations(id) on delete cascade,
+  amount numeric(14,2) not null check (amount > 0),
+  method public.payment_method not null default 'cash',
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_reservation_payments_reservation on public.reservation_payments(reservation_id);
+alter table public.reservation_payments enable row level security;
+create policy reservation_payments_select on public.reservation_payments for select to authenticated
+  using (public.has_module_permission(organization_id, 'reservations', 'view'));
+create policy reservation_payments_insert on public.reservation_payments for insert to authenticated
+  with check (public.has_module_permission(organization_id, 'reservations', 'manage'));
+
+-- add_reservation_payment (migration 074) : même schéma que
+-- add_sale_payment() (migration 024) — incrément atomique sous le verrou de
+-- ligne de l'UPDATE, security invoker (les policies RLS ci-dessus et
+-- reservations_update s'appliquent normalement).
+create or replace function public.add_reservation_payment(p_reservation_id uuid, p_amount numeric, p_method public.payment_method)
+returns public.reservations
+language plpgsql as $$
+declare
+  v_organization_id uuid;
+  v_reservation public.reservations;
+begin
+  if p_amount <= 0 then
+    raise exception 'Le montant doit être positif.';
+  end if;
+
+  select organization_id into v_organization_id from public.reservations where id = p_reservation_id;
+  if v_organization_id is null then
+    raise exception 'Réservation introuvable.';
+  end if;
+
+  insert into public.reservation_payments (organization_id, reservation_id, amount, method, created_by)
+  values (v_organization_id, p_reservation_id, p_amount, p_method, auth.uid());
+
+  update public.reservations
+  set deposit = deposit + p_amount,
+      updated_at = now()
+  where id = p_reservation_id
+  returning * into v_reservation;
+
+  return v_reservation;
+end;
+$$;
+
+revoke all on function public.add_reservation_payment(uuid, numeric, public.payment_method) from public;
+grant execute on function public.add_reservation_payment(uuid, numeric, public.payment_method) to authenticated;
+
 -- =============== FIN ===============
 -- Rappel: RLS activé sur les 25 tables ZegCaisse (19 + super_admins, plans,
 -- admin_impersonations, support_tickets, support_messages) + les 15 tables
