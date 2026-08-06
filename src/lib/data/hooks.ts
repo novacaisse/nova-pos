@@ -1683,7 +1683,7 @@ export function useUploadProductImage() {
 // Événements réels insérés par des triggers Postgres (migration 011) :
 // vente importante, stock bas/rupture, nouveau membre. Table déjà en
 // place depuis le schéma initial (RLS ouverte à tout membre de la
-// boutique — voir permissionsMatrix.ts), seule l'écriture était morte.
+// boutique), seule l'écriture était morte.
 export type AppNotification = {
   id: string; organization_id: string; user_id: string | null;
   title: string; body: string | null; kind: string | null;
