@@ -182,6 +182,13 @@ grant execute on function public.find_user_id_by_email(text) to authenticated;
 -- create-team-member (Bloc 14, service role) rattache un compte existant
 -- via cette fonction.
 grant execute on function public.find_user_id_by_email(text) to service_role;
+-- revoke all from public ne retire pas le privilège que Supabase accorde
+-- nommément à anon par défaut à la création du projet (pg_default_acl) —
+-- revoke explicite nécessaire (audit AUDIT_ANON_RPC_2026-08.md, migration
+-- 080) : sans lui, n'importe qui pouvait énumérer les emails inscrits sans
+-- session, alors que la fonction était documentée "authenticated only"
+-- depuis l'origine (migration 004).
+revoke execute on function public.find_user_id_by_email(text) from anon;
 
 -- Accès Super Admin — indépendant de organization_members (pas lié à une
 -- boutique). Aucun grant à "authenticated" sur cette table : gérée
@@ -1798,6 +1805,10 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+-- Fonction trigger uniquement (NEW invalide hors contexte trigger) —
+-- inutilement exposée comme endpoint RPC par défaut (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.handle_new_user() from anon, authenticated;
 
 -- Garde-fou anti-survente (migration 026) : seuls 'sale'/'out'/'transfer'
 -- représentent une sortie réelle de stock (marchandise qui quitte le
@@ -1848,6 +1859,9 @@ drop trigger if exists trg_stock_mov on public.stock_movements;
 create trigger trg_stock_mov
   after insert on public.stock_movements
   for each row execute function public.apply_stock_movement();
+-- Fonction trigger uniquement — voir handle_new_user() ci-dessus (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.apply_stock_movement() from anon, authenticated;
 
 -- create_sale() (migration 026) : useCreateSale enchaînait 4 écritures
 -- client séparées (sales, sale_items, payments, stock_movements) sans
@@ -1971,6 +1985,9 @@ drop trigger if exists trg_notify_big_sale on public.sales;
 create trigger trg_notify_big_sale
   after insert on public.sales
   for each row execute function public.notify_big_sale();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.notify_big_sale() from anon, authenticated;
 
 create or replace function public.notify_stock_level()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -1998,6 +2015,9 @@ drop trigger if exists trg_notify_stock_level on public.stock_levels;
 create trigger trg_notify_stock_level
   after insert or update of quantity on public.stock_levels
   for each row execute function public.notify_stock_level();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.notify_stock_level() from anon, authenticated;
 
 create or replace function public.notify_new_member()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -2022,6 +2042,9 @@ drop trigger if exists trg_notify_new_member on public.organization_members;
 create trigger trg_notify_new_member
   after insert on public.organization_members
   for each row execute function public.notify_new_member();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.notify_new_member() from anon, authenticated;
 
 -- =============== STORAGE ===============
 -- Bucket pour le logo boutique : public en lecture (affiché sur tickets et
@@ -2621,6 +2644,9 @@ drop trigger if exists trg_hotel_resv_room_insert on public.hotel_reservation_ro
 create trigger trg_hotel_resv_room_insert
   before insert on public.hotel_reservation_rooms
   for each row execute function public.hotel_sync_reservation_room_on_insert();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.hotel_sync_reservation_room_on_insert() from anon, authenticated;
 
 -- Répercute tout changement de dates/statut/billing_unit de la
 -- réservation sur les lignes hotel_reservation_rooms existantes (ex.
@@ -2648,6 +2674,9 @@ drop trigger if exists trg_hotel_reservations_sync on public.hotel_reservations;
 create trigger trg_hotel_reservations_sync
   after update on public.hotel_reservations
   for each row execute function public.hotel_sync_reservation_room_on_update();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.hotel_sync_reservation_room_on_update() from anon, authenticated;
 
 -- Communications automatisées (ZegHotel Phase 5, migration 032) — table
 -- notifications strictement interne (user_id référence auth.users, un
@@ -2676,6 +2705,9 @@ drop trigger if exists trg_notify_hotel_reservation_created on public.hotel_rese
 create trigger trg_notify_hotel_reservation_created
   after insert on public.hotel_reservations
   for each row execute function public.notify_hotel_reservation_created();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.notify_hotel_reservation_created() from anon, authenticated;
 
 create or replace function public.notify_hotel_checkout()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -2698,6 +2730,9 @@ drop trigger if exists trg_notify_hotel_checkout on public.hotel_reservations;
 create trigger trg_notify_hotel_checkout
   after update on public.hotel_reservations
   for each row execute function public.notify_hotel_checkout();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.notify_hotel_checkout() from anon, authenticated;
 
 -- Migration 020i — ZegHotel, étape 4/4 (partie facturation) : folios,
 -- charges et paiements. À exécuter après 020f/020g/020h.
@@ -4482,6 +4517,9 @@ create trigger trg_erp_warehouses_single_default
   before insert or update of is_default on public.erp_warehouses
   for each row when (new.is_default)
   execute function public.enforce_single_default_erp_warehouse();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.enforce_single_default_erp_warehouse() from anon, authenticated;
 
 create table if not exists public.erp_products (
   id uuid primary key default gen_random_uuid(),
@@ -4711,6 +4749,9 @@ $$;
 create trigger trg_erp_stock_movements_apply
   after insert on public.erp_stock_movements
   for each row execute function public.apply_erp_stock_movement();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.apply_erp_stock_movement() from anon, authenticated;
 
 -- send_erp_stock_transfer() : crée les mouvements 'transfer_out'
 -- (décrémente le dépôt source, bloqué par le trigger si stock
@@ -6131,6 +6172,9 @@ $$;
 create trigger trg_erp_cash_transactions_apply
   after insert on public.erp_cash_transactions
   for each row execute function public.apply_erp_cash_transaction();
+-- Fonction trigger uniquement — voir handle_new_user() (audit
+-- AUDIT_ANON_RPC_2026-08.md, migration 080).
+revoke execute on function public.apply_erp_cash_transaction() from anon, authenticated;
 
 -- confirm_erp_fund_transfer() : crée la paire transfer_out/transfer_in et
 -- passe le transfert "confirmed".

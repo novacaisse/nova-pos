@@ -281,6 +281,8 @@ lot de travail) :
    email donné est enregistré sur la plateforme (énumération d'emails) —
    exécution réservée aux rôles authentifiés (pas `anon`) pour limiter
    l'exposition, sans protection supplémentaire au-delà de ça dans ce scope.
+   **⚠️ Correctif 2026-08** : cette restriction "pas `anon`" n'a en réalité
+   jamais été appliquée — voir section 17, migration 080.
 2. **`profiles_select_shopmates`** — correction trouvée en implémentant
    l'écran : `profiles_all` (schéma initial) restreint déjà SELECT à
    `id = auth.uid()`, donc un owner listant son équipe ne voyait ni nom ni
@@ -584,3 +586,60 @@ de cette section.
   vers `text` libre — aucun changement RLS, uniquement un changement de
   type de colonne (les dépenses n'ont pas à partager l'enum des paiements
   de vente).
+
+## 17. Audit RPC/`anon` (2026-08) — cause racine trouvée et corrigée
+
+Suite à la connexion directe de ce projet Supabase (Security Advisor +
+requêtes en direct), premier audit systématique de toutes les fonctions RPC
+accessibles au rôle `anon` — voir `AUDIT_ANON_RPC_2026-08.md` (racine du
+dépôt) pour le détail complet, tableau des 63 fonctions applicatives et
+méthodologie.
+
+**Découverte majeure** : le pattern `revoke all on function ... from
+public; grant execute on function ... to authenticated;`, utilisé dans
+*toutes* les migrations de ce projet depuis la migration 002 (y compris
+celui mentionné en section 7 ci-dessus pour `find_user_id_by_email`),
+**n'a jamais exclu `anon`**. Confirmé en base via `pg_default_acl` : ce
+projet Supabase a un privilège par défaut, posé à sa création, qui
+accorde `EXECUTE` à `anon` **directement et nommément** sur toute
+nouvelle fonction de `public` — indépendant du rôle `PUBLIC`, donc jamais
+touché par `revoke ... from public`. Autrement dit, la limite
+"exécution réservée aux rôles authentifiés (pas `anon`)" documentée en
+section 7 n'a jamais été appliquée en pratique, sur aucune fonction du
+projet, sans que personne ne le sache avant cet audit.
+
+**Corrigé (migration 079, PR #23)** :
+- `add_reservation_payment()` — `search_path` figé.
+- `hotel_room_dirty_on_checkout()` / `hotel_room_clean_on_task_done()`
+  (fonctions trigger ZegHotel) — `revoke` explicite `anon`+`authenticated`.
+
+**Corrigé (migration 080, PR à suivre)**, suite à l'audit complet :
+- `find_user_id_by_email()` — `revoke execute ... from anon;` explicite
+  (le grant `authenticated` reste, comportement d'origine documenté en
+  section 7 conservé). Seul appelant légitime vérifié dans le repo :
+  `supabase/functions/create-team-member/index.ts`, via le client
+  `service_role` (Edge Function à `verify_jwt = true` — aucune session
+  anonyme possible), jamais depuis le navigateur.
+- 12 fonctions trigger exposées inutilement comme endpoints RPC
+  (`handle_new_user`, `apply_stock_movement`, `apply_erp_stock_movement`,
+  `apply_erp_cash_transaction`, `enforce_single_default_erp_warehouse`,
+  `hotel_sync_reservation_room_on_insert`/`_on_update`, `notify_big_sale`,
+  `notify_hotel_checkout`, `notify_hotel_reservation_created`,
+  `notify_new_member`, `notify_stock_level`) — `revoke` `anon`+
+  `authenticated` sur chacune, vérifié au préalable qu'aucun appel RPC
+  direct n'existe nulle part dans le repo (uniquement référencées par
+  `create trigger ... execute function`). `rls_auto_enable()` (13ᵉ
+  fonction trigger identifiée par l'audit) volontairement exclue : event
+  trigger géré par la plateforme Supabase elle-même, pas une fonction
+  créée par une migration de ce dépôt.
+
+**Reste à traiter séparément** (documenté dans `AUDIT_ANON_RPC_2026-08.md`,
+non appliqué) : ~45 fonctions `security definer` restent accessibles à
+`anon` au niveau du grant, mais protégées individuellement par un contrôle
+interne vérifié (`has_module_permission()`, `is_super_admin()`,
+`auth.uid()` explicite) ou, pour les fonctions `security invoker`, par la
+RLS `TO authenticated` des tables qu'elles écrivent — pas un trou de
+sécurité en l'état, mais une correction du privilège par défaut du projet
+(`alter default privileges in schema public revoke execute on functions
+from anon;`) réglerait la cause racine une fois pour toutes plutôt que
+fonction par fonction.
