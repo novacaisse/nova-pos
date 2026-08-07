@@ -1624,6 +1624,105 @@ export function computeTreasurySystemTotal(
   return folioTotal + posTotal - expenseTotal;
 }
 
+// ============ PAIE (Round 2, Phase D, migration 091) ============
+// Version simple : salaire de base par membre + bulletin mensuel généré,
+// salaire figé à la génération (jamais recalculé si le profil change
+// ensuite) — pas de gestion fiscale/cotisations détaillée.
+export type HotelPayrollProfile = {
+  id: string; organization_id: string; user_id: string; base_salary: number;
+  created_at: string; updated_at: string;
+};
+export type PayslipStatus = "draft" | "paid";
+export type HotelPayslip = {
+  id: string; organization_id: string; user_id: string;
+  period_month: number; period_year: number;
+  base_salary: number; adjustment: number; adjustment_note: string | null; net_total: number;
+  status: PayslipStatus; paid_at: string | null; created_by: string | null; created_at: string;
+};
+
+export function useHotelPayrollProfiles() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_payroll_profiles", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelPayrollProfile[]> => {
+      const { data, error } = await supabase.from("hotel_payroll_profiles")
+        .select("*").eq("organization_id", organizationId!);
+      if (error) throw error;
+      return data as HotelPayrollProfile[];
+    },
+  });
+}
+export function useUpsertHotelPayrollProfile() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { user_id: string; base_salary: number }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { error } = await supabase.from("hotel_payroll_profiles")
+        .upsert({ ...p, organization_id: organizationId, updated_at: new Date().toISOString() }, { onConflict: "organization_id,user_id" });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_payroll_profiles", organizationId] }),
+  });
+}
+
+export function useHotelPayslips(periodMonth: number, periodYear: number) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_payslips", organizationId, periodMonth, periodYear],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelPayslip[]> => {
+      const { data, error } = await supabase.from("hotel_payslips")
+        .select("*").eq("organization_id", organizationId!)
+        .eq("period_month", periodMonth).eq("period_year", periodYear);
+      if (error) throw error;
+      return data as HotelPayslip[];
+    },
+  });
+}
+// Génère les bulletins manquants du mois pour tous les membres avec un
+// profil de paie — idempotent (on conflict do nothing, contrainte unique
+// organization_id/user_id/period_month/period_year) : ne recrée jamais un
+// bulletin déjà généré, ne recalcule jamais son salaire figé.
+export function useGenerateHotelPayslips() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ periodMonth, periodYear, profiles }: { periodMonth: number; periodYear: number; profiles: HotelPayrollProfile[] }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      if (!profiles.length) return;
+      const rows = profiles.map((p) => ({
+        organization_id: organizationId, user_id: p.user_id,
+        period_month: periodMonth, period_year: periodYear, base_salary: p.base_salary,
+      }));
+      const { error } = await supabase.from("hotel_payslips")
+        .upsert(rows, { onConflict: "organization_id,user_id,period_month,period_year", ignoreDuplicates: true });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_payslips", organizationId] }),
+  });
+}
+export function useUpdateHotelPayslip() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...patch }: Partial<HotelPayslip> & { id: string }) => {
+      if (patch.status === "paid" && !patch.paid_at) patch.paid_at = new Date().toISOString();
+      const { error } = await supabase.from("hotel_payslips").update(patch).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_payslips", organizationId] }),
+  });
+}
+export function useDeleteHotelPayslip() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("hotel_payslips").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_payslips", organizationId] }),
+  });
+}
+
 export function useRunNightAudit() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
