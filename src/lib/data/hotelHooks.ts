@@ -124,7 +124,11 @@ export type HousekeepingTaskStatus = "pending" | "in_progress" | "done";
 export type HotelHousekeepingTask = {
   id: string; organization_id: string; room_id: string; task_date: string;
   kind: HousekeepingTaskKind; status: HousekeepingTaskStatus;
-  assigned_to: string | null; notes: string | null; created_at: string; completed_at: string | null;
+  assigned_to: string | null;
+  // Assignation à un membre non enregistré (mission "mise à jour
+  // ZegHotel", migration 086) — mutuellement exclusif avec assigned_to.
+  assigned_to_name: string | null;
+  notes: string | null; created_at: string; completed_at: string | null;
 };
 export type MaintenancePriority = "low" | "normal" | "high" | "urgent";
 export type MaintenanceStatus = "open" | "in_progress" | "resolved";
@@ -1286,11 +1290,15 @@ export function useGenerateHousekeepingTasks() {
 // frontend. Même policy UPDATE que le changement de statut
 // (hotel_housekeeping_update, niveau 'manage') — assigner une tâche n'est
 // qu'une écriture de plus sur la même ligne, aucune RLS à toucher.
+// assigned_to_name (migration 086) : assignation à un membre non enregistré
+// dans le logiciel — le frontend garantit l'exclusion mutuelle avec
+// assigned_to (jamais les deux non-null en même temps), voir HousekeepingPage.
 export function useAssignHousekeepingTask() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, assigned_to }: { id: string; assigned_to: string | null }) => {
-      const { error } = await supabase.from("hotel_housekeeping_tasks").update({ assigned_to }).eq("id", id);
+    mutationFn: async ({ id, assigned_to, assigned_to_name }: { id: string; assigned_to: string | null; assigned_to_name?: string | null }) => {
+      const { error } = await supabase.from("hotel_housekeeping_tasks")
+        .update({ assigned_to, assigned_to_name: assigned_to_name ?? null }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_housekeeping_tasks", organizationId] }),

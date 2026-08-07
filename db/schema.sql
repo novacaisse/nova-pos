@@ -3339,6 +3339,10 @@ create table if not exists public.hotel_housekeeping_tasks (
   kind text not null default 'cleaning' check (kind in ('cleaning','turnover','inspection')),
   status text not null default 'pending' check (status in ('pending','in_progress','done')),
   assigned_to uuid references auth.users(id) on delete set null,
+  -- Assignation à un membre non enregistré dans le logiciel (mission "mise
+  -- à jour ZegHotel", migration 086) : texte libre, mutuellement exclusif
+  -- avec assigned_to côté frontend (jamais les deux en même temps).
+  assigned_to_name text,
   notes text,
   created_at timestamptz not null default now(),
   completed_at timestamptz
