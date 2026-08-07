@@ -88,6 +88,33 @@ export function useErpCashPositionReport() {
   });
 }
 
+// Dépenses (mission "Round 2", refonte "Rapports par onglet", 4 apps) —
+// ZegERP a son propre grand livre de trésorerie (erp_cash_transactions,
+// migration 054), contrairement à ZegHotel/ZegResto qui réutilisent la
+// table partagée expenses : une "dépense" ici est une transaction
+// type='out' (encaissement transfer_out exclu — un virement interne
+// n'est pas une charge, juste un déplacement entre comptes). Vue non
+// filtrée par période comme les 4 vues ci-dessus — le filtrage se fait
+// côté page, sur reason/created_at déjà présents.
+export type ErpCashTransactionOutRow = {
+  id: string; cash_account_id: string; amount: number; reason: string | null; created_at: string;
+};
+export function useErpCashTransactionsOut() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["erp_cash_transactions_out", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<ErpCashTransactionOutRow[]> => {
+      const { data, error } = await supabase.from("erp_cash_transactions")
+        .select("id, cash_account_id, amount, reason, created_at")
+        .eq("organization_id", organizationId!).eq("type", "out")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as ErpCashTransactionOutRow[];
+    },
+  });
+}
+
 // ============ Rapports personnalisés (favoris privés) ============
 export function useErpCustomReports() {
   const organizationId = useOrganizationId();
