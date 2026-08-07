@@ -2,16 +2,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
   BarChart3, TrendingUp, Percent, Coins, Moon, Loader2, FileDown, ArrowUp, ArrowDown, Minus,
-  BedDouble, Wallet, Ban, UserX, CalendarDays, Trophy,
+  BedDouble, Wallet, Ban, UserX, CalendarDays, Trophy, Banknote, Users, Truck, Package,
 } from "lucide-react";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useFormatMoney, useMyRole, useShopSettings, useExpenses } from "@/lib/data/hooks";
+import { useFormatMoney, useMyRole, useShopSettings, useExpenses, useProducts, useSuppliers } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow, escapeHtml } from "@/lib/printDoc";
 import {
   useHotelReservations, useHotelRooms, useRunNightAudit, nightsInRange,
-  useHotelPaymentsInRange, useHotelFolioExtrasInRange, type HotelPaymentMethod,
+  useHotelPaymentsInRange, useHotelFolioExtrasInRange, useHotelPosSales, type HotelPaymentMethod,
 } from "@/lib/data/hotelHooks";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,13 @@ export const Route = createFileRoute("/app/hotel/rapports")({
 
 function toISO(d: Date) { return d.toISOString().slice(0, 10); }
 function addDays(iso: string, n: number) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return toISO(d); }
+// Abrégé pour l'axe du graphique (formatMoney() n'a pas de mode compact) —
+// le montant complet reste affiché dans le tooltip via formatMoney().
+function compactAmount(n: number) {
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(Math.round(n));
+}
 
 const PAYMENT_LABEL: Record<HotelPaymentMethod, string> = {
   cash: "Espèces", mobile_money: "Mobile Money", card: "Carte", bank_transfer: "Virement",
@@ -28,6 +36,25 @@ const PAYMENT_LABEL: Record<HotelPaymentMethod, string> = {
 const CHARGE_KIND_LABEL: Record<string, string> = {
   extra: "Extra", penalty: "Pénalité", tax: "Taxe", discount: "Remise",
 };
+
+// Rapports par onglet (mission "Round 2", 4 apps — même pattern que
+// /app/rapports, ZegCaisse) : Ventes/Dépenses/Clients/Fournisseurs/
+// Produits/Meilleurs mois s'ajoutent ici aux indicateurs PMS déjà en
+// place (occupation/ADR/RevPAR — restent toujours visibles au-dessus,
+// ce ne sont pas des "rapports" au sens de cette liste mais le tableau
+// de bord de la page). "Meilleures chambres" remplace "Meilleurs
+// produits" (pas de notion de produit vendable hors du PDV interne côté
+// hôtel — voir l'onglet "produits" séparé, alimenté par hotel_pos_sales).
+const REPORTS = [
+  { id: "ventes", label: "Ventes (hébergement)", icon: BarChart3 },
+  { id: "rooms", label: "Meilleures chambres", icon: BedDouble },
+  { id: "clients", label: "Clients", icon: Users },
+  { id: "fournisseurs", label: "Fournisseurs", icon: Truck },
+  { id: "produits", label: "Produits (PDV interne)", icon: Package },
+  { id: "depenses", label: "Dépenses", icon: Banknote },
+  { id: "months", label: "Meilleurs mois", icon: Trophy },
+] as const;
+type ReportId = (typeof REPORTS)[number]["id"];
 
 function pct(current: number, previous: number): number | null {
   if (previous <= 0) return null;
@@ -63,6 +90,7 @@ function HotelReportsPage() {
   const [period, setPeriod] = useState<Period>("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [report, setReport] = useState<ReportId>("ventes");
   const { from: fromDate, to: toDate } = periodRange(period, customFrom, customTo);
   const rangeStart = toISO(fromDate);
   const rangeEnd = toISO(toDate);
@@ -178,20 +206,178 @@ function HotelReportsPage() {
     }
     return {
       alos: arrivedStays.length ? totalStayNights / arrivedStays.length : 0,
-      topGuests: [...guestMap.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 5),
+      topGuests: [...guestMap.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 10),
     };
   }, [reservations]);
+
+  // Meilleures chambres (nouvel onglet, refonte "Rapports par onglet") —
+  // même boucle que byRoomType ci-dessus mais agrégée par CHAMBRE (numéro
+  // réel), pas par type.
+  const roomNumberById = useMemo(() => new Map(rooms.map((r) => [r.id, r.number])), [rooms]);
+  const byRoom = useMemo(() => {
+    const map = new Map<string, { nights: number; revenue: number }>();
+    for (const res of reservations ?? []) {
+      for (const rr of res.reservation_rooms) {
+        if (rr.status === "cancelled" || rr.status === "no_show") continue;
+        const effectiveCheckOut = rr.check_out > rr.check_in ? rr.check_out : addDays(rr.check_in, 1);
+        const start = rr.check_in < rangeStart ? rangeStart : rr.check_in;
+        const end = effectiveCheckOut > rangeEnd ? rangeEnd : effectiveCheckOut;
+        const n = Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 86400000);
+        if (n <= 0) continue;
+        const totalNights = Math.max(1, (new Date(effectiveCheckOut).getTime() - new Date(rr.check_in).getTime()) / 86400000);
+        const rev = (rr.rate_amount / totalNights) * n;
+        const number = roomNumberById.get(rr.room_id) ?? "—";
+        const entry = map.get(number) ?? { nights: 0, revenue: 0 };
+        entry.nights += n; entry.revenue += rev;
+        map.set(number, entry);
+      }
+    }
+    return [...map.entries()].map(([number, v]) => ({ number, ...v })).sort((a, b) => b.revenue - a.revenue);
+  }, [reservations, roomNumberById, rangeStart, rangeEnd]);
+
+  // Fournisseurs / Produits (nouveaux onglets) — alimentés par le point de
+  // vente interne (piscine/bar/restaurant, hotel_pos_sales), seul canal de
+  // vente de produits côté ZegHotel — products/suppliers sont des tables
+  // partagées avec ZegCaisse (cf. /app/hotel/produits, /app/hotel/fournisseurs).
+  const { data: posSales = [] } = useHotelPosSales({ from: fromDate.toISOString(), to: toDate.toISOString() });
+  const { data: products = [] } = useProducts();
+  const { data: suppliers = [] } = useSuppliers();
+  const supplierIdByProduct = useMemo(() => new Map(products.map((p) => [p.id, p.supplier_id])), [products]);
+  const supplierNameById = useMemo(() => new Map(suppliers.map((s) => [s.id, s.name])), [suppliers]);
+  const { byProduct, bySupplier } = useMemo(() => {
+    const productMap = new Map<string, { name: string; qty: number; ca: number }>();
+    const supplierMap = new Map<string, { name: string; qty: number; ca: number }>();
+    for (const sale of posSales) {
+      for (const item of sale.items) {
+        const key = item.product_id ?? `manuel:${item.name}`;
+        const pEntry = productMap.get(key) ?? { name: item.name, qty: 0, ca: 0 };
+        pEntry.qty += item.quantity; pEntry.ca += item.unit_price * item.quantity;
+        productMap.set(key, pEntry);
+
+        const supplierId = item.product_id ? supplierIdByProduct.get(item.product_id) : null;
+        if (!supplierId) continue;
+        const supplierName = supplierNameById.get(supplierId) ?? "Fournisseur";
+        const sEntry = supplierMap.get(supplierId) ?? { name: supplierName, qty: 0, ca: 0 };
+        sEntry.qty += item.quantity; sEntry.ca += item.unit_price * item.quantity;
+        supplierMap.set(supplierId, sEntry);
+      }
+    }
+    return {
+      byProduct: [...productMap.values()].sort((a, b) => b.ca - a.ca).slice(0, 15),
+      bySupplier: [...supplierMap.values()].sort((a, b) => b.ca - a.ca),
+    };
+  }, [posSales, supplierIdByProduct, supplierNameById]);
 
   // Dépenses (mission "Round 2 ZegHotel", item 6) — jusqu'ici absentes des
   // rapports malgré un module Dépenses actif ; même filtre client que le
   // dashboard (expenses est une table partagée, pas de hook hotelHooks dédié).
   const { data: expenses = [] } = useExpenses();
-  const periodExpensesTotal = useMemo(() => expenses
-    .filter((e) => { const d = new Date(e.paid_at + "T12:00:00"); return d >= fromDate && d <= toDate; })
-    .reduce((s, e) => s + Number(e.amount || 0), 0), [expenses, fromDate, toDate]);
+  const expensesInRange = useMemo(() => expenses
+    .filter((e) => { const d = new Date(e.paid_at + "T12:00:00"); return d >= fromDate && d <= toDate; }), [expenses, fromDate, toDate]);
+  const periodExpensesTotal = useMemo(() => expensesInRange.reduce((s, e) => s + Number(e.amount || 0), 0), [expensesInRange]);
+  const expensesByCategory = useMemo(() => {
+    const map = new Map<string, { name: string; qty: number; ca: number }>();
+    for (const e of expensesInRange) {
+      const key = e.category?.trim() || "Sans catégorie";
+      const entry = map.get(key) ?? { name: key, qty: 0, ca: 0 };
+      entry.qty += 1; entry.ca += Number(e.amount || 0);
+      map.set(key, entry);
+    }
+    return [...map.values()].sort((a, b) => b.ca - a.ca);
+  }, [expensesInRange]);
+
+  // Meilleurs mois (nouvel onglet) — 12 derniers mois glissants,
+  // indépendant du sélecteur de période ci-dessus (revenu hébergement +
+  // extras, même définition que le résultat net affiché plus haut).
+  const twelveMonthsStart = useMemo(() => toISO(new Date(new Date().getFullYear(), new Date().getMonth() - 11, 1)), []);
+  const todayIso = useMemo(() => toISO(new Date()), []);
+  const { data: yearReservations } = useHotelReservations(twelveMonthsStart, todayIso);
+  const { data: yearExtras = [] } = useHotelFolioExtrasInRange(twelveMonthsStart, todayIso);
+  const bestMonths = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; ca: number }>();
+    for (const res of yearReservations ?? []) {
+      for (const rr of res.reservation_rooms) {
+        if (rr.status === "cancelled" || rr.status === "no_show") continue;
+        const d = new Date(rr.check_in + "T00:00:00");
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const label = d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+        const entry = map.get(key) ?? { key, label, ca: 0 };
+        entry.ca += rr.rate_amount;
+        map.set(key, entry);
+      }
+    }
+    for (const c of yearExtras) {
+      const d = new Date(c.charge_date + "T00:00:00");
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+      const entry = map.get(key) ?? { key, label, ca: 0 };
+      entry.ca += c.amount * c.quantity;
+      map.set(key, entry);
+    }
+    return [...map.values()].sort((a, b) => b.key.localeCompare(a.key));
+  }, [yearReservations, yearExtras]);
+
+  // Ventes (onglet "Ventes (hébergement)") — revenu hébergement par jour
+  // sur la période sélectionnée, regroupé par semaine au-delà d'un mois
+  // (même repli que le graphique du dashboard, app.hotel.index.tsx).
+  const ventesByDay = useMemo(() => {
+    const bucketDays = periodDays > 31 ? 7 : 1;
+    const points: { label: string; ca: number }[] = [];
+    for (let i = 0; i < periodDays; i += bucketDays) {
+      const bStart = addDays(rangeStart, i);
+      const bDays = Math.min(bucketDays, periodDays - i);
+      const bEnd = addDays(bStart, bDays);
+      const { revenue: bRevenue } = nightsInRange(reservations, bStart, bEnd);
+      const label = new Date(bStart + "T00:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+      points.push({ label, ca: Math.round(bRevenue) });
+    }
+    return points;
+  }, [reservations, rangeStart, periodDays]);
   const netResult = revenue + extrasTotal - periodExpensesTotal;
 
   const isLoading = loadingReservations || loadingPayments || loadingExtras;
+
+  // Lignes génériques par onglet (mission "Round 2", pattern partagé avec
+  // /app/rapports ZegCaisse) — {label, qty, ca}, réutilisées par le
+  // graphique et le tableau ci-dessous, ainsi que par l'export PDF par
+  // onglet (exportTabPdf).
+  const currentRows: { label: string; qty: number; ca: number }[] = useMemo(() => {
+    if (report === "ventes") return ventesByDay.map((d) => ({ label: d.label, qty: 0, ca: d.ca }));
+    if (report === "rooms") return byRoom.map((r) => ({ label: `Chambre ${r.number}`, qty: Math.round(r.nights), ca: r.revenue }));
+    if (report === "clients") return topGuests.map((g) => ({ label: g.name, qty: g.stays, ca: g.revenue }));
+    if (report === "fournisseurs") return bySupplier.map((s) => ({ label: s.name, qty: s.qty, ca: s.ca }));
+    if (report === "produits") return byProduct.map((p) => ({ label: p.name, qty: p.qty, ca: p.ca }));
+    if (report === "depenses") return expensesByCategory.map((e) => ({ label: e.name, qty: e.qty, ca: e.ca }));
+    if (report === "months") return bestMonths.map((m) => ({ label: m.label, qty: 0, ca: m.ca }));
+    return [];
+  }, [report, ventesByDay, byRoom, topGuests, bySupplier, byProduct, expensesByCategory, bestMonths]);
+  const chartRows = useMemo(() => (report === "ventes" || report === "months") ? [...currentRows].reverse() : currentRows, [report, currentRows]);
+
+  const exportTabPdf = () => {
+    const reportLabel = REPORTS.find((r) => r.id === report)?.label ?? "";
+    const bodyHtml = `
+      <div class="doc-parties">
+        <div class="block"><h2>Période</h2><div class="name">${report === "months" ? "12 derniers mois" : `${escapeHtml(fromDate.toLocaleDateString("fr-FR"))} — ${escapeHtml(toDate.toLocaleDateString("fr-FR"))}`}</div></div>
+        <div class="block" style="text-align:right"><h2>Lignes</h2><div class="name">${currentRows.length}</div></div>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>Libellé</th><th class="num">Qté</th><th class="num">Montant</th></tr></thead>
+        <tbody>${currentRows.map((r) => `<tr><td>${escapeHtml(r.label)}</td><td class="num">${r.qty}</td><td class="num">${escapeHtml(formatMoney(r.ca))}</td></tr>`).join("") || `<tr><td colspan="3">Aucune donnée</td></tr>`}</tbody>
+      </table>`;
+    const html = renderA4Document({
+      docTitle: `Rapport — ${reportLabel}`,
+      docDate: new Date().toLocaleString("fr-FR"),
+      shop: {
+        shopName: currentOrganization?.name ?? "Hôtel",
+        logoUrl: currentOrganization?.logo_url,
+        address: settings?.data.address,
+        phone: settings?.data.phone,
+        ifu: settings?.data.ifu,
+      },
+      bodyHtml,
+    });
+    openPrintWindow(html);
+  };
 
   const exportPdf = () => {
     const bodyHtml = `
@@ -298,6 +484,69 @@ function HotelReportsPage() {
           <StatCard label="Dépenses" value={formatMoney(periodExpensesTotal)} icon={<Wallet className="h-5 w-5" />} accent="destructive" />
           <StatCard label="Résultat net" value={formatMoney(netResult)} hint="Hébergement + extras − dépenses"
             icon={<TrendingUp className="h-5 w-5" />} accent={netResult >= 0 ? "success" : "destructive"} />
+        </div>
+
+        <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
+          {REPORTS.map((r) => {
+            const Icon = r.icon;
+            return (
+              <button key={r.id} onClick={() => setReport(r.id)}
+                className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium", report === r.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+                <Icon className="h-3.5 w-3.5" /> {r.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {REPORTS.find((r) => r.id === report)?.label} · {report === "months" ? "12 derniers mois" : `${fromDate.toLocaleDateString("fr-FR")} — ${toDate.toLocaleDateString("fr-FR")}`}
+            </div>
+            <button onClick={exportTabPdf} className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold hover:bg-muted">
+              <FileDown className="h-3.5 w-3.5" /> PDF
+            </button>
+          </div>
+          {currentRows.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">Aucune donnée sur cette période.</div>
+          ) : (
+            <>
+              <div className="mb-4 h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartRows} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false}
+                      interval="preserveStartEnd" tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v} />
+                    <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactAmount} />
+                    <Tooltip formatter={(value: number) => [formatMoney(value), "Montant"]} contentStyle={{ fontSize: 12, borderRadius: 12 }} />
+                    <Bar dataKey="ca" fill="var(--primary)" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40">
+                    <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-2">
+                        {report === "ventes" ? "Jour" : report === "months" ? "Mois" : report === "clients" ? "Client" : report === "fournisseurs" ? "Fournisseur" : report === "depenses" ? "Catégorie" : report === "rooms" ? "Chambre" : "Produit"}
+                      </th>
+                      <th className="px-3 py-2 text-right">{report === "clients" ? "Séjours" : report === "rooms" ? "Nuits" : "Qté"}</th>
+                      <th className="px-3 py-2 text-right">Montant</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentRows.map((r, i) => (
+                      <tr key={i} className="border-t border-border/60">
+                        <td className="px-3 py-2 font-medium">{r.label}</td>
+                        <td className="tabular px-3 py-2 text-right">{r.qty || "—"}</td>
+                        <td className="tabular px-3 py-2 text-right font-semibold">{formatMoney(r.ca)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
