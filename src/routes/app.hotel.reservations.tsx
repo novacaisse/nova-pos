@@ -431,6 +431,16 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const hourlyHours = isHourly && checkOutAt && checkInAt
     ? Math.max(1, Math.ceil((new Date(checkOutAt).getTime() - new Date(checkInAt).getTime()) / 3_600_000))
     : 0;
+  // Préréglages 1h/2h/5h (mission "Round 2 ZegHotel", item 2) : déplace
+  // uniquement l'heure de départ, l'heure d'arrivée reste éditable
+  // librement au-dessus — un simple raccourci sur checkOutTime.
+  const applyHourlyPreset = (hours: number) => {
+    const [h, m] = checkInTime.split(":").map(Number);
+    const total = h * 60 + m + hours * 60;
+    const outH = Math.floor(total / 60) % 24;
+    const outM = total % 60;
+    setCheckOutTime(`${String(outH).padStart(2, "0")}:${String(outM).padStart(2, "0")}`);
+  };
 
   // Fenêtre de recherche des chevauchements : pour une réservation horaire,
   // checkOut === checkIn (forcé ci-dessus), donc interroger avec cette même
@@ -497,10 +507,22 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   // tarif horaire) — le serveur recalcule et applique le tarif définitif à
   // la création (migrations 027/028) si la réception ne saisit pas de prix
   // manuel dans rateOverrides.
+  // Priorité au tarif horaire du TYPE de chambre (mission "Round 2
+  // ZegHotel", item 2, migration 087) : un tarif personnalisé pour ce
+  // nombre d'heures exact (custom_hourly_rates) prime sur hourly_rate ×
+  // heures, qui prime lui-même sur le tarif horaire de la formule
+  // tarifaire org-wide (repli si le type de chambre n'a rien configuré).
   const rateFor = (id: string) => {
-    const roomTypeId = roomOf(id)?.room_type_id;
+    const room = roomOf(id);
+    const roomTypeId = room?.room_type_id;
     if (!roomTypeId) return 0;
-    if (isHourly) return Math.round(hourlyHours * (selectedRatePlan?.hourly_rate ?? 0) * 100) / 100;
+    if (isHourly) {
+      const rt = room?.room_type;
+      const customMatch = rt?.custom_hourly_rates.find((c) => c.hours === hourlyHours);
+      if (customMatch) return customMatch.price;
+      const perHour = rt?.hourly_rate ?? selectedRatePlan?.hourly_rate ?? 0;
+      return Math.round(hourlyHours * perHour * 100) / 100;
+    }
     return estimateRoomRate(roomTypeId, checkIn, checkOut, ratePlanId, roomTypes, seasonalRates, ratePlans);
   };
   const [rateOverrides, setRateOverrides] = useState<Record<string, number>>({});
@@ -547,8 +569,14 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
         rate_plan_id: ratePlanId || null, corporate_account_id: corporateId || null,
         channel, adults, children, notes: notes.trim() || undefined,
         // rate_amount = null quand la réception n'a pas touché le champ :
-        // le serveur calcule alors le tarif définitif (migrations 027/028).
-        rooms: selectedRoomIds.map((id) => ({ room_id: id, rate_amount: rateOverrides[id] ?? null })),
+        // le serveur calcule alors le tarif définitif (migrations 027/028)
+        // — sauf en horaire, où le calcul serveur ne connaît que le tarif
+        // horaire de la formule tarifaire (hotel_rate_plans), pas encore le
+        // tarif horaire par type de chambre (migration 087) ; on envoie donc
+        // explicitement le montant déjà calculé côté client (rateFor) pour
+        // que le tarif du type de chambre s'applique réellement, pas juste
+        // à l'affichage.
+        rooms: selectedRoomIds.map((id) => ({ room_id: id, rate_amount: rateOverrides[id] ?? (isHourly ? rateFor(id) : null) })),
         check_in_at: checkInAt, check_out_at: checkOutAt,
       });
       onCreated(reservation.id);
@@ -591,6 +619,16 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
                 <input type="time" value={checkInTime} onChange={(e) => setCheckInTime(e.target.value)} className={inp} /></label>
               <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Heure de départ *</span>
                 <input type="time" value={checkOutTime} onChange={(e) => setCheckOutTime(e.target.value)} className={inp} /></label>
+              <div className="col-span-2 flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Durée :</span>
+                {[1, 2, 5].map((h) => (
+                  <button key={h} type="button" onClick={() => applyHourlyPreset(h)}
+                    className={cn("rounded-lg border px-2.5 py-1 text-xs font-semibold",
+                      hourlyHours === h ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40")}>
+                    {h} h
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
