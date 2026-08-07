@@ -1041,6 +1041,25 @@ export function useCreateHotelPosSale() {
   });
 }
 
+// Ventes récentes / vente du jour (mission "mise à jour ZegHotel", item 6 —
+// parité ZegCaisse, même pattern que useSales, src/lib/data/hooks.ts).
+export function useHotelPosSales(opts: number | { limit?: number; from?: string; to?: string } = 100) {
+  const { limit = 100, from, to } = typeof opts === "number" ? { limit: opts } : opts;
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_pos_sales", organizationId, limit, from, to],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelPosSale[]> => {
+      let q = supabase.from("hotel_pos_sales").select("*").eq("organization_id", organizationId!);
+      if (from) q = q.gte("created_at", from);
+      if (to) q = q.lte("created_at", to);
+      const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data ?? []) as HotelPosSale[];
+    },
+  });
+}
+
 export function folioBalance(folio: HotelFolioDetail): number {
   const charges = folio.charges.reduce((s, c) => s + c.amount * c.quantity, 0);
   const paid = folio.payments.reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);

@@ -255,6 +255,9 @@ create table if not exists public.products (
   image_url text, is_active boolean not null default true,
   low_stock_threshold integer not null default 5,
   created_at timestamptz not null default now(),
+  -- Produit sans stock (mission "mise à jour ZegHotel", migration 088) —
+  -- repas/plat/café vendus au POS sans mouvement de stock associé.
+  track_stock boolean not null default true,
   unique (organization_id, sku)
 );
 create index if not exists idx_products_shop on public.products(organization_id);
@@ -3265,6 +3268,7 @@ declare
   v_total numeric(14,2);
   v_reference text;
   v_sale public.hotel_pos_sales;
+  v_track_stock boolean;
 begin
   if not public.has_module_permission(p_organization_id, 'hotel_pos_interne', 'create') then
     raise exception 'Accès refusé.';
@@ -3284,12 +3288,17 @@ begin
   values (p_organization_id, v_reference, p_items, v_subtotal, coalesce(p_discount, 0), v_total, p_payment_method, coalesce(p_paid, v_total), auth.uid())
   returning * into v_sale;
 
+  -- track_stock (migration 088) : pas de mouvement de stock pour un
+  -- article sans suivi de stock (plat/café...).
   for v_item in select * from jsonb_array_elements(p_items) loop
     v_product_id := nullif(v_item->>'product_id', '')::uuid;
     v_quantity := (v_item->>'quantity')::numeric;
     if v_product_id is not null then
-      insert into public.stock_movements (organization_id, product_id, type, quantity, reason, reference, created_by)
-      values (p_organization_id, v_product_id, 'sale', v_quantity, 'POS ZegHotel', v_reference, auth.uid());
+      select track_stock into v_track_stock from public.products where id = v_product_id;
+      if coalesce(v_track_stock, true) then
+        insert into public.stock_movements (organization_id, product_id, type, quantity, reason, reference, created_by)
+        values (p_organization_id, v_product_id, 'sale', v_quantity, 'POS ZegHotel', v_reference, auth.uid());
+      end if;
     end if;
   end loop;
 

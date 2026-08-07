@@ -207,16 +207,18 @@ export function ProductForm({ initial, cats, canManage, basePath = "/app/produit
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Taux de taxe (%)</div>
                 <input type="number" onFocus={selectOnFocus} min={0} max={100} value={form.tax_rate ?? 0} onChange={(e) => setForm({ ...form, tax_rate: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
               </label>
-              {isNew && (
+              {isNew && (form.track_stock ?? true) && (
                 <label className="block">
                   <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Stock initial</div>
                   <input type="number" onFocus={selectOnFocus} value={form.stock ?? 0} onChange={(e) => setForm({ ...form, stock: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
                 </label>
               )}
-              <label className="block">
-                <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Seuil stock bas</div>
-                <input type="number" onFocus={selectOnFocus} value={form.low_stock_threshold ?? 5} onChange={(e) => setForm({ ...form, low_stock_threshold: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
-              </label>
+              {(form.track_stock ?? true) && (
+                <label className="block">
+                  <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Seuil stock bas</div>
+                  <input type="number" onFocus={selectOnFocus} value={form.low_stock_threshold ?? 5} onChange={(e) => setForm({ ...form, low_stock_threshold: Number(e.target.value) || 0 })} disabled={!canManage} className={inp} />
+                </label>
+              )}
               <label className="block sm:col-span-2">
                 <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Description</div>
                 <textarea rows={3} value={form.description ?? ""} onChange={(e) => setForm({ ...form, description: e.target.value })} disabled={!canManage}
@@ -227,6 +229,16 @@ export function ProductForm({ initial, cats, canManage, basePath = "/app/produit
             <label className="mt-4 flex items-center justify-between rounded-xl border border-border/60 p-3 text-sm">
               <span>Produit actif (visible en Caisse et dans le catalogue)</span>
               <input type="checkbox" checked={form.is_active ?? true} onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                disabled={!canManage} className="h-5 w-5 accent-primary" />
+            </label>
+            {/* track_stock (mission "mise à jour ZegHotel", migration 088) —
+                repas/plat/café vendus sans mouvement de stock associé. */}
+            <label className="mt-2 flex items-center justify-between rounded-xl border border-border/60 p-3 text-sm">
+              <span>
+                Suivi de stock
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">Désactiver pour un produit sans stock (plat, café, prestation…)</span>
+              </span>
+              <input type="checkbox" checked={form.track_stock ?? true} onChange={(e) => setForm({ ...form, track_stock: e.target.checked })}
                 disabled={!canManage} className="h-5 w-5 accent-primary" />
             </label>
           </div>
