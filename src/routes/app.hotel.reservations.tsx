@@ -467,6 +467,19 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const [newGuestName, setNewGuestName] = useState("");
   const [newGuestPhone, setNewGuestPhone] = useState("");
   const [newGuestEmail, setNewGuestEmail] = useState("");
+  // Champs complets (mission "mise à jour ZegHotel", Phase 2, point 2) —
+  // avant ce correctif, la création rapide n'exposait que nom/téléphone/
+  // email alors que hotel_guests a déjà toutes ces colonnes (CNI/ville via
+  // adresse/date de naissance, migration 028) : la réception devait
+  // rouvrir la fiche client depuis /app/hotel/clients après coup pour les
+  // compléter. Repliés sous "Plus d'informations" pour ne pas alourdir le
+  // cas courant (juste nom + téléphone).
+  const [newGuestMore, setNewGuestMore] = useState(false);
+  const [newGuestDocType, setNewGuestDocType] = useState("");
+  const [newGuestDocNumber, setNewGuestDocNumber] = useState("");
+  const [newGuestAddress, setNewGuestAddress] = useState("");
+  const [newGuestDob, setNewGuestDob] = useState("");
+  const [newGuestNationality, setNewGuestNationality] = useState("");
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
   const [channel, setChannel] = useState("direct");
@@ -509,9 +522,15 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
         full_name: newGuestName.trim(),
         phone: newGuestPhone.trim() || undefined,
         email: newGuestEmail.trim() || undefined,
+        id_document_type: newGuestDocType || undefined,
+        id_document_number: newGuestDocNumber.trim() || undefined,
+        address: newGuestAddress.trim() || undefined,
+        date_of_birth: newGuestDob || undefined,
+        nationality: newGuestNationality.trim() || undefined,
       });
       setGuestId(g.id); setSelectedGuestName(g.full_name);
       setAddingGuest(false); setNewGuestName(""); setNewGuestPhone(""); setNewGuestEmail(""); setGuestSearch("");
+      setNewGuestMore(false); setNewGuestDocType(""); setNewGuestDocNumber(""); setNewGuestAddress(""); setNewGuestDob(""); setNewGuestNationality("");
     } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
   };
 
@@ -589,8 +608,27 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
                   <input value={newGuestPhone} onChange={(e) => setNewGuestPhone(e.target.value)} placeholder="Téléphone" className={inp} />
                   <input value={newGuestEmail} onChange={(e) => setNewGuestEmail(e.target.value)} placeholder="Email" className={inp} />
                 </div>
+                {!newGuestMore ? (
+                  <button onClick={() => setNewGuestMore(true)} className="text-xs font-semibold text-primary hover:underline">
+                    + Plus d'informations (CNI, ville, date de naissance…)
+                  </button>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={newGuestDocType} onChange={(e) => setNewGuestDocType(e.target.value)} className={inp}>
+                      <option value="">Type de pièce</option>
+                      <option value="CNI">CNI</option>
+                      <option value="Passeport">Passeport</option>
+                      <option value="Permis de conduire">Permis de conduire</option>
+                      <option value="Autre">Autre</option>
+                    </select>
+                    <input value={newGuestDocNumber} onChange={(e) => setNewGuestDocNumber(e.target.value)} placeholder="N° de pièce" className={inp} />
+                    <input value={newGuestAddress} onChange={(e) => setNewGuestAddress(e.target.value)} placeholder="Ville / Adresse" className={inp} />
+                    <input type="date" value={newGuestDob} onChange={(e) => setNewGuestDob(e.target.value)} placeholder="Date de naissance" className={inp} />
+                    <input value={newGuestNationality} onChange={(e) => setNewGuestNationality(e.target.value)} placeholder="Nationalité" className={cn(inp, "col-span-2")} />
+                  </div>
+                )}
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => { setAddingGuest(false); setNewGuestName(""); setNewGuestPhone(""); setNewGuestEmail(""); }}
+                  <button onClick={() => { setAddingGuest(false); setNewGuestName(""); setNewGuestPhone(""); setNewGuestEmail(""); setNewGuestMore(false); setNewGuestDocType(""); setNewGuestDocNumber(""); setNewGuestAddress(""); setNewGuestDob(""); setNewGuestNationality(""); }}
                     className="h-9 flex-1 rounded-xl border border-border bg-card text-xs font-semibold">Retour</button>
                   <button onClick={createAndSelectGuest} disabled={!newGuestName.trim() || upsertGuest.isPending}
                     className="flex h-9 flex-[2] items-center justify-center gap-1.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground disabled:opacity-40">
