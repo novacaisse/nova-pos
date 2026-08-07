@@ -67,6 +67,11 @@ function ProduitsPage() {
 
   const [query, setQuery] = useState(q ?? "");
   const [cat, setCat] = useState<"all" | string>("all");
+  // Séparation produits avec/sans stock (mission "mise à jour ZegHotel",
+  // item 6, migration 088) — "module spécial" demandé : plutôt qu'un
+  // écran dupliqué, un filtre sur ce même catalogue déjà partagé avec
+  // ZegCaisse, cohérent avec track_stock stocké directement sur products.
+  const [stockFilter, setStockFilter] = useState<"all" | "tracked" | "untracked">("all");
   const [view, setView] = useState<"grid" | "list">("list");
   const [confirmDel, setConfirmDel] = useState<ProductWithStock | null>(null);
   const [manageCats, setManageCats] = useState(false);
@@ -76,10 +81,12 @@ function ProduitsPage() {
 
   const list = useMemo(() => products.filter((p) => {
     if (cat !== "all" && p.category_id !== cat) return false;
+    if (stockFilter === "tracked" && !p.track_stock) return false;
+    if (stockFilter === "untracked" && p.track_stock) return false;
     if (!query.trim()) return true;
     const q = query.toLowerCase();
     return p.name.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q) || (p.barcode ?? "").toLowerCase().includes(q);
-  }), [products, query, cat]);
+  }), [products, query, cat, stockFilter]);
 
   if (isLoading) return <PageSkeleton title="Produits & Stock" subtitle="Catalogue" />;
 
@@ -106,6 +113,14 @@ function ProduitsPage() {
               className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
           </div>
           <CategoryFilter cats={cats} value={cat} onChange={setCat} />
+          <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5 text-xs font-semibold">
+            {([["all", "Tous"], ["tracked", "Avec stock"], ["untracked", "Sans stock"]] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setStockFilter(k)}
+                className={cn("rounded-md px-2.5 py-1.5", stockFilter === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="ml-auto flex items-center gap-0.5 rounded-lg border border-border p-0.5">
             <button onClick={() => setView("list")} className={cn("grid h-8 w-8 place-items-center rounded-md", view === "list" && "bg-muted")}><List className="h-4 w-4" /></button>
             <button onClick={() => setView("grid")} className={cn("grid h-8 w-8 place-items-center rounded-md", view === "grid" && "bg-muted")}><LayoutGrid className="h-4 w-4" /></button>

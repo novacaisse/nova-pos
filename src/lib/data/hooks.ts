@@ -15,6 +15,9 @@ export type Product = {
   sku: string | null; barcode: string | null; name: string; description: string | null;
   price: number; cost: number; tax_rate: number; unit: string | null;
   image_url: string | null; is_active: boolean; low_stock_threshold: number;
+  // Produit sans stock (mission "mise à jour ZegHotel", migration 088) —
+  // repas/plat/café vendus sans mouvement de stock associé.
+  track_stock: boolean;
 };
 export type ProductWithStock = Product & { stock: number };
 
