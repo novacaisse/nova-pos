@@ -6,11 +6,11 @@ import {
 } from "recharts";
 import {
   BedDouble, CalendarRange, DoorClosed, LogIn, LogOut, Sparkle, Users, TrendingUp, Percent, Coins,
-  ClipboardList, ReceiptText, CalendarClock, AlertCircle, BarChart3,
+  ClipboardList, ReceiptText, CalendarClock, AlertCircle, BarChart3, Wallet, TrendingDown,
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useFormatMoney } from "@/lib/data/hooks";
+import { useFormatMoney, useExpenses } from "@/lib/data/hooks";
 import { useHotelDashboardStats, useHotelRooms, useHotelReservations, useHotelDiagnostics, nightsInRange } from "@/lib/data/hotelHooks";
 
 function addDaysISO(iso: string, n: number) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
@@ -55,6 +55,17 @@ function HotelDashboard() {
   const { nights: periodNights, revenue: periodRevenue } = useMemo(
     () => nightsInRange(periodReservations, rangeStart, rangeEnd), [periodReservations, rangeStart, rangeEnd]);
   const periodOccupancyPct = rooms.length ? Math.round((periodNights / (rooms.length * periodDays)) * 100) : 0;
+
+  // Dépenses au dashboard (mission "Round 2 ZegHotel", item 6) — jusqu'ici
+  // invisibles ici et des rapports, malgré un module Dépenses actif depuis
+  // la Phase 2 ; expenses est une table partagée (pas d'app_module), donc
+  // filtrée côté client par organisation via RLS déjà, pas de hook dédié
+  // hotelHooks nécessaire.
+  const { data: expenses = [] } = useExpenses();
+  const periodExpensesTotal = useMemo(() => expenses
+    .filter((e) => { const d = new Date(e.paid_at + "T12:00:00"); return d >= fromDate && d <= toDate; })
+    .reduce((s, e) => s + Number(e.amount || 0), 0), [expenses, fromDate, toDate]);
+  const periodNetResult = periodRevenue - periodExpensesTotal;
 
   // Graphique dynamique (mission "Round 2 ZegHotel", item 1) — revenu +
   // occupation par intervalle sur la période choisie. Regroupement par
@@ -178,6 +189,12 @@ function HotelDashboard() {
             <StatCard label="Revenu hébergement" value={formatMoney(periodRevenue)} icon={<Coins className="h-5 w-5" />} accent="accent" />
             <StatCard label="Nuits vendues" value={String(periodNights)} icon={<TrendingUp className="h-5 w-5" />} />
             <StatCard label="Taux d'occupation (période)" value={`${periodOccupancyPct}%`} icon={<Percent className="h-5 w-5" />} accent="primary" />
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <StatCard label="Dépenses" value={formatMoney(periodExpensesTotal)} icon={<Wallet className="h-5 w-5" />} accent="destructive" />
+            <StatCard label="Résultat net (hébergement)" value={formatMoney(periodNetResult)}
+              icon={periodNetResult >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+              accent={periodNetResult >= 0 ? "success" : "destructive"} />
           </div>
         </div>
 

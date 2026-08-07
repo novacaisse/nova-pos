@@ -10,6 +10,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Wallet, Search, X, Copy, Check, CheckCircle2, Clock, XCircle, Loader2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import { useFormatMoney } from "@/lib/data/hooks";
 import { usePaymentRequestsList, type PaymentRequestRow, type PaymentRequestStatus } from "@/lib/data/paymentHooks";
 import { cn } from "@/lib/utils";
@@ -33,25 +34,38 @@ function PaiementsPage() {
   const formatMoney = useFormatMoney();
   const { data: payments = [], isLoading } = usePaymentRequestsList("hotel");
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<PaymentRequestStatus | "all">("all");
+  // Défaut sur "paid" (mission "Round 2 ZegHotel", item 5 : "afficher
+  // automatiquement que les paiements effectués par les clients") — les
+  // autres statuts restent consultables via les boutons, juste plus le
+  // filtre par défaut à l'ouverture du module.
+  const [statusFilter, setStatusFilter] = useState<PaymentRequestStatus | "all">("paid");
   const [selected, setSelected] = useState<PaymentRequestRow | null>(null);
+  const [period, setPeriod] = useState<Period>("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const { from: periodFrom, to: periodTo } = periodRange(period, customFrom, customTo);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return payments.filter((p) => {
       if (statusFilter !== "all" && p.status !== statusFilter) return false;
+      const createdAt = new Date(p.created_at);
+      if (createdAt < periodFrom || createdAt >= periodTo) return false;
       if (!q) return true;
       return (p.full_name ?? "").toLowerCase().includes(q) || (p.phone ?? "").includes(q) || (p.provider_ref ?? "").toLowerCase().includes(q);
     });
-  }, [payments, query, statusFilter]);
+  }, [payments, query, statusFilter, periodFrom, periodTo]);
 
-  const totalPaid = payments.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0);
-  const pendingCount = payments.filter((p) => p.status === "pending").length;
-  const failedCount = payments.filter((p) => p.status === "failed").length;
+  const totalPaid = filtered.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0);
+  const pendingCount = filtered.filter((p) => p.status === "pending").length;
+  const failedCount = filtered.filter((p) => p.status === "failed").length;
 
   return (
     <div>
-      <PageHeader title="Paiements" subtitle="Paiements Mobile Money (MoneyFusion) — acomptes et règlements de notes de séjour" />
+      <PageHeader title="Paiements" subtitle="Paiements Mobile Money (MoneyFusion) — acomptes et règlements de notes de séjour"
+        actions={<PeriodSelector period={period} onChange={setPeriod}
+          customFrom={customFrom} customTo={customTo}
+          onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} />} />
       <div className="space-y-4 p-4 sm:p-8">
         <div className="grid gap-3 sm:grid-cols-3">
           <StatCard label="Total encaissé" value={formatMoney(totalPaid)} icon={<Wallet className="h-5 w-5" />} accent="success" />
@@ -66,7 +80,7 @@ function PaiementsPage() {
               className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary" />
           </div>
           <div className="flex gap-1">
-            {(["all", "pending", "paid", "failed"] as const).map((s) => (
+            {(["paid", "pending", "failed", "all"] as const).map((s) => (
               <button key={s} onClick={() => setStatusFilter(s)}
                 className={cn("rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold", statusFilter === s ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-muted")}>
                 {s === "all" ? "Tous" : STATUS_LABEL[s]}
