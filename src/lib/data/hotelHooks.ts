@@ -12,10 +12,16 @@ function useOrganizationId() {
 }
 
 // ============ TYPES ============
+// Tarif horaire personnalisé (mission "mise à jour ZegHotel", migration
+// 087) — ex. {"label":"2h","hours":2,"price":5000}. Référence affichée sur
+// la fiche du type de chambre, pas encore branché sur le calcul automatique
+// à la réservation (voir commentaire de la migration).
+export type CustomHourlyRate = { label: string; hours: number; price: number };
 export type HotelRoomType = {
   id: string; organization_id: string; name: string; description: string | null;
   capacity_adults: number; capacity_children: number; amenities: string[];
   base_price: number; image_url: string | null; created_at: string;
+  hourly_rate: number | null; custom_hourly_rates: CustomHourlyRate[];
 };
 export type HousekeepingStatus = "clean" | "dirty" | "inspected" | "out_of_service";
 export type HotelRoom = {

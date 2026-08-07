@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Plus, X, Loader2, Pencil, Trash2, BedDouble, DoorClosed, Search, History, CalendarRange } from "lucide-react";
+import { Plus, X, Loader2, Pencil, Trash2, BedDouble, DoorClosed, Search, History, CalendarRange, Clock, Wrench } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useMyRole } from "@/lib/data/hooks";
 import { useFormatMoney } from "@/lib/data/hooks";
@@ -8,7 +8,7 @@ import {
   useHotelRoomTypes, useUpsertHotelRoomType, useDeleteHotelRoomType,
   useHotelRooms, useUpsertHotelRoom, useDeleteHotelRoom, useSetRoomHousekeepingStatus,
   useRoomReservationHistory,
-  type HotelRoomType, type HotelRoom, type HousekeepingStatus,
+  type HotelRoomType, type HotelRoom, type HousekeepingStatus, type CustomHourlyRate,
 } from "@/lib/data/hotelHooks";
 import { cn, selectOnFocus } from "@/lib/utils";
 
@@ -16,6 +16,16 @@ const RESV_STATUS_LABEL: Record<string, string> = {
   pending: "En attente", confirmed: "Confirmée", checked_in: "En cours", checked_out: "Terminée",
   cancelled: "Annulée", no_show: "No-show",
 };
+
+// Équipements pré-suggérés (mission "mise à jour ZegHotel", item 3) — liste
+// courte de suggestions courantes, filtrées par la barre de recherche ;
+// libre à l'établissement d'ajouter n'importe quel équipement non listé ici
+// (texte libre, hotel_room_types.amenities déjà en place avant cette phase).
+const EQUIPMENT_PRESETS = [
+  "Climatisation", "Ventilateur", "Chauffage", "Wifi", "Télévision", "Mini-bar",
+  "Coffre-fort", "Sèche-cheveux", "Balcon", "Vue mer", "Baignoire", "Douche",
+  "Bureau", "Machine à café", "Room service",
+];
 
 export const Route = createFileRoute("/app/hotel/rooms")({
   component: RoomsPage,
@@ -108,6 +118,21 @@ function RoomsPage() {
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">{t.capacity_adults} adulte(s) · {t.capacity_children} enfant(s)</p>
                   <p className="mt-2 font-display text-lg font-bold text-primary">{formatMoney(t.base_price)} <span className="text-xs font-normal text-muted-foreground">/ nuit</span></p>
+                  {(t.hourly_rate || t.custom_hourly_rates.length > 0) && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t.hourly_rate ? `${formatMoney(t.hourly_rate)} / heure` : ""}
+                      {t.hourly_rate && t.custom_hourly_rates.length > 0 ? " · " : ""}
+                      {t.custom_hourly_rates.map((r) => `${r.label} : ${formatMoney(r.price)}`).join(", ")}
+                    </p>
+                  )}
+                  {t.amenities.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {t.amenities.slice(0, 4).map((a) => (
+                        <span key={a} className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{a}</span>
+                      ))}
+                      {t.amenities.length > 4 && <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">+{t.amenities.length - 4}</span>}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -233,8 +258,28 @@ function RoomTypeModal({ roomType, onClose }: { roomType: HotelRoomType | null; 
   const [capacityAdults, setCapacityAdults] = useState(roomType?.capacity_adults ?? 2);
   const [capacityChildren, setCapacityChildren] = useState(roomType?.capacity_children ?? 0);
   const [basePrice, setBasePrice] = useState(roomType?.base_price ?? 0);
+  // Tarifs heure / heure personnalisée (mission "mise à jour ZegHotel",
+  // migration 087 — à exécuter manuellement avant que ces champs persistent
+  // réellement, cf. commentaire de la migration).
+  const [hourlyRate, setHourlyRate] = useState(roomType?.hourly_rate ?? 0);
+  const [customRates, setCustomRates] = useState<CustomHourlyRate[]>(roomType?.custom_hourly_rates ?? []);
+  const [equipment, setEquipment] = useState<string[]>(roomType?.amenities ?? []);
+  const [equipQuery, setEquipQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const inp = "w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
+
+  const filteredPresets = EQUIPMENT_PRESETS.filter((e) => !equipment.includes(e) && e.toLowerCase().includes(equipQuery.trim().toLowerCase()));
+  const addEquipment = (label: string) => {
+    const v = label.trim();
+    if (!v || equipment.includes(v)) return;
+    setEquipment((eq) => [...eq, v]);
+    setEquipQuery("");
+  };
+
+  const addCustomRate = () => setCustomRates((r) => [...r, { label: "", hours: 1, price: 0 }]);
+  const updateCustomRate = (i: number, patch: Partial<CustomHourlyRate>) =>
+    setCustomRates((r) => r.map((row, j) => j === i ? { ...row, ...patch } : row));
+  const removeCustomRate = (i: number) => setCustomRates((r) => r.filter((_, j) => j !== i));
 
   const submit = async () => {
     setError(null);
@@ -242,6 +287,9 @@ function RoomTypeModal({ roomType, onClose }: { roomType: HotelRoomType | null; 
       await upsert.mutateAsync({
         id: roomType?.id, name: name.trim(), description: description.trim() || null,
         capacity_adults: capacityAdults, capacity_children: capacityChildren, base_price: basePrice,
+        hourly_rate: hourlyRate || null,
+        custom_hourly_rates: customRates.filter((r) => r.label.trim() && r.price > 0),
+        amenities: equipment,
       });
       onClose();
     } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
@@ -254,7 +302,7 @@ function RoomTypeModal({ roomType, onClose }: { roomType: HotelRoomType | null; 
           <div className="font-display text-lg font-bold">{roomType ? "Modifier le type" : "Nouveau type de chambre"}</div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
-        <div className="space-y-3 p-5">
+        <div className="max-h-[75vh] space-y-3 overflow-y-auto p-5">
           <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nom *</span>
             <input value={name} onChange={(e) => setName(e.target.value)} className={inp} placeholder="Chambre Standard" /></label>
           <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description</span>
@@ -265,8 +313,69 @@ function RoomTypeModal({ roomType, onClose }: { roomType: HotelRoomType | null; 
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Enfants</span>
               <input type="number" onFocus={selectOnFocus} min={0} value={capacityChildren} onChange={(e) => setCapacityChildren(Number(e.target.value))} className={inp} /></label>
           </div>
-          <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Prix de base / nuit *</span>
-            <input type="number" onFocus={selectOnFocus} min={0} value={basePrice} onChange={(e) => setBasePrice(Number(e.target.value))} className={inp} /></label>
+
+          {/* Tarifs — nuitée (existant) + heure + heure personnalisée
+              (mission "mise à jour ZegHotel", item 3, migration 087). */}
+          <div className="rounded-xl border border-border p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><Clock className="h-3.5 w-3.5" /> Tarifs</div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block"><span className="mb-1 block text-xs text-muted-foreground">Prix / nuit *</span>
+                <input type="number" onFocus={selectOnFocus} min={0} value={basePrice} onChange={(e) => setBasePrice(Number(e.target.value))} className={inp} /></label>
+              <label className="block"><span className="mb-1 block text-xs text-muted-foreground">Prix / heure</span>
+                <input type="number" onFocus={selectOnFocus} min={0} value={hourlyRate || ""} onChange={(e) => setHourlyRate(Number(e.target.value))} className={inp} placeholder="Optionnel" /></label>
+            </div>
+            <div className="mt-2 space-y-1.5">
+              <span className="block text-xs text-muted-foreground">Tarifs personnalisés (ex : forfait 2h, week-end…)</span>
+              {customRates.map((r, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <input value={r.label} onChange={(e) => updateCustomRate(i, { label: e.target.value })} placeholder="Libellé"
+                    className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary" />
+                  <input type="number" onFocus={selectOnFocus} min={0} value={r.hours} onChange={(e) => updateCustomRate(i, { hours: Number(e.target.value) })}
+                    placeholder="h" className="h-9 w-14 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary" />
+                  <input type="number" onFocus={selectOnFocus} min={0} value={r.price} onChange={(e) => updateCustomRate(i, { price: Number(e.target.value) })}
+                    placeholder="Prix" className="h-9 w-20 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary" />
+                  <button onClick={() => removeCustomRate(i)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+              <button onClick={addCustomRate} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border py-1.5 text-xs font-semibold text-muted-foreground hover:border-primary hover:text-primary">
+                <Plus className="h-3.5 w-3.5" /> Ajouter un tarif personnalisé
+              </button>
+            </div>
+          </div>
+
+          {/* Équipements — hotel_room_types.amenities existait déjà en base,
+              seule l'interface manquait (mission "mise à jour ZegHotel"). */}
+          <div className="rounded-xl border border-border p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><Wrench className="h-3.5 w-3.5" /> Équipements</div>
+            {equipment.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {equipment.map((e) => (
+                  <span key={e} className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                    {e} <button onClick={() => setEquipment((eq) => eq.filter((x) => x !== e))} className="hover:text-destructive"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input value={equipQuery} onChange={(e) => setEquipQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && equipQuery.trim()) addEquipment(equipQuery); }}
+                placeholder="Rechercher ou ajouter un équipement…" className="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary" />
+            </div>
+            {equipQuery.trim() && (
+              <div className="mt-1.5 max-h-28 overflow-y-auto rounded-lg border border-border">
+                {filteredPresets.map((p) => (
+                  <button key={p} onClick={() => addEquipment(p)} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">{p}</button>
+                ))}
+                {!EQUIPMENT_PRESETS.some((p) => p.toLowerCase() === equipQuery.trim().toLowerCase()) && (
+                  <button onClick={() => addEquipment(equipQuery)} className="block w-full px-3 py-1.5 text-left text-xs font-semibold text-primary hover:bg-muted">
+                    + Ajouter « {equipQuery.trim()} »
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
           <div className="flex gap-2 pt-1">
             <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>

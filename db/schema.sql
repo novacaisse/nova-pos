@@ -2374,7 +2374,13 @@ create table if not exists public.hotel_room_types (
   amenities jsonb not null default '[]'::jsonb,
   base_price numeric(14,2) not null,
   image_url text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Tarifs de référence heure/heure personnalisée (mission "mise à jour
+  -- ZegHotel", migration 087) — pas encore branchés sur
+  -- hotel_compute_room_rate() (le calcul automatique en réservation reste
+  -- sur hotel_rate_plans.hourly_rate, précédence confirmée migration 027).
+  hourly_rate numeric(14,2),
+  custom_hourly_rates jsonb not null default '[]'::jsonb
 );
 create index if not exists idx_hotel_room_types_org on public.hotel_room_types(organization_id);
 alter table public.hotel_room_types enable row level security;
