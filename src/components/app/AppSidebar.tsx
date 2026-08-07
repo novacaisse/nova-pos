@@ -129,6 +129,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
     { title: "Point de vente", url: "/app/hotel/pos-interne", icon: "Coffee" },
     { title: "Paiements", url: "/app/hotel/paiements", icon: "Wallet2" },
+    { title: "Dépenses", url: "/app/hotel/depenses", icon: "Wallet" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
     { title: "Facture FNE", url: "/app/hotel/fne", icon: "Landmark" },
   ],
@@ -220,6 +221,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // financières que les notes de séjour (hotel_folios) — masqué pour
   // housekeeping en cohérence avec le reste des écrans financiers ci-dessus.
   "/app/hotel/paiements": ["housekeeping"],
+  // Dépenses (ZegHotel, mission "mise à jour ZegHotel", item 8) : table
+  // expenses partagée avec ZegCaisse, aucune donnée ménage — masqué pour
+  // housekeeping en cohérence avec le reste des écrans financiers.
+  "/app/hotel/depenses": ["housekeeping"],
   // Produits & Stock : lecture ouverte à tout membre (products_select),
   // écriture réservée par has_module_permission('produits') — housekeeping
   // masqué en cohérence avec les autres modules hors de son périmètre.
