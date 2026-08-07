@@ -852,6 +852,64 @@ function printReservationConfirmation(
   openPrintWindow(html, { width: 900, height: 700 });
 }
 
+// Reçu de caisse au check-in (mission "mise à jour ZegHotel", Phase 2,
+// point 2 — dernier tiret) : même gabarit A4 que printReservationConfirmation
+// ci-dessus, mais cadré comme un reçu d'enregistrement (chambre assignée +
+// acompte déjà versé) plutôt qu'une confirmation de réservation.
+function printCheckInReceipt(
+  reservation: HotelReservationRow, folio: HotelFolioDetail | null | undefined,
+  org: { name: string; logo_url: string | null } | null,
+  settings: { data: { address?: string; phone?: string; ifu?: string } } | null | undefined,
+  formatMoney: (n: number) => string,
+) {
+  const nights = Math.max(1, Math.round((new Date(reservation.check_out).getTime() - new Date(reservation.check_in).getTime()) / 86400000));
+  const activeRooms = reservation.reservation_rooms.filter((rr) => rr.status !== "cancelled" && rr.status !== "no_show");
+  const roomList = activeRooms.map((rr) => `Chambre ${rr.room?.number ?? "—"} — ${rr.room?.room_type?.name ?? ""}`).join(", ");
+  const roomTotal = activeRooms.reduce((s, rr) => s + rr.rate_amount, 0);
+  const paidSoFar = (folio?.payments ?? []).filter((p) => p.kind !== "refund").reduce((s, p) => s + p.amount, 0)
+    - (folio?.payments ?? []).filter((p) => p.kind === "refund").reduce((s, p) => s + p.amount, 0);
+  const balanceDue = roomTotal - paidSoFar;
+
+  const bodyHtml = `
+    <div class="doc-parties">
+      <div class="block">
+        <h2>Client</h2>
+        <div class="name">${reservation.guest?.full_name ?? "—"}</div>
+        ${reservation.guest?.phone ? `<div>${reservation.guest.phone}</div>` : ""}
+        ${reservation.guest?.id_document_type ? `<div>${reservation.guest.id_document_type}${reservation.guest.id_document_number ? ` — ${reservation.guest.id_document_number}` : ""}</div>` : ""}
+      </div>
+      <div class="block" style="text-align:right">
+        <h2>Enregistrement</h2>
+        <div class="name">${new Date(reservation.check_in).toLocaleDateString("fr-FR")} → ${new Date(reservation.check_out).toLocaleDateString("fr-FR")}</div>
+        <div>${roomList}</div>
+      </div>
+    </div>
+    <div class="doc-totals">
+      <div class="row total"><span>Total séjour (hébergement, ${nights} nuit${nights > 1 ? "s" : ""})</span><span>${formatMoney(roomTotal)}</span></div>
+      ${paidSoFar > 0 ? `<div class="row"><span>Déjà versé</span><span>-${formatMoney(paidSoFar)}</span></div>` : ""}
+      <div class="row total"><span>Solde restant dû</span><span>${formatMoney(Math.max(0, balanceDue))}</span></div>
+    </div>
+    <p style="margin-top:16px;font-size:12px;color:#666">
+      Reçu remis au client à son enregistrement (check-in). Le solde restant dû sera réglé au départ, sauf paiement anticipé.
+    </p>`;
+
+  const html = renderA4Document({
+    docTitle: "Reçu d'enregistrement",
+    docNumber: reservation.id.slice(0, 8).toUpperCase(),
+    docDate: new Date().toLocaleDateString("fr-FR"),
+    shop: {
+      shopName: org?.name ?? "Organisation",
+      logoUrl: org?.logo_url,
+      address: settings?.data.address,
+      phone: settings?.data.phone,
+      ifu: settings?.data.ifu,
+    },
+    bodyHtml,
+    footerHtml: "Reçu généré par ZegHotel au check-in.",
+  });
+  openPrintWindow(html, { width: 900, height: 700 });
+}
+
 function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId: string; canWrite: boolean; onClose: () => void }) {
   const { data: reservation, isLoading } = useHotelReservation(reservationId);
   const formatMoney = useFormatMoney();
@@ -901,10 +959,18 @@ function ReservationDrawer({ reservationId, canWrite, onClose }: { reservationId
                   {new Date(reservation.check_in).toLocaleDateString("fr-FR")} → {new Date(reservation.check_out).toLocaleDateString("fr-FR")}
                   <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase", STATUS_COLOR[reservation.status])}>{STATUS_LABEL[reservation.status]}</span>
                 </div>
-                <button onClick={() => printReservationConfirmation(reservation, folio, currentOrganization, settings, formatMoney)}
-                  className="mt-2 flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-foreground hover:bg-muted">
-                  <Printer className="h-3 w-3" /> Imprimer/Télécharger confirmation
-                </button>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button onClick={() => printReservationConfirmation(reservation, folio, currentOrganization, settings, formatMoney)}
+                    className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-foreground hover:bg-muted">
+                    <Printer className="h-3 w-3" /> Imprimer/Télécharger confirmation
+                  </button>
+                  {(reservation.status === "checked_in" || reservation.status === "checked_out") && (
+                    <button onClick={() => printCheckInReceipt(reservation, folio, currentOrganization, settings, formatMoney)}
+                      className="flex items-center gap-1 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success hover:bg-success/20">
+                      <Printer className="h-3 w-3" /> Reçu de check-in
+                    </button>
+                  )}
+                </div>
               </div>
               <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl border border-border hover:bg-muted"><X className="h-4 w-4" /></button>
             </header>
