@@ -5,7 +5,7 @@
 // mensuel par compte.
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Building2, Plus, X, Trash2, Save, Receipt, CheckCircle2, Clock, Loader2 } from "lucide-react";
+import { Building2, Plus, X, Trash2, Save, Receipt, CheckCircle2, Clock, Loader2, Search } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useFormatMoney } from "@/lib/data/hooks";
 import {
@@ -38,6 +38,13 @@ function CorporatePage() {
 
   const [edit, setEdit] = useState<Partial<HotelCorporateAccount> | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const filteredAccounts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return accounts;
+    return accounts.filter((a) =>
+      a.name.toLowerCase().includes(q) || (a.contact_name ?? "").toLowerCase().includes(q) || (a.contact_email ?? "").toLowerCase().includes(q));
+  }, [accounts, query]);
 
   const pending = invoices.filter((i) => !i.corporate_paid_at);
   const pendingTotal = pending.reduce((s, i) => s + i.total, 0);
@@ -72,6 +79,14 @@ function CorporatePage() {
           <StatCard label="Montant en attente" value={formatMoney(pendingTotal)} icon={<Receipt className="h-5 w-5" />} accent="accent" />
         </div>
 
+        {accounts.length > 0 && (
+          <div className="relative max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher une entreprise…"
+              className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary" />
+          </div>
+        )}
+
         {loadingAccounts ? (
           <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">Chargement…</div>
         ) : accounts.length === 0 ? (
@@ -79,9 +94,13 @@ function CorporatePage() {
             <div className="text-sm text-muted-foreground">Aucun compte entreprise pour l'instant.</div>
             <button onClick={() => setEdit({ name: "" })} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"><Plus className="h-4 w-4" /> Ajouter</button>
           </div>
+        ) : filteredAccounts.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+            Aucune entreprise ne correspond à « {query} ».
+          </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            {accounts.map((a) => {
+            {filteredAccounts.map((a) => {
               const accInvoices = invoicesByAccount.get(a.id) ?? [];
               const accPending = accInvoices.filter((i) => !i.corporate_paid_at);
               const accPendingTotal = accPending.reduce((s, i) => s + i.total, 0);
