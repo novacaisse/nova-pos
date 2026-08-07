@@ -1178,6 +1178,8 @@ insert into public.permission_modules (key, app_module, label, open_view, sort_o
   ('hotel_parametres',   'hotel', 'Paramètres',       true,  12),
   -- Migration 090 (Round 2, Phase C) — module Finance/Trésorerie simplifié.
   ('hotel_finance',      'hotel', 'Finance',          false, 13),
+  -- Migration 091 (Round 2, Phase D) — module Gestion de paie simple.
+  ('hotel_payroll',      'hotel', 'Paie',             false, 14),
   -- Modules ZegResto (migration 068, Phase D-2)
   ('resto_salle',        'resto', 'Salle',                true,  1),
   ('resto_commandes',    'resto', 'Commandes',            true,  2),
@@ -3446,6 +3448,65 @@ create policy hotel_treasury_reconciliations_insert on public.hotel_treasury_rec
 drop policy if exists hotel_treasury_reconciliations_delete on public.hotel_treasury_reconciliations;
 create policy hotel_treasury_reconciliations_delete on public.hotel_treasury_reconciliations for delete to authenticated
   using (public.has_module_permission(organization_id, 'hotel_finance', 'manage'));
+
+-- Migration 091 (Round 2, Phase D) — Gestion de paie simple. Salaire de
+-- base par membre (hotel_payroll_profiles) + bulletins mensuels dont le
+-- salaire est figé à la génération (hotel_payslips) — jamais recalculé
+-- rétroactivement si le profil change ensuite. owner/manager uniquement
+-- (pas même accountant — données personnelles de rémunération).
+create table if not exists public.hotel_payroll_profiles (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  base_salary numeric(14,2) not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, user_id)
+);
+create index if not exists idx_hotel_payroll_profiles_org on public.hotel_payroll_profiles(organization_id);
+alter table public.hotel_payroll_profiles enable row level security;
+
+drop policy if exists hotel_payroll_profiles_select on public.hotel_payroll_profiles;
+create policy hotel_payroll_profiles_select on public.hotel_payroll_profiles for select to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_payroll', 'view'));
+drop policy if exists hotel_payroll_profiles_write on public.hotel_payroll_profiles;
+create policy hotel_payroll_profiles_write on public.hotel_payroll_profiles for all to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_payroll', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_payroll', 'manage'));
+
+create table if not exists public.hotel_payslips (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  period_month int not null check (period_month between 1 and 12),
+  period_year int not null check (period_year between 2020 and 2100),
+  base_salary numeric(14,2) not null,
+  adjustment numeric(14,2) not null default 0,
+  adjustment_note text,
+  net_total numeric(14,2) generated always as (base_salary + adjustment) stored,
+  status text not null default 'draft' check (status in ('draft', 'paid')),
+  paid_at timestamptz,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (organization_id, user_id, period_month, period_year)
+);
+create index if not exists idx_hotel_payslips_org on public.hotel_payslips(organization_id);
+create index if not exists idx_hotel_payslips_period on public.hotel_payslips(organization_id, period_year, period_month);
+alter table public.hotel_payslips enable row level security;
+
+drop policy if exists hotel_payslips_select on public.hotel_payslips;
+create policy hotel_payslips_select on public.hotel_payslips for select to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_payroll', 'view'));
+drop policy if exists hotel_payslips_insert on public.hotel_payslips;
+create policy hotel_payslips_insert on public.hotel_payslips for insert to authenticated
+  with check (public.has_module_permission(organization_id, 'hotel_payroll', 'create'));
+drop policy if exists hotel_payslips_update on public.hotel_payslips;
+create policy hotel_payslips_update on public.hotel_payslips for update to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_payroll', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_payroll', 'manage'));
+drop policy if exists hotel_payslips_delete on public.hotel_payslips;
+create policy hotel_payslips_delete on public.hotel_payslips for delete to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_payroll', 'manage'));
 
 -- Migration 020j — ZegHotel, étape finale : tâches de ménage et
 -- incidents de maintenance. À exécuter après 020f/020g/020h/020i.

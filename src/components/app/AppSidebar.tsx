@@ -128,6 +128,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Paiements", url: "/app/hotel/paiements", icon: "Wallet2" },
     { title: "Dépenses", url: "/app/hotel/depenses", icon: "Wallet" },
     { title: "Finance", url: "/app/hotel/finance", icon: "Landmark" },
+    { title: "Paie", url: "/app/hotel/paie", icon: "Briefcase" },
     { title: "Facture FNE", url: "/app/hotel/fne", icon: "Landmark" },
   ],
   hotelOperation: [
@@ -245,6 +246,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // housekeeping masqués, aucune ligne organization_module_permissions
   // pour eux.
   "/app/hotel/finance": ["front_desk", "housekeeping"],
+  // Paie (ZegHotel Round 2, Phase D, migration 091) : owner/manager
+  // uniquement (pas même accountant — données personnelles de
+  // rémunération individuelle, cf. commentaire de tête de la migration).
+  "/app/hotel/paie": ["front_desk", "housekeeping", "accountant"],
   // Produits & Stock : lecture ouverte à tout membre (products_select),
   // écriture réservée par has_module_permission('produits') — housekeeping
   // masqué en cohérence avec les autres modules hors de son périmètre.
@@ -356,6 +361,9 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   // (owner/manager/accountant) — peut donc être branchée ici sans le même
   // garde-fou.
   "/app/hotel/finance": "hotel_finance",
+  // Paie (ZegHotel Round 2, Phase D, migration 091) : clé neuve seedée
+  // owner/manager uniquement (même remarque que hotel_finance ci-dessus).
+  "/app/hotel/paie": "hotel_payroll",
 };
 // Idem ZegResto (Équipe Phase D-2, migrations 068/069).
 const RESTO_MODULE_FOR_URL: Record<string, string> = {
