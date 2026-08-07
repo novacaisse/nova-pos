@@ -79,6 +79,7 @@ import { Route as AppHotelParametresRouteImport } from './routes/app.hotel.param
 import { Route as AppHotelPaiementsRouteImport } from './routes/app.hotel.paiements'
 import { Route as AppHotelMaintenanceRouteImport } from './routes/app.hotel.maintenance'
 import { Route as AppHotelHousekeepingRouteImport } from './routes/app.hotel.housekeeping'
+import { Route as AppHotelFournisseursRouteImport } from './routes/app.hotel.fournisseurs'
 import { Route as AppHotelFneRouteImport } from './routes/app.hotel.fne'
 import { Route as AppHotelEquipeRouteImport } from './routes/app.hotel.equipe'
 import { Route as AppHotelDepensesRouteImport } from './routes/app.hotel.depenses'
@@ -452,6 +453,11 @@ const AppHotelHousekeepingRoute = AppHotelHousekeepingRouteImport.update({
   path: '/housekeeping',
   getParentRoute: () => AppHotelRoute,
 } as any)
+const AppHotelFournisseursRoute = AppHotelFournisseursRouteImport.update({
+  id: '/fournisseurs',
+  path: '/fournisseurs',
+  getParentRoute: () => AppHotelRoute,
+} as any)
 const AppHotelFneRoute = AppHotelFneRouteImport.update({
   id: '/fne',
   path: '/fne',
@@ -621,6 +627,7 @@ export interface FileRoutesByFullPath {
   '/app/hotel/depenses': typeof AppHotelDepensesRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
   '/app/hotel/fne': typeof AppHotelFneRoute
+  '/app/hotel/fournisseurs': typeof AppHotelFournisseursRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
   '/app/hotel/paiements': typeof AppHotelPaiementsRoute
@@ -706,6 +713,7 @@ export interface FileRoutesByTo {
   '/app/hotel/depenses': typeof AppHotelDepensesRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
   '/app/hotel/fne': typeof AppHotelFneRoute
+  '/app/hotel/fournisseurs': typeof AppHotelFournisseursRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
   '/app/hotel/paiements': typeof AppHotelPaiementsRoute
@@ -799,6 +807,7 @@ export interface FileRoutesById {
   '/app/hotel/depenses': typeof AppHotelDepensesRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
   '/app/hotel/fne': typeof AppHotelFneRoute
+  '/app/hotel/fournisseurs': typeof AppHotelFournisseursRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
   '/app/hotel/paiements': typeof AppHotelPaiementsRoute
@@ -894,6 +903,7 @@ export interface FileRouteTypes {
     | '/app/hotel/depenses'
     | '/app/hotel/equipe'
     | '/app/hotel/fne'
+    | '/app/hotel/fournisseurs'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
     | '/app/hotel/paiements'
@@ -979,6 +989,7 @@ export interface FileRouteTypes {
     | '/app/hotel/depenses'
     | '/app/hotel/equipe'
     | '/app/hotel/fne'
+    | '/app/hotel/fournisseurs'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
     | '/app/hotel/paiements'
@@ -1071,6 +1082,7 @@ export interface FileRouteTypes {
     | '/app/hotel/depenses'
     | '/app/hotel/equipe'
     | '/app/hotel/fne'
+    | '/app/hotel/fournisseurs'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
     | '/app/hotel/paiements'
@@ -1607,6 +1619,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHotelHousekeepingRouteImport
       parentRoute: typeof AppHotelRoute
     }
+    '/app/hotel/fournisseurs': {
+      id: '/app/hotel/fournisseurs'
+      path: '/fournisseurs'
+      fullPath: '/app/hotel/fournisseurs'
+      preLoaderRoute: typeof AppHotelFournisseursRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
     '/app/hotel/fne': {
       id: '/app/hotel/fne'
       path: '/fne'
@@ -1845,6 +1864,7 @@ interface AppHotelRouteChildren {
   AppHotelDepensesRoute: typeof AppHotelDepensesRoute
   AppHotelEquipeRoute: typeof AppHotelEquipeRoute
   AppHotelFneRoute: typeof AppHotelFneRoute
+  AppHotelFournisseursRoute: typeof AppHotelFournisseursRoute
   AppHotelHousekeepingRoute: typeof AppHotelHousekeepingRoute
   AppHotelMaintenanceRoute: typeof AppHotelMaintenanceRoute
   AppHotelPaiementsRoute: typeof AppHotelPaiementsRoute
@@ -1863,6 +1883,7 @@ const AppHotelRouteChildren: AppHotelRouteChildren = {
   AppHotelDepensesRoute: AppHotelDepensesRoute,
   AppHotelEquipeRoute: AppHotelEquipeRoute,
   AppHotelFneRoute: AppHotelFneRoute,
+  AppHotelFournisseursRoute: AppHotelFournisseursRoute,
   AppHotelHousekeepingRoute: AppHotelHousekeepingRoute,
   AppHotelMaintenanceRoute: AppHotelMaintenanceRoute,
   AppHotelPaiementsRoute: AppHotelPaiementsRoute,

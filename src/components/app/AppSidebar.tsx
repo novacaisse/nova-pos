@@ -139,6 +139,7 @@ const NAV: Record<string, NavItem[]> = {
   hotelCatalogue: [
     { title: "Chambres", url: "/app/hotel/rooms", icon: "DoorClosed" },
     { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
+    { title: "Fournisseurs", url: "/app/hotel/fournisseurs", icon: "Truck" },
     { title: "Point de vente", url: "/app/hotel/pos-interne", icon: "Coffee" },
   ],
   // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu ;
@@ -233,6 +234,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // expenses partagée avec ZegCaisse, aucune donnée ménage — masqué pour
   // housekeeping en cohérence avec le reste des écrans financiers.
   "/app/hotel/depenses": ["housekeeping"],
+  // Fournisseurs (ZegHotel Round 2, Phase B) : suppliers/purchase_orders
+  // partagées avec ZegCaisse, aucune donnée ménage — masqué pour
+  // housekeeping en cohérence avec Dépenses/Paiements ci-dessus.
+  "/app/hotel/fournisseurs": ["housekeeping"],
   // Produits & Stock : lecture ouverte à tout membre (products_select),
   // écriture réservée par has_module_permission('produits') — housekeeping
   // masqué en cohérence avec les autres modules hors de son périmètre.
