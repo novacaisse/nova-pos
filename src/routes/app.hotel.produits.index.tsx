@@ -8,17 +8,17 @@ import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Plus, Edit3, Trash2, X, LayoutGrid, List, Tag as TagIcon, Package, ChevronDown, Check,
-  Upload, Download, Loader2, ArrowDownCircle, ArrowUpCircle,
+  Upload, Download, Loader2, ArrowDownCircle, ArrowUpCircle, Sliders, AlertTriangle, ArrowLeftRight, Save,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { PageSkeleton } from "@/components/app/PageSkeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   useProducts, useDeleteProduct, useProductStockMovements, useBulkImportProducts,
-  useCategories, useUpsertCategory, useDeleteCategory, useMyRole,
+  useCategories, useUpsertCategory, useDeleteCategory, useMyRole, useCreateStockMovement,
   useFormatMoney, type ProductWithStock, type Category, type BulkImportProductRow,
 } from "@/lib/data/hooks";
-import { cn } from "@/lib/utils";
+import { cn, selectOnFocus } from "@/lib/utils";
 
 function parseCsv(text: string): string[][] {
   const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
@@ -60,6 +60,7 @@ function ProduitsPage() {
   const { data: products = [], isLoading } = useProducts();
   const { data: cats = [] } = useCategories();
   const remove = useDeleteProduct();
+  const createMove = useCreateStockMovement();
   const { data: myRole } = useMyRole();
   const canManage = myRole === "owner" || myRole === "manager";
   const canSeeCostMargin = true;
@@ -71,6 +72,7 @@ function ProduitsPage() {
   const [manageCats, setManageCats] = useState(false);
   const [importing, setImporting] = useState(false);
   const [viewing, setViewing] = useState<ProductWithStock | null>(null);
+  const [showAdjust, setShowAdjust] = useState(false);
 
   const list = useMemo(() => products.filter((p) => {
     if (cat !== "all" && p.category_id !== cat) return false;
@@ -88,6 +90,9 @@ function ProduitsPage() {
           <>
             <button onClick={() => setManageCats(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><TagIcon className="h-4 w-4" /> Catégories</button>
             <button onClick={() => setImporting(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Upload className="h-4 w-4" /> Importer</button>
+            {products.length > 0 && (
+              <button onClick={() => setShowAdjust(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Sliders className="h-4 w-4" /> Nouveau mouvement</button>
+            )}
             <Link to="/app/hotel/produits/nouveau" className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouveau produit</Link>
           </>
         )}
@@ -201,6 +206,10 @@ function ProduitsPage() {
         )}
         {importing && (
           <ImportDialog cats={cats} onClose={() => setImporting(false)} />
+        )}
+        {showAdjust && products.length > 0 && (
+          <AdjustStockDialog products={products} onClose={() => setShowAdjust(false)}
+            onSave={async (payload) => { await createMove.mutateAsync(payload); setShowAdjust(false); }} />
         )}
         {viewing && (
           <ProductDetailDialog product={viewing} cats={cats} canManage={canManage} canSeeCostMargin={canSeeCostMargin}
@@ -442,6 +451,133 @@ function ImportDialog({ cats, onClose }: { cats: Category[]; onClose: () => void
           <button onClick={submit} disabled={rows.length === 0 || bulkImport.isPending || (mode === "category" && !categoryId)}
             className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
             {bulkImport.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Importer {rows.length > 0 ? `(${rows.length})` : ""}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+// Entrée/ajustement manuel de stock (mission "récupération + correctifs
+// impact élevé", Partie 1) — même pattern que app.stock.tsx (ZegCaisse),
+// réutilisé tel quel plutôt que recréé : mêmes types de mouvement, même
+// garde-fou anti-survente côté serveur (apply_stock_movement(), migration
+// 026, s'applique à toute écriture stock_movements quel que soit l'appelant).
+// Note connue (voir RAPPORT_ZEGHOTEL_CORRECTIFS_2026-08.md) : côté
+// ZegHotel, seul le propriétaire peut réellement écrire sur products/
+// stock_movements aujourd'hui (has_module_permission(...,'produits'/'stock',...)
+// pointe vers des clés de module qui n'existent que pour app_module='pos') —
+// ce bouton est donc affiché à owner+manager pour rester cohérent avec le
+// reste de cette page (Modifier/Supprimer produit ont la même limite
+// préexistante), mais un manager verra son enregistrement rejeté par la
+// RLS. Corriger cette limite dépasse le mandat de cette mission (décision
+// produit sur la convergence des clés de module pos/hotel).
+type LocalKind = "entree" | "sortie" | "ajustement" | "perte" | "transfert";
+const KIND_META: Record<LocalKind, { label: string; icon: typeof ArrowDownCircle; dbType: "in" | "out" | "adjustment" | "transfer" }> = {
+  entree:     { label: "Entrée",     icon: ArrowDownCircle,  dbType: "in" },
+  sortie:     { label: "Sortie",     icon: ArrowUpCircle,    dbType: "out" },
+  ajustement: { label: "Ajustement", icon: Sliders,          dbType: "adjustment" },
+  perte:      { label: "Perte",      icon: AlertTriangle,    dbType: "out" },
+  transfert:  { label: "Transfert",  icon: ArrowLeftRight,   dbType: "transfer" },
+};
+
+function AdjustStockDialog({ products, onClose, onSave }: {
+  products: ProductWithStock[]; onClose: () => void;
+  onSave: (m: { product_id: string; type: any; quantity: number; reason?: string }) => Promise<void>;
+}) {
+  const [productId, setProductId] = useState(products[0]?.id ?? "");
+  const [productQuery, setProductQuery] = useState("");
+  const [kind, setKind] = useState<LocalKind>("entree");
+  const [qty, setQty] = useState(0);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inp = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
+
+  const p = products.find((x) => x.id === productId);
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return [];
+    return products.filter((x) => x.name.toLowerCase().includes(q) || (x.sku ?? "").toLowerCase().includes(q)).slice(0, 8);
+  }, [products, productQuery]);
+  if (!p) return null;
+
+  const delta = kind === "entree" ? +Math.abs(qty)
+    : kind === "sortie" || kind === "perte" || kind === "transfert" ? -Math.abs(qty)
+    : qty; // ajustement signé
+  const newStock = Math.max(0, p.stock + delta);
+
+  const submit = async () => {
+    if (!qty) return;
+    setError(null); setSaving(true);
+    try {
+      await onSave({
+        product_id: p.id,
+        type: KIND_META[kind].dbType,
+        quantity: Math.abs(qty),
+        reason: reason.trim() ? `${KIND_META[kind].label} — ${reason.trim()}` : KIND_META[kind].label,
+      });
+    } catch (e: any) {
+      // Le garde-fou anti-survente (apply_stock_movement()) rejette toute
+      // sortie qui ferait passer le stock sous zéro — message serveur
+      // remonté tel quel plutôt qu'un message générique.
+      setError(e?.message ?? "Erreur inconnue.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="font-display text-lg font-bold">Nouveau mouvement de stock</div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="space-y-3 p-5">
+        <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Produit</div>
+          <div className="mb-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs">
+            Sélectionné : <b>{p.name}</b> (stock : {p.stock})
+          </div>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input value={productQuery} onChange={(e) => setProductQuery(e.target.value)}
+              placeholder="Rechercher un autre produit (nom, SKU)…"
+              className={cn(inp, "pl-9")} />
+            {filteredProducts.length > 0 && (
+              <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border bg-card shadow-elegant">
+                {filteredProducts.map((x) => (
+                  <button key={x.id} type="button" onClick={() => { setProductId(x.id); setProductQuery(""); }}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted">
+                    <span className="min-w-0 truncate">{x.name}</span>
+                    <span className="tabular shrink-0 text-xs text-muted-foreground">stock {x.stock}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </label>
+        <div className="grid grid-cols-5 gap-1">
+          {(Object.keys(KIND_META) as LocalKind[]).map((t) => (
+            <button key={t} onClick={() => setKind(t)}
+              className={cn("rounded-lg border py-2 text-[11px] font-semibold", kind === t ? "border-primary bg-primary/10 text-primary" : "border-border")}>
+              {KIND_META[t].label}
+            </button>
+          ))}
+        </div>
+        <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Quantité</div>
+          <input type="number" onFocus={selectOnFocus} value={qty} onChange={(e) => setQty(Number(e.target.value) || 0)} className={inp} />
+        </label>
+        <label className="block"><div className="mb-1 text-xs font-semibold text-muted-foreground">Motif (optionnel)</div>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ex : Inventaire mensuel" className={inp} />
+        </label>
+        <div className="rounded-xl bg-muted p-3 text-xs">
+          Impact : <b className={delta >= 0 ? "text-success" : "text-destructive"}>{delta > 0 ? "+" : ""}{delta}</b> · Nouveau stock : <b>{newStock}</b>
+        </div>
+        {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-semibold">Annuler</button>
+          <button onClick={submit} disabled={!qty || saving} className="flex h-11 flex-[2] items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
           </button>
         </div>
       </div>
