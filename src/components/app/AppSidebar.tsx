@@ -127,6 +127,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
     { title: "Paiements", url: "/app/hotel/paiements", icon: "Wallet2" },
     { title: "Dépenses", url: "/app/hotel/depenses", icon: "Wallet" },
+    { title: "Finance", url: "/app/hotel/finance", icon: "Landmark" },
     { title: "Facture FNE", url: "/app/hotel/fne", icon: "Landmark" },
   ],
   hotelOperation: [
@@ -238,6 +239,12 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // partagées avec ZegCaisse, aucune donnée ménage — masqué pour
   // housekeeping en cohérence avec Dépenses/Paiements ci-dessus.
   "/app/hotel/fournisseurs": ["housekeeping"],
+  // Finance (ZegHotel Round 2, Phase C, migration 090) : hotel_finance
+  // correctement seedé pour owner/manager/accountant uniquement (pas de
+  // trésorier séparé, même périmètre que ZegERP Finance) — front_desk et
+  // housekeeping masqués, aucune ligne organization_module_permissions
+  // pour eux.
+  "/app/hotel/finance": ["front_desk", "housekeeping"],
   // Produits & Stock : lecture ouverte à tout membre (products_select),
   // écriture réservée par has_module_permission('produits') — housekeeping
   // masqué en cohérence avec les autres modules hors de son périmètre.
@@ -343,6 +350,12 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   "/app/hotel/paiements": "hotel_folios",
   "/app/hotel/rapports": "hotel_rapports",
   "/app/hotel/parametres": "hotel_parametres",
+  // Finance (ZegHotel Round 2, Phase C, migration 090) : contrairement à
+  // "produits"/"depenses"/"fournisseurs" ci-dessus, hotel_finance est une
+  // clé neuve correctement seedée pour app_module='hotel' dès sa création
+  // (owner/manager/accountant) — peut donc être branchée ici sans le même
+  // garde-fou.
+  "/app/hotel/finance": "hotel_finance",
 };
 // Idem ZegResto (Équipe Phase D-2, migrations 068/069).
 const RESTO_MODULE_FOR_URL: Record<string, string> = {
