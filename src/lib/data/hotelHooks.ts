@@ -623,6 +623,34 @@ export function useHotelReservation(id: string | null) {
   });
 }
 
+// Historique des réservations d'une chambre (mission "mise à jour
+// ZegHotel", Phase 2, point 3 — clic sur une chambre → historique) : part
+// de hotel_reservation_rooms (pas hotel_reservations directement) car c'est
+// la seule table qui porte room_id — une réservation multi-chambres n'y
+// apparaît qu'une fois par chambre effectivement réservée.
+export type RoomReservationHistoryRow = {
+  id: string; rate_amount: number; status: string;
+  reservation: {
+    id: string; check_in: string; check_out: string; status: ReservationStatus;
+    guest: { full_name: string } | null;
+  };
+};
+export function useRoomReservationHistory(roomId: string | null) {
+  return useQuery({
+    queryKey: ["hotel_room_reservation_history", roomId],
+    enabled: !!roomId,
+    queryFn: async (): Promise<RoomReservationHistoryRow[]> => {
+      const { data, error } = await supabase.from("hotel_reservation_rooms")
+        .select("id, rate_amount, status, reservation:hotel_reservations(id, check_in, check_out, status, guest:hotel_guests(full_name))")
+        .eq("room_id", roomId!)
+        .order("check_in", { foreignTable: "hotel_reservations", ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return (data as any[]).filter((r) => r.reservation) as RoomReservationHistoryRow[];
+    },
+  });
+}
+
 export type CreateReservationInput = {
   guest_id: string; check_in: string; check_out: string;
   rate_plan_id?: string | null; corporate_account_id?: string | null;

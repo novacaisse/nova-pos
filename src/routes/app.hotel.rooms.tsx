@@ -1,15 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Plus, X, Loader2, Pencil, Trash2, BedDouble, DoorClosed, Search } from "lucide-react";
+import { Plus, X, Loader2, Pencil, Trash2, BedDouble, DoorClosed, Search, History, CalendarRange } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useMyRole } from "@/lib/data/hooks";
 import { useFormatMoney } from "@/lib/data/hooks";
 import {
   useHotelRoomTypes, useUpsertHotelRoomType, useDeleteHotelRoomType,
   useHotelRooms, useUpsertHotelRoom, useDeleteHotelRoom, useSetRoomHousekeepingStatus,
+  useRoomReservationHistory,
   type HotelRoomType, type HotelRoom, type HousekeepingStatus,
 } from "@/lib/data/hotelHooks";
 import { cn, selectOnFocus } from "@/lib/utils";
+
+const RESV_STATUS_LABEL: Record<string, string> = {
+  pending: "En attente", confirmed: "Confirmée", checked_in: "En cours", checked_out: "Terminée",
+  cancelled: "Annulée", no_show: "No-show",
+};
 
 export const Route = createFileRoute("/app/hotel/rooms")({
   component: RoomsPage,
@@ -35,6 +41,7 @@ function RoomsPage() {
 
   const [editingType, setEditingType] = useState<HotelRoomType | "new" | null>(null);
   const [editingRoom, setEditingRoom] = useState<HotelRoom | "new" | null>(null);
+  const [historyRoom, setHistoryRoom] = useState<HotelRoom | null>(null);
   const deleteType = useDeleteHotelRoomType();
   const deleteRoom = useDeleteHotelRoom();
 
@@ -139,7 +146,11 @@ function RoomsPage() {
                 <tbody>
                   {filteredRooms.map((r) => (
                     <tr key={r.id} className="border-t border-border/60 hover:bg-muted/40">
-                      <td className="px-4 py-3 font-semibold">{r.number}</td>
+                      <td className="px-4 py-3 font-semibold">
+                        <button onClick={() => setHistoryRoom(r)} className="flex items-center gap-1.5 hover:text-primary hover:underline">
+                          {r.number} <History className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{r.room_type?.name ?? "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{r.floor || "—"}</td>
                       <td className="px-4 py-3">
@@ -173,6 +184,44 @@ function RoomsPage() {
 
       {editingType && <RoomTypeModal roomType={editingType === "new" ? null : editingType} onClose={() => setEditingType(null)} />}
       {editingRoom && <RoomModal room={editingRoom === "new" ? null : editingRoom} roomTypes={roomTypes} onClose={() => setEditingRoom(null)} />}
+      {historyRoom && <RoomHistoryModal room={historyRoom} onClose={() => setHistoryRoom(null)} />}
+    </div>
+  );
+}
+
+// Historique des réservations d'une chambre (mission "mise à jour
+// ZegHotel", Phase 2, point 3) — clic sur le numéro de chambre.
+function RoomHistoryModal({ room, onClose }: { room: HotelRoom; onClose: () => void }) {
+  const { data: history = [], isLoading } = useRoomReservationHistory(room.id);
+  const formatMoney = useFormatMoney();
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="flex items-center gap-2 font-display text-lg font-bold"><History className="h-5 w-5 text-primary" /> Historique — Chambre {room.number}</div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="max-h-[70vh] space-y-2 overflow-y-auto p-5">
+          {isLoading ? (
+            <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+          ) : history.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Aucune réservation pour cette chambre.</div>
+          ) : (
+            history.map((h) => (
+              <div key={h.id} className="rounded-xl border border-border/60 p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 font-semibold"><CalendarRange className="h-3.5 w-3.5 text-muted-foreground" /> {h.reservation.guest?.full_name ?? "—"}</span>
+                  <span className="tabular font-bold">{formatMoney(h.rate_amount)}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{new Date(h.reservation.check_in).toLocaleDateString("fr-FR")} → {new Date(h.reservation.check_out).toLocaleDateString("fr-FR")}</span>
+                  <span className="rounded-full bg-muted px-2 py-0.5">{RESV_STATUS_LABEL[h.reservation.status] ?? h.reservation.status}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
