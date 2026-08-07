@@ -1508,6 +1508,122 @@ export function useHotelDashboardStats(today: string) {
 // dates. Le CA d'hébergement étant porté par hotel_reservation_rooms.rate_amount
 // (montant total du séjour, pas un montant par nuit), il n'y a pas de charge
 // "room" à re-poster jour par jour ici.
+// ============ FINANCE / TRÉSORERIE (Round 2, Phase C, migration 090) ============
+// Module simplifié — pas de grand livre : les comptes sont purement
+// informatifs (aucune écriture existante n'y est rattachée par clé
+// étrangère) et un rapprochement fige son system_total au moment de sa
+// création à partir des données déjà collectées ailleurs (voir
+// computeTreasurySystemTotal ci-dessous, utilisée par la page).
+export type TreasuryAccountType = "cash" | "bank";
+export type HotelTreasuryAccount = {
+  id: string; organization_id: string; name: string; type: TreasuryAccountType;
+  account_number: string | null; opening_balance: number; is_active: boolean; created_at: string;
+};
+export type HotelTreasuryReconciliation = {
+  id: string; organization_id: string; account_id: string;
+  period_start: string; period_end: string;
+  system_total: number; statement_amount: number; difference: number;
+  notes: string | null; created_by: string | null; created_at: string;
+};
+
+export function useHotelTreasuryAccounts() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_treasury_accounts", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelTreasuryAccount[]> => {
+      const { data, error } = await supabase.from("hotel_treasury_accounts")
+        .select("*").eq("organization_id", organizationId!).order("created_at");
+      if (error) throw error;
+      return data as HotelTreasuryAccount[];
+    },
+  });
+}
+export function useUpsertHotelTreasuryAccount() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (a: Partial<HotelTreasuryAccount> & { name: string; type: TreasuryAccountType }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { data, error } = await supabase.from("hotel_treasury_accounts")
+        .upsert({ ...a, organization_id: organizationId }).select().single();
+      if (error) throw error; return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_treasury_accounts", organizationId] }),
+  });
+}
+export function useDeleteHotelTreasuryAccount() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("hotel_treasury_accounts").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_treasury_accounts", organizationId] }),
+  });
+}
+
+export function useHotelTreasuryReconciliations(accountId?: string) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_treasury_reconciliations", organizationId, accountId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelTreasuryReconciliation[]> => {
+      let q = supabase.from("hotel_treasury_reconciliations").select("*").eq("organization_id", organizationId!);
+      if (accountId) q = q.eq("account_id", accountId);
+      const { data, error } = await q.order("period_end", { ascending: false });
+      if (error) throw error;
+      return data as HotelTreasuryReconciliation[];
+    },
+  });
+}
+export function useCreateHotelTreasuryReconciliation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (r: { account_id: string; period_start: string; period_end: string; system_total: number; statement_amount: number; notes?: string }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { error } = await supabase.from("hotel_treasury_reconciliations").insert({ ...r, organization_id: organizationId });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_treasury_reconciliations", organizationId] }),
+  });
+}
+export function useDeleteHotelTreasuryReconciliation() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("hotel_treasury_reconciliations").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_treasury_reconciliations", organizationId] }),
+  });
+}
+
+// Solde théorique d'un compte sur une période, à partir des données déjà
+// collectées ailleurs — mapping par méthode de paiement (cash → "Caisse",
+// tout le reste → "Banque"), seule granularité disponible sans toucher au
+// schéma des tables existantes (hors périmètre de cette phase). Approximatif
+// par nature (une même méthode peut recouvrir plusieurs comptes bancaires
+// réels) — présenté comme tel dans l'écran, pas comme un rapprochement
+// comptable strict.
+export function computeTreasurySystemTotal(
+  type: TreasuryAccountType,
+  payments: HotelPayment[],
+  posSales: HotelPosSale[],
+  expenses: { amount: number; method: string | null }[],
+): number {
+  const cashMethods = new Set(["cash"]);
+  const expenseCashLabels = new Set(["Espèces", "cash"]);
+  const inScope = (m: string | null) => type === "cash" ? cashMethods.has(m ?? "") : !cashMethods.has(m ?? "") && !!m;
+
+  const folioTotal = payments.filter((p) => inScope(p.method))
+    .reduce((s, p) => s + (p.kind === "refund" ? -p.amount : p.amount), 0);
+  const posTotal = posSales.filter((s) => inScope(s.payment_method)).reduce((s, sale) => s + sale.paid, 0);
+  const expenseTotal = expenses.filter((e) => type === "cash" ? expenseCashLabels.has(e.method ?? "") : !expenseCashLabels.has(e.method ?? "") && !!e.method)
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+
+  return folioTotal + posTotal - expenseTotal;
+}
+
 export function useRunNightAudit() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({

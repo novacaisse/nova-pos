@@ -1176,6 +1176,8 @@ insert into public.permission_modules (key, app_module, label, open_view, sort_o
   ('hotel_rapports',     'hotel', 'Rapports',         false, 10),
   ('hotel_canaux',       'hotel', 'Canaux de distribution', false, 11),
   ('hotel_parametres',   'hotel', 'Paramètres',       true,  12),
+  -- Migration 090 (Round 2, Phase C) — module Finance/Trésorerie simplifié.
+  ('hotel_finance',      'hotel', 'Finance',          false, 13),
   -- Modules ZegResto (migration 068, Phase D-2)
   ('resto_salle',        'resto', 'Salle',                true,  1),
   ('resto_commandes',    'resto', 'Commandes',            true,  2),
@@ -1335,7 +1337,10 @@ insert into public.default_role_permissions (role, module_key, can_view, can_cre
   ('accountant', 'hotel_payments', true, false, false),
   ('accountant', 'hotel_corporate', true, false, false),
   ('accountant', 'hotel_maintenance', true, false, false),
-  ('accountant', 'hotel_rapports', true, false, false)
+  ('accountant', 'hotel_rapports', true, false, false),
+  -- Migration 090 (Round 2, Phase C) — même périmètre que hotel_payments/
+  -- hotel_rapports : lecture seule.
+  ('accountant', 'hotel_finance', true, false, false)
 on conflict (role, module_key) do update set can_view = excluded.can_view, can_create = excluded.can_create, can_manage = excluded.can_manage;
 
 -- ZegResto (migration 068, Phase D-2) — owner/manager : accès complet.
@@ -3380,6 +3385,67 @@ create policy hotel_payments_update on public.hotel_payments for update to authe
 drop policy if exists hotel_payments_delete on public.hotel_payments;
 create policy hotel_payments_delete on public.hotel_payments for delete to authenticated
   using (public.has_module_permission(organization_id, 'hotel_payments', 'manage'));
+
+-- Migration 090 (Round 2, Phase C) — Finance/Trésorerie simplifié. Deux
+-- tables : comptes de trésorerie déclarés (purement informatifs, aucune
+-- écriture existante n'y est liée par clé étrangère) et rapprochements
+-- périodiques (system_total figé à la création, jamais recalculé
+-- rétroactivement — voir commentaire de tête de la migration).
+create table if not exists public.hotel_treasury_accounts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  type text not null default 'cash' check (type in ('cash', 'bank')),
+  account_number text,
+  opening_balance numeric(14,2) not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_treasury_accounts_org on public.hotel_treasury_accounts(organization_id);
+alter table public.hotel_treasury_accounts enable row level security;
+
+drop policy if exists hotel_treasury_accounts_select on public.hotel_treasury_accounts;
+create policy hotel_treasury_accounts_select on public.hotel_treasury_accounts for select to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_finance', 'view'));
+drop policy if exists hotel_treasury_accounts_insert on public.hotel_treasury_accounts;
+create policy hotel_treasury_accounts_insert on public.hotel_treasury_accounts for insert to authenticated
+  with check (public.has_module_permission(organization_id, 'hotel_finance', 'create'));
+drop policy if exists hotel_treasury_accounts_update on public.hotel_treasury_accounts;
+create policy hotel_treasury_accounts_update on public.hotel_treasury_accounts for update to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_finance', 'manage'))
+  with check (public.has_module_permission(organization_id, 'hotel_finance', 'manage'));
+drop policy if exists hotel_treasury_accounts_delete on public.hotel_treasury_accounts;
+create policy hotel_treasury_accounts_delete on public.hotel_treasury_accounts for delete to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_finance', 'manage'));
+
+create table if not exists public.hotel_treasury_reconciliations (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  account_id uuid not null references public.hotel_treasury_accounts(id) on delete cascade,
+  period_start date not null,
+  period_end date not null check (period_end >= period_start),
+  system_total numeric(14,2) not null,
+  statement_amount numeric(14,2) not null,
+  difference numeric(14,2) generated always as (statement_amount - system_total) stored,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_hotel_treasury_reconciliations_org on public.hotel_treasury_reconciliations(organization_id);
+create index if not exists idx_hotel_treasury_reconciliations_account on public.hotel_treasury_reconciliations(account_id);
+alter table public.hotel_treasury_reconciliations enable row level security;
+
+drop policy if exists hotel_treasury_reconciliations_select on public.hotel_treasury_reconciliations;
+create policy hotel_treasury_reconciliations_select on public.hotel_treasury_reconciliations for select to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_finance', 'view'));
+drop policy if exists hotel_treasury_reconciliations_insert on public.hotel_treasury_reconciliations;
+create policy hotel_treasury_reconciliations_insert on public.hotel_treasury_reconciliations for insert to authenticated
+  with check (public.has_module_permission(organization_id, 'hotel_finance', 'create'));
+-- Pas de policy update : un rapprochement clôturé ne se corrige pas, on en
+-- crée un nouveau.
+drop policy if exists hotel_treasury_reconciliations_delete on public.hotel_treasury_reconciliations;
+create policy hotel_treasury_reconciliations_delete on public.hotel_treasury_reconciliations for delete to authenticated
+  using (public.has_module_permission(organization_id, 'hotel_finance', 'manage'));
 
 -- Migration 020j — ZegHotel, étape finale : tâches de ménage et
 -- incidents de maintenance. À exécuter après 020f/020g/020h/020i.
