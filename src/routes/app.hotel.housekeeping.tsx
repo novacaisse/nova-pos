@@ -43,12 +43,12 @@ function HousekeepingPage() {
   const updateTask = useUpdateHousekeepingTaskStatus();
   const assignTask = useAssignHousekeepingTask();
 
-  // Équipe de ménage assignable — rôle dédié "housekeeping" (Gouvernante).
-  // Un membre avec un accès élargi via la matrice de permissions (Partie 4)
-  // mais un autre rôle de base reste assignable s'il est déjà affecté à une
-  // tâche (voir memberName ci-dessous), simplement absent de cette liste de
-  // sélection tant qu'il n'a jamais été assigné.
-  const housekeepers = useMemo(() => members.filter((m) => m.role === "housekeeping"), [members]);
+  // Membres assignables (mission "Round 2 ZegHotel") : tout membre inscrit
+  // dans l'organisation, pas seulement le rôle dédié "housekeeping" —
+  // certains établissements font tourner le ménage entre plusieurs rôles
+  // (front_desk, manager…). Les non-inscrits restent assignables séparément
+  // via le champ texte libre (assigned_to_name, migration 086).
+  const housekeepers = useMemo(() => members, [members]);
   const memberName = (userId: string | null) => userId ? (members.find((m) => m.user_id === userId)?.profile?.full_name ?? "Membre") : null;
   // assigned_to_name (mission "mise à jour ZegHotel", migration 086) :
   // affichage identique qu'il s'agisse d'un membre enregistré ou non.

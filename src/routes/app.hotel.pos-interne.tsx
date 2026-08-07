@@ -19,7 +19,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   ShoppingCart, Plus, Minus, Trash2, Receipt, Loader2, Coffee, X, Search,
-  BedDouble, Banknote, Smartphone, CreditCard, Check, Settings2,
+  BedDouble, Banknote, Smartphone, CreditCard, Check,
   Maximize2, Minimize2, ScanLine, History, CalendarRange, Printer, Percent, Download,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
@@ -137,13 +137,7 @@ function HotelPosPage() {
   return (
     <div className={cn("flex flex-col", fullscreen ? "h-screen" : "h-[calc(100vh-4rem)]")}>
       <div className="pos-hide-in-fullscreen">
-        <PageHeader title="Point de vente" subtitle="Restaurant, bar, piscine, room service — sur la note d'un client ou encaissé tout de suite"
-          actions={
-            <Link to="/app/hotel/produits" className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">
-              <Settings2 className="h-4 w-4" /> Gérer le catalogue
-            </Link>
-          }
-        />
+        <PageHeader title="Point de vente" subtitle="Restaurant, bar, piscine, room service — sur la note d'un client ou encaissé tout de suite" />
       </div>
       <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4 sm:p-8 lg:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-h-0 flex-col">

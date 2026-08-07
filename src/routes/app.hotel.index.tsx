@@ -2,13 +2,25 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
+  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+} from "recharts";
+import {
   BedDouble, CalendarRange, DoorClosed, LogIn, LogOut, Sparkle, Users, TrendingUp, Percent, Coins,
-  ClipboardList, ReceiptText, CalendarClock, AlertCircle,
+  ClipboardList, ReceiptText, CalendarClock, AlertCircle, BarChart3, Wallet, TrendingDown,
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useFormatMoney } from "@/lib/data/hooks";
+import { useFormatMoney, useExpenses } from "@/lib/data/hooks";
 import { useHotelDashboardStats, useHotelRooms, useHotelReservations, useHotelDiagnostics, nightsInRange } from "@/lib/data/hotelHooks";
+
+function addDaysISO(iso: string, n: number) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+// Abrégé pour l'axe du graphique (formatMoney() n'a pas de mode compact) —
+// le montant complet reste affiché dans le tooltip via formatMoney().
+function compactAmount(n: number) {
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(Math.round(n));
+}
 
 export const Route = createFileRoute("/app/hotel/")({
   component: HotelDashboard,
@@ -43,6 +55,36 @@ function HotelDashboard() {
   const { nights: periodNights, revenue: periodRevenue } = useMemo(
     () => nightsInRange(periodReservations, rangeStart, rangeEnd), [periodReservations, rangeStart, rangeEnd]);
   const periodOccupancyPct = rooms.length ? Math.round((periodNights / (rooms.length * periodDays)) * 100) : 0;
+
+  // Dépenses au dashboard (mission "Round 2 ZegHotel", item 6) — jusqu'ici
+  // invisibles ici et des rapports, malgré un module Dépenses actif depuis
+  // la Phase 2 ; expenses est une table partagée (pas d'app_module), donc
+  // filtrée côté client par organisation via RLS déjà, pas de hook dédié
+  // hotelHooks nécessaire.
+  const { data: expenses = [] } = useExpenses();
+  const periodExpensesTotal = useMemo(() => expenses
+    .filter((e) => { const d = new Date(e.paid_at + "T12:00:00"); return d >= fromDate && d <= toDate; })
+    .reduce((s, e) => s + Number(e.amount || 0), 0), [expenses, fromDate, toDate]);
+  const periodNetResult = periodRevenue - periodExpensesTotal;
+
+  // Graphique dynamique (mission "Round 2 ZegHotel", item 1) — revenu +
+  // occupation par intervalle sur la période choisie. Regroupement par
+  // semaine au-delà d'un mois pour garder un nombre de barres lisible
+  // (une période "année" en quotidien donnerait 365 barres illisibles).
+  const bucketDays = periodDays > 31 ? 7 : 1;
+  const chartSeries = useMemo(() => {
+    const points: { label: string; revenue: number; occupancy: number }[] = [];
+    for (let i = 0; i < periodDays; i += bucketDays) {
+      const bStart = addDaysISO(rangeStart, i);
+      const bDays = Math.min(bucketDays, periodDays - i);
+      const bEnd = addDaysISO(bStart, bDays);
+      const { nights, revenue } = nightsInRange(periodReservations, bStart, bEnd);
+      const occupancy = rooms.length ? Math.round((nights / (rooms.length * bDays)) * 100) : 0;
+      const label = new Date(bStart + "T00:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+      points.push({ label, revenue: Math.round(revenue), occupancy });
+    }
+    return points;
+  }, [periodReservations, rangeStart, periodDays, bucketDays, rooms.length]);
 
   if (!isLoading && rooms.length === 0) {
     return (
@@ -148,6 +190,39 @@ function HotelDashboard() {
             <StatCard label="Nuits vendues" value={String(periodNights)} icon={<TrendingUp className="h-5 w-5" />} />
             <StatCard label="Taux d'occupation (période)" value={`${periodOccupancyPct}%`} icon={<Percent className="h-5 w-5" />} accent="primary" />
           </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <StatCard label="Dépenses" value={formatMoney(periodExpensesTotal)} icon={<Wallet className="h-5 w-5" />} accent="destructive" />
+            <StatCard label="Résultat net (hébergement)" value={formatMoney(periodNetResult)}
+              icon={periodNetResult >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+              accent={periodNetResult >= 0 ? "success" : "destructive"} />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+            <BarChart3 className="h-4 w-4 text-primary" /> Revenu & occupation ({bucketDays > 1 ? "par semaine" : "par jour"})
+          </div>
+          {!chartSeries.some((p) => p.revenue > 0 || p.occupancy > 0) ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Aucune donnée sur cette période.</p>
+          ) : (
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartSeries} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="revenue" tick={{ fontSize: 11 }} tickLine={false} axisLine={false}
+                    tickFormatter={compactAmount} />
+                  <YAxis yAxisId="occupancy" orientation="right" tick={{ fontSize: 11 }} tickLine={false} axisLine={false}
+                    domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip
+                    formatter={(value: number, name: string) => name === "occupancy" ? [`${value}%`, "Occupation"] : [formatMoney(value), "Revenu"]}
+                    labelClassName="text-xs" contentStyle={{ fontSize: 12, borderRadius: 12 }} />
+                  <Bar yAxisId="revenue" dataKey="revenue" name="revenue" fill="var(--primary)" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                  <Line yAxisId="occupancy" dataKey="occupancy" name="occupancy" stroke="var(--accent)" strokeWidth={2} dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">

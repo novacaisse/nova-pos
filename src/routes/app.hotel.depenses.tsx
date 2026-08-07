@@ -14,10 +14,11 @@
 // Non corrigé ici (changement de policy/seed hors périmètre de cette phase
 // sans confirmation explicite) — même classe de gap, signalée au même titre.
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Wallet, Trash2, Edit3, Save, X, Settings2 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
+import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import {
   useExpenses, useUpsertExpense, useDeleteExpense, useShopSettings, useUpdateShopSettings,
   useFormatMoney, type Expense,
@@ -40,11 +41,21 @@ function HotelDepensesPage() {
   const [edit, setEdit] = useState<Partial<Expense> | null>(null);
   const [del, setDel] = useState<Expense | null>(null);
   const [manageCategories, setManageCategories] = useState(false);
+  // Filtre période (mission "Round 2 ZegHotel", item 6) — même sélecteur
+  // partagé que le dashboard/rapports, "Ce mois" par défaut.
+  const [period, setPeriod] = useState<Period>("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const { from: periodFrom, to: periodTo } = periodRange(period, customFrom, customTo);
 
   const customCategories = settings?.data.expense_categories ?? [];
   const allCategories = [...DEFAULT_EXPENSE_CATEGORIES, ...customCategories];
 
-  const filtered = filter === "all" ? items : items.filter((e) => (e.category ?? "Autre") === filter);
+  const inPeriod = useMemo(() => items.filter((e) => {
+    const paidAt = new Date(e.paid_at + "T12:00:00");
+    return paidAt >= periodFrom && paidAt <= periodTo;
+  }), [items, periodFrom, periodTo]);
+  const filtered = filter === "all" ? inPeriod : inPeriod.filter((e) => (e.category ?? "Autre") === filter);
   const total = filtered.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   const saveCategories = async (next: string[]) => {
@@ -56,6 +67,9 @@ function HotelDepensesPage() {
       <PageHeader title="Dépenses" subtitle="Suivi des sorties de caisse"
         actions={
           <>
+            <PeriodSelector period={period} onChange={setPeriod}
+              customFrom={customFrom} customTo={customTo}
+              onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} />
             <button onClick={() => setManageCategories(true)} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"><Settings2 className="h-4 w-4" /> Catégories</button>
             <button onClick={() => setEdit({ label: "", amount: 0, category: allCategories[0], paid_at: new Date().toISOString().slice(0,10), method: "Espèces" })} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90"><Plus className="h-4 w-4" /> Nouvelle dépense</button>
           </>

@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useFormatMoney, useMyRole, useShopSettings } from "@/lib/data/hooks";
+import { useFormatMoney, useMyRole, useShopSettings, useExpenses } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow, escapeHtml } from "@/lib/printDoc";
 import {
@@ -182,6 +182,15 @@ function HotelReportsPage() {
     };
   }, [reservations]);
 
+  // Dépenses (mission "Round 2 ZegHotel", item 6) — jusqu'ici absentes des
+  // rapports malgré un module Dépenses actif ; même filtre client que le
+  // dashboard (expenses est une table partagée, pas de hook hotelHooks dédié).
+  const { data: expenses = [] } = useExpenses();
+  const periodExpensesTotal = useMemo(() => expenses
+    .filter((e) => { const d = new Date(e.paid_at + "T12:00:00"); return d >= fromDate && d <= toDate; })
+    .reduce((s, e) => s + Number(e.amount || 0), 0), [expenses, fromDate, toDate]);
+  const netResult = revenue + extrasTotal - periodExpensesTotal;
+
   const isLoading = loadingReservations || loadingPayments || loadingExtras;
 
   const exportPdf = () => {
@@ -202,6 +211,8 @@ function HotelReportsPage() {
           <tr><td>Durée moyenne de séjour</td><td class="num">${alos.toFixed(1)} nuit${alos >= 2 ? "s" : ""}</td></tr>
           <tr><td>Annulations</td><td class="num">${cancelledCount}</td></tr>
           <tr><td>No-show</td><td class="num">${noShowCount}</td></tr>
+          <tr><td>Dépenses</td><td class="num">${escapeHtml(formatMoney(periodExpensesTotal))}</td></tr>
+          <tr><td>Résultat net</td><td class="num">${escapeHtml(formatMoney(netResult))}</td></tr>
         </tbody>
       </table>
 
@@ -281,6 +292,12 @@ function HotelReportsPage() {
           <StatCard label="Revenu extras (hors chambre)" value={formatMoney(extrasTotal)} icon={<Wallet className="h-5 w-5" />} />
           <StatCard label="Annulations" value={String(cancelledCount)} icon={<Ban className="h-5 w-5" />} />
           <StatCard label="No-show" value={String(noShowCount)} icon={<UserX className="h-5 w-5" />} />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <StatCard label="Dépenses" value={formatMoney(periodExpensesTotal)} icon={<Wallet className="h-5 w-5" />} accent="destructive" />
+          <StatCard label="Résultat net" value={formatMoney(netResult)} hint="Hébergement + extras − dépenses"
+            icon={<TrendingUp className="h-5 w-5" />} accent={netResult >= 0 ? "success" : "destructive"} />
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">

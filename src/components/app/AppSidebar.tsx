@@ -118,20 +118,28 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Stock", url: "/app/stock", icon: "Warehouse" },
     { title: "Fournisseurs", url: "/app/fournisseurs", icon: "Truck" },
   ],
-  hotel: [
+  // Regroupement thématique (mission "Round 2 ZegHotel", dernier item —
+  // même découpage Pilotage/Opération/Catalogue que NAV.pilotage/operation/
+  // catalogue ci-dessus pour ZegCaisse) : la liste plate à 13 entrées était
+  // devenue difficile à parcourir au fil des phases successives.
+  hotelPilotage: [
     { title: "Tableau de bord", url: "/app/hotel", icon: "BedDouble" },
+    { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
+    { title: "Paiements", url: "/app/hotel/paiements", icon: "Wallet2" },
+    { title: "Dépenses", url: "/app/hotel/depenses", icon: "Wallet" },
+    { title: "Facture FNE", url: "/app/hotel/fne", icon: "Landmark" },
+  ],
+  hotelOperation: [
     { title: "Réservations", url: "/app/hotel/reservations", icon: "CalendarRange" },
-    { title: "Chambres", url: "/app/hotel/rooms", icon: "DoorClosed" },
     { title: "Housekeeping", url: "/app/hotel/housekeeping", icon: "Sparkle" },
     { title: "Maintenance", url: "/app/hotel/maintenance", icon: "Wrench" },
     { title: "Clients", url: "/app/hotel/clients", icon: "Users" },
     { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
+  ],
+  hotelCatalogue: [
+    { title: "Chambres", url: "/app/hotel/rooms", icon: "DoorClosed" },
     { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
     { title: "Point de vente", url: "/app/hotel/pos-interne", icon: "Coffee" },
-    { title: "Paiements", url: "/app/hotel/paiements", icon: "Wallet2" },
-    { title: "Dépenses", url: "/app/hotel/depenses", icon: "Wallet" },
-    { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
-    { title: "Facture FNE", url: "/app/hotel/fne", icon: "Landmark" },
   ],
   // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu ;
   // Phase 2 : Commandes + Cuisine) — réservations/rapports rejoignent ce
@@ -511,7 +519,9 @@ export function AppSidebar() {
         {showPos && renderGroup("Pilotage", NAV.pilotage)}
         {showPos && renderGroup("Opération", NAV.operation)}
         {showPos && renderGroup("Catalogue", NAV.catalogue)}
-        {showHotel && renderGroup("Hôtel", NAV.hotel)}
+        {showHotel && renderGroup("Pilotage", NAV.hotelPilotage)}
+        {showHotel && renderGroup("Opération", NAV.hotelOperation)}
+        {showHotel && renderGroup("Catalogue", NAV.hotelCatalogue)}
         {showResto && renderGroup("Restaurant", NAV.resto)}
         {showErp && renderGroup("ERP", NAV.erp)}
         {showPos && renderGroup("Administration", NAV.adminPos)}
