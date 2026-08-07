@@ -392,11 +392,29 @@ export function AppSidebar() {
   const isGatableModule = (url: string) => getModulesForApp(currentOrganization?.app_module).some((m) => m.url === url);
   // Tant que myModulePerms n'a pas encore chargé, on ne masque rien ici —
   // HIDDEN_FOR reste la garde immédiate, évite un flash "aucun menu".
+  //
+  // Correctif (mission "mise à jour ZegHotel", suite Phase 3) : my_module_permissions()
+  // (RPC, db/schema.sql) filtre permission_modules par l'app_module de l'org
+  // courante — une clé réutilisée hors de ce filtre (ex. 'produits'/'stock'/
+  // 'depenses', dont la seule ligne permission_modules a app_module='pos')
+  // n'apparaît donc JAMAIS dans myModulePerms pour un org ZegHotel, quel
+  // que soit le rôle, y compris owner. Avant ce correctif, une clé absente
+  // du tableau était traitée comme "refusée" (`.find()` → undefined →
+  // `.can_view` → undefined → falsy) : /app/hotel/produits était donc
+  // invisible dans la nav pour tout le monde en prod (confirmé en base
+  // réelle). has_module_permission() côté RLS n'a pas ce filtre par
+  // app_module — c'est la vraie barrière de sécurité (cf. commentaire
+  // HIDDEN_FOR plus haut : "la RLS reste la seule barrière réelle") — donc
+  // une clé absente de myModulePerms ne doit pas masquer le lien, seule une
+  // ligne présente avec can_view=false doit le faire.
   const hasModulePermission = (url: string) => {
     const key = MODULE_FOR_URL[url];
     if (!key || !myModulePerms) return true;
     const keys = Array.isArray(key) ? key : [key];
-    return keys.some((k) => myModulePerms.find((p) => p.module_key === k)?.can_view);
+    return keys.some((k) => {
+      const perm = myModulePerms.find((p) => p.module_key === k);
+      return perm ? perm.can_view : true;
+    });
   };
   // Facture FNE (mission "mise à jour ZegHotel", item 9) : spécifique à la
   // DGI Côte d'Ivoire — masqué pour les organisations des autres pays

@@ -1474,6 +1474,44 @@ with check (
   )
 );
 
+-- Seeding automatique des permissions par défaut à l'ajout d'un membre
+-- (migration 089) — la migration 084 avait fait un backfill ponctuel de
+-- organization_module_permissions pour les membres déjà existants à
+-- l'époque, mais rien ne reproduisait ce seeding pour les membres ajoutés
+-- depuis (has_module_permission() renvoyait alors false pour tout module
+-- jusqu'à ce qu'un owner ouvre manuellement la matrice de permissions).
+-- Jamais sur UPDATE de rôle : un changement de rôle reste un choix
+-- explicite via la matrice, pas un reset silencieux de permissions déjà
+-- personnalisées.
+create or replace function public.seed_member_module_permissions()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.role = 'owner' then
+    return new;
+  end if;
+
+  insert into public.organization_module_permissions (organization_id, user_id, module_key, can_create, can_read, can_update, can_delete)
+  select new.organization_id, new.user_id, pm.key,
+    coalesce(orp.can_create, drp.can_create, false),
+    coalesce(orp.can_view, drp.can_view, false),
+    coalesce(orp.can_manage, drp.can_manage, false),
+    coalesce(orp.can_manage, drp.can_manage, false)
+  from public.organizations o
+  join public.permission_modules pm on pm.app_module = o.app_module
+  left join public.organization_role_permissions orp on orp.role_id = new.custom_role_id and orp.module_key = pm.key
+  left join public.default_role_permissions drp on drp.role = new.role and drp.module_key = pm.key
+  where o.id = new.organization_id
+  on conflict (organization_id, user_id, module_key) do nothing;
+
+  return new;
+end;
+$$;
+revoke all on function public.seed_member_module_permissions() from public;
+drop trigger if exists trg_seed_member_module_permissions on public.organization_members;
+create trigger trg_seed_member_module_permissions
+  after insert on public.organization_members
+  for each row execute function public.seed_member_module_permissions();
+
 -- has_module_permission() (mise à jour migration 084) : signature et
 -- vocabulaire de niveau ('view'/'create'/'manage') INCHANGÉS pour ne
 -- casser aucune des ~287 policies RLS qui l'appellent déjà à travers tout
