@@ -701,12 +701,20 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
             </span>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
               {rooms.map((r) => {
-                const unavailable = bookedRoomIds.has(r.id) && !selectedRoomIds.includes(r.id);
+                // Une chambre en maintenance (housekeeping_status =
+                // out_of_service, mission "Round 2 ZegHotel", item 4) reste
+                // exclue même si aucune réservation ne la chevauche — sans
+                // ce garde-fou, une chambre en panne restait réservable tant
+                // que personne n'y avait pensé manuellement.
+                const outOfService = r.housekeeping_status === "out_of_service";
+                const unavailable = (bookedRoomIds.has(r.id) && !selectedRoomIds.includes(r.id)) || (outOfService && !selectedRoomIds.includes(r.id));
                 return (
                   <label key={r.id} className={cn("flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm", unavailable && "opacity-40")}>
                     <span className="flex items-center gap-2">
                       <input type="checkbox" disabled={unavailable} checked={selectedRoomIds.includes(r.id)} onChange={() => toggleRoom(r.id)} />
-                      {r.number} — {r.room_type?.name} {unavailable && <span className="text-xs text-destructive">(indisponible)</span>}
+                      {r.number} — {r.room_type?.name}{" "}
+                      {outOfService && <span className="text-xs text-destructive">(en maintenance)</span>}
+                      {!outOfService && unavailable && <span className="text-xs text-destructive">(indisponible)</span>}
                     </span>
                     {selectedRoomIds.includes(r.id) && (
                       <input type="number" onFocus={selectOnFocus} className="w-24 rounded-lg border border-border bg-background px-2 py-1 text-xs"

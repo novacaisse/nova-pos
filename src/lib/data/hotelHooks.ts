@@ -1364,6 +1364,12 @@ export function useHotelMaintenanceTickets() {
     },
   });
 }
+// Propagation chambre ↔ maintenance (mission "Round 2 ZegHotel", item 4) :
+// un incident ouvert bloque désormais la chambre (housekeeping_status =
+// out_of_service, déjà exclue des chambres sélectionnables à la création
+// d'une réservation, cf. CreateReservationModal) — plus besoin qu'un
+// manager pense à basculer manuellement le statut en plus de signaler
+// l'incident.
 export function useCreateMaintenanceTicket() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
@@ -1371,19 +1377,45 @@ export function useCreateMaintenanceTicket() {
       if (!organizationId) throw new Error("Aucune organisation sélectionnée");
       const { error } = await supabase.from("hotel_maintenance_tickets").insert({ ...t, organization_id: organizationId });
       if (error) throw error;
+      const { error: roomErr } = await supabase.from("hotel_rooms")
+        .update({ housekeeping_status: "out_of_service" }).eq("id", t.room_id);
+      if (roomErr) throw roomErr;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_maintenance_tickets", organizationId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["hotel_maintenance_tickets", organizationId] });
+      qc.invalidateQueries({ queryKey: ["hotel_rooms", organizationId] });
+    },
   });
 }
 export function useUpdateMaintenanceTicket() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...patch }: Partial<HotelMaintenanceTicket> & { id: string }) => {
+    // room_id : transmis par l'appelant (déjà en mémoire, cf. MaintenanceActions)
+    // uniquement pour piloter la remise à disposition de la chambre — jamais
+    // écrit sur hotel_maintenance_tickets (room_id n'y change jamais après coup).
+    mutationFn: async ({ id, room_id, ...patch }: Partial<HotelMaintenanceTicket> & { id: string; room_id?: string }) => {
       if (patch.status === "resolved" && !patch.resolved_at) patch.resolved_at = new Date().toISOString();
       const { error } = await supabase.from("hotel_maintenance_tickets").update(patch).eq("id", id);
       if (error) throw error;
+      if (patch.status === "resolved" && room_id) {
+        // Ne libère la chambre que si aucun AUTRE incident n'est encore
+        // ouvert dessus — "dirty" (pas "clean") : elle doit repasser par un
+        // passage ménage avant d'être considérée prête, comme après un
+        // départ (cf. check-out, plus haut dans ce fichier).
+        const { count } = await supabase.from("hotel_maintenance_tickets")
+          .select("id", { count: "exact", head: true })
+          .eq("room_id", room_id).neq("id", id).neq("status", "resolved");
+        if (!count) {
+          const { error: roomErr } = await supabase.from("hotel_rooms")
+            .update({ housekeeping_status: "dirty" }).eq("id", room_id).eq("housekeeping_status", "out_of_service");
+          if (roomErr) throw roomErr;
+        }
+      }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_maintenance_tickets", organizationId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["hotel_maintenance_tickets", organizationId] });
+      qc.invalidateQueries({ queryKey: ["hotel_rooms", organizationId] });
+    },
   });
 }
 

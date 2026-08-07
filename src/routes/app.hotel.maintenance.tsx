@@ -81,7 +81,7 @@ function MaintenancePage() {
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">{STATUS_LABEL[t.status]}</span>
-                  {canResolve && t.status !== "resolved" && <MaintenanceActions id={t.id} status={t.status} />}
+                  {canResolve && t.status !== "resolved" && <MaintenanceActions id={t.id} status={t.status} roomId={t.room_id} />}
                 </div>
               </div>
             ))}
@@ -94,7 +94,7 @@ function MaintenancePage() {
   );
 }
 
-function MaintenanceActions({ id, status }: { id: string; status: MaintenanceStatus }) {
+function MaintenanceActions({ id, status, roomId }: { id: string; status: MaintenanceStatus; roomId: string }) {
   const update = useUpdateMaintenanceTicket();
   return (
     <div className="flex gap-2">
@@ -102,7 +102,7 @@ function MaintenanceActions({ id, status }: { id: string; status: MaintenanceSta
         <button onClick={() => update.mutate({ id, status: "in_progress" })}
           className="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted">Prendre en charge</button>
       )}
-      <button onClick={() => update.mutate({ id, status: "resolved" })}
+      <button onClick={() => update.mutate({ id, status: "resolved", room_id: roomId })}
         className="rounded-xl bg-success/10 px-3 py-1.5 text-xs font-semibold text-success hover:bg-success/20">Résoudre</button>
     </div>
   );
