@@ -1,7 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package, Truck, Banknote, FileSpreadsheet, FileText as FileIcon, Loader2 } from "lucide-react";
+import {
+  Download, Sparkles, Send, TrendingUp, Clock, BarChart3, Users, Package, Truck, Banknote,
+  FileSpreadsheet, FileText as FileIcon, Loader2, Trophy,
+} from "lucide-react";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import {
   startOfDay, endOfDay, startOfWeek, startOfMonth, endOfMonth,
   startOfYear, endOfYear, subMonths, subYears,
@@ -12,6 +16,14 @@ import { useSales, useProducts, useSuppliers, useExpenses, useShopSettings, useF
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
+
+// Abrégé pour l'axe du graphique (formatMoney() n'a pas de mode compact) —
+// le montant complet reste affiché dans le tooltip via formatMoney().
+function compactAmount(n: number) {
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(Math.round(n));
+}
 
 export const Route = createFileRoute("/app/rapports")({
   component: RapportsPage,
@@ -36,6 +48,10 @@ const REPORTS = [
   { id: "suppliers", label: "Fournisseurs", icon: Truck },
   { id: "margin", label: "Marge réelle", icon: TrendingUp },
   { id: "expenses", label: "Dépenses", icon: Banknote },
+  // Indépendant du sélecteur de période ci-dessus (n'aurait aucun sens
+  // filtré sur "Aujourd'hui") — toujours calculé sur les 12 derniers mois,
+  // cf. useSales dédié plus bas.
+  { id: "months", label: "Meilleurs mois", icon: Trophy },
   { id: "peak", label: "Heures & jours de pointe", icon: Clock },
 ] as const;
 type ReportId = (typeof REPORTS)[number]["id"];
@@ -201,6 +217,25 @@ function RapportsPage() {
   }, [sales]);
   const maxPeak = Math.max(1, ...peakHours.map((p) => p.v));
 
+  // Meilleurs mois (nouvel onglet, refonte "Rapports par onglet") —
+  // toujours sur les 12 derniers mois glissants, indépendamment de la
+  // période choisie ci-dessus pour les autres onglets.
+  const twelveMonthsStart = useMemo(() => startOfMonth(subMonths(new Date(), 11)).toISOString(), []);
+  const { data: yearSalesRaw = [] } = useSales({ from: twelveMonthsStart, to: endOfDay(new Date()).toISOString(), limit: 5000 });
+  const yearSales = useMemo(() => yearSalesRaw.filter(isRevenueSale), [yearSalesRaw]);
+  const bestMonths = useMemo(() => {
+    const agg = new Map<string, { key: string; label: string; qty: number; ca: number }>();
+    for (const sale of yearSales) {
+      const d = new Date(sale.created_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+      const cur = agg.get(key) ?? { key, label, qty: 0, ca: 0 };
+      cur.qty += 1; cur.ca += sale.total;
+      agg.set(key, cur);
+    }
+    return [...agg.values()].sort((a, b) => b.key.localeCompare(a.key));
+  }, [yearSales]);
+
   const salesByDay = useMemo(() => {
     const agg = new Map<string, { date: string; qty: number; ca: number }>();
     for (const sale of sales) {
@@ -219,8 +254,20 @@ function RapportsPage() {
     if (report === "suppliers") return topSuppliers.map((s) => ({ label: s.name, qty: s.qty, ca: s.ca, margin: `${s.marginPct.toFixed(0)}%` }));
     if (report === "sales") return salesByDay.map((d) => ({ label: new Date(d.date).toLocaleDateString("fr-FR"), qty: d.qty, ca: d.ca, margin: "—" }));
     if (report === "expenses") return expensesByCategory.map((e) => ({ label: e.name, qty: e.qty, ca: e.total, margin: "—" }));
+    if (report === "months") return bestMonths.map((m) => ({ label: m.label, qty: m.qty, ca: m.ca, margin: "—" }));
     return [];
-  }, [report, topProductsByCa, worstMarginProducts, topCustomers, topSuppliers, salesByDay, expensesByCategory]);
+  }, [report, topProductsByCa, worstMarginProducts, topCustomers, topSuppliers, salesByDay, expensesByCategory, bestMonths]);
+
+  // Graphique générique (mission "Round 2", "GRAPHIQUE avec possibilité de
+  // télécharger en pdf chaque rapport") — un seul composant réutilisé pour
+  // tous les onglets tabulaires (peak garde son propre histogramme dédié
+  // ci-dessous, déjà en place). sales/months sont chronologiques (les plus
+  // récents d'abord dans currentRows) : inversés pour un graphique qui se
+  // lit de gauche à droite dans le temps.
+  const chartRows = useMemo(() => {
+    if (report === "sales" || report === "months") return [...currentRows].reverse();
+    return currentRows;
+  }, [report, currentRows]);
 
   const exportCsv = () => {
     const rows = [
@@ -346,11 +393,24 @@ function RapportsPage() {
                 ) : currentRows.length === 0 ? (
                   <div className="p-8 text-center text-sm text-muted-foreground">Aucune donnée sur cette période.</div>
                 ) : (
+                  <>
+                  <div className="mb-4 h-56 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartRows} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false}
+                          interval="preserveStartEnd" tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v} />
+                        <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactAmount} />
+                        <Tooltip formatter={(value: number) => [formatXOF(value), report === "expenses" ? "Montant" : "CA"]} contentStyle={{ fontSize: 12, borderRadius: 12 }} />
+                        <Bar dataKey="ca" fill="var(--primary)" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                   <div className="overflow-hidden rounded-xl border border-border">
                     <table className="w-full text-sm">
                       <thead className="bg-muted/40">
                         <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          <th className="px-3 py-2">{report === "sales" ? "Jour" : report === "customers" ? "Client" : report === "suppliers" ? "Fournisseur" : report === "expenses" ? "Catégorie" : "Produit"}</th>
+                          <th className="px-3 py-2">{report === "sales" ? "Jour" : report === "months" ? "Mois" : report === "customers" ? "Client" : report === "suppliers" ? "Fournisseur" : report === "expenses" ? "Catégorie" : "Produit"}</th>
                           <th className="px-3 py-2 text-right">{report === "customers" ? "Achats" : "Qté"}</th>
                           <th className="px-3 py-2 text-right">{report === "expenses" ? "Montant" : "CA"}</th>
                           <th className="px-3 py-2 text-right">Marge</th>
@@ -368,6 +428,7 @@ function RapportsPage() {
                       </tbody>
                     </table>
                   </div>
+                  </>
                 )}
               </div>
             </>
