@@ -1357,6 +1357,39 @@ export function useUpdateMaintenanceTicket() {
 // ============ DASHBOARD ============
 export type HotelDashboardReservation = HotelReservation & { guest: HotelGuestContact | null };
 
+// Diagnostics opérationnels (mission "mise à jour ZegHotel", Phase 2, point
+// 1) — trois signaux qui demandent une action aujourd'hui (pas des
+// indicateurs financiers, déjà couverts par /app/hotel/rapports) : ménage
+// en retard, notes non clôturées après un départ, réservations pas encore
+// confirmées.
+export type HotelDiagnostics = {
+  pendingHousekeeping: number;
+  openFoliosPastCheckout: number;
+  pendingReservations: number;
+};
+export function useHotelDiagnostics(today: string) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_diagnostics", organizationId, today],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelDiagnostics> => {
+      const [{ count: pendingHousekeeping }, { count: openFoliosPastCheckout }, { count: pendingReservations }] = await Promise.all([
+        supabase.from("hotel_housekeeping_tasks").select("id", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).eq("task_date", today).neq("status", "done"),
+        supabase.from("hotel_folios").select("id, reservation:hotel_reservations!inner(status)", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).eq("status", "open").eq("reservation.status", "checked_out"),
+        supabase.from("hotel_reservations").select("id", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).eq("status", "pending").gte("check_in", today),
+      ]);
+      return {
+        pendingHousekeeping: pendingHousekeeping ?? 0,
+        openFoliosPastCheckout: openFoliosPastCheckout ?? 0,
+        pendingReservations: pendingReservations ?? 0,
+      };
+    },
+  });
+}
+
 export function useHotelDashboardStats(today: string) {
   const organizationId = useOrganizationId();
   return useQuery({
