@@ -35,6 +35,8 @@ import {
   Calculator,
   Briefcase,
   FolderOpen,
+  Landmark,
+  Wallet2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -83,6 +85,8 @@ const ICONS = {
   Calculator,
   Briefcase,
   FolderOpen,
+  Landmark,
+  Wallet2,
 } as const;
 
 type NavItem = {
@@ -100,6 +104,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Nova IA", url: "/app/nova", icon: "Sparkles" },
     { title: "Rapports", url: "/app/rapports", icon: "BarChart3" },
     { title: "Dépenses", url: "/app/depenses", icon: "Wallet" },
+    { title: "Facture FNE", url: "/app/fne", icon: "Landmark" },
   ],
   operation: [
     { title: "Point de vente", url: "/app/caisse", icon: "ScanBarcode", badge: "F1" },
@@ -123,7 +128,9 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Comptes entreprise", url: "/app/hotel/corporate", icon: "Building2" },
     { title: "Produits & Stock", url: "/app/hotel/produits", icon: "Package" },
     { title: "Point de vente", url: "/app/hotel/pos-interne", icon: "Coffee" },
+    { title: "Paiements", url: "/app/hotel/paiements", icon: "Wallet2" },
     { title: "Rapports", url: "/app/hotel/rapports", icon: "BarChart3" },
+    { title: "Facture FNE", url: "/app/hotel/fne", icon: "Landmark" },
   ],
   // Construit au fil des phases de ce chantier (Phase 1 : Salle + Menu ;
   // Phase 2 : Commandes + Cuisine) — réservations/rapports rejoignent ce
@@ -136,6 +143,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "Menu", url: "/app/resto/menu", icon: "BookOpen" },
     { title: "Réservations", url: "/app/resto/reservations", icon: "CalendarRange" },
     { title: "Rapports", url: "/app/resto/rapports", icon: "BarChart3" },
+    { title: "Facture FNE", url: "/app/resto/fne", icon: "Landmark" },
   ],
   // Même logique incrémentale que resto ci-dessus (Frontend Phase 1 :
   // Produits + Stock, module DB "Stock/Produits" déjà livré) — les autres
@@ -153,6 +161,7 @@ const NAV: Record<string, NavItem[]> = {
     { title: "RH", url: "/app/erp/rh", icon: "Briefcase" },
     { title: "Documents", url: "/app/erp/documents", icon: "FolderOpen" },
     { title: "Rapports", url: "/app/erp/rapports", icon: "BarChart3" },
+    { title: "Facture FNE", url: "/app/erp/fne", icon: "Landmark" },
   ],
   // ZegCaisse/ZegHôtel/ZegResto/ZegERP ont chacun leur propre Équipe/
   // Paramètres — rien de commun dans la nav entre applications (le
@@ -207,6 +216,10 @@ const HIDDEN_FOR: Partial<Record<string, AppRole[]>> = {
   // Comptes entreprise (ZegHotel Phase 4, migration 031) : housekeeping
   // n'a RLS-wise aucun accès (données financières hors de son périmètre).
   "/app/hotel/corporate": ["housekeeping"],
+  // Paiements (ZegHotel, mission "mise à jour ZegHotel") : mêmes données
+  // financières que les notes de séjour (hotel_folios) — masqué pour
+  // housekeeping en cohérence avec le reste des écrans financiers ci-dessus.
+  "/app/hotel/paiements": ["housekeeping"],
   // Produits & Stock : lecture ouverte à tout membre (products_select),
   // écriture réservée par has_module_permission('produits') — housekeeping
   // masqué en cohérence avec les autres modules hors de son périmètre.
@@ -305,6 +318,11 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   // POS_MODULE_FOR_URL ci-dessus.
   "/app/hotel/produits": "produits",
   "/app/hotel/pos-interne": "hotel_pos_interne",
+  // Paiements (mission "mise à jour ZegHotel", item 10) : liste
+  // payment_requests filtrée sur target_table='hotel_folios' — même clé de
+  // permission que la RLS payment_requests_select réutilise déjà pour ce
+  // target_table (db/schema.sql), pas de nouvelle clé à seeder.
+  "/app/hotel/paiements": "hotel_folios",
   "/app/hotel/rapports": "hotel_rapports",
   "/app/hotel/parametres": "hotel_parametres",
 };
@@ -375,10 +393,16 @@ export function AppSidebar() {
     const keys = Array.isArray(key) ? key : [key];
     return keys.some((k) => myModulePerms.find((p) => p.module_key === k)?.can_view);
   };
+  // Facture FNE (mission "mise à jour ZegHotel", item 9) : spécifique à la
+  // DGI Côte d'Ivoire — masqué pour les organisations des autres pays
+  // couverts (COUNTRIES, AddOrganizationDialog.tsx), même garde que
+  // l'ancien bloc dans OrgIdentityTab.tsx avant sa promotion en module.
+  const isFneUrl = (url: string) => url === "/app/fne" || url === "/app/hotel/fne" || url === "/app/resto/fne" || url === "/app/erp/fne";
   const visible = (item: NavItem) =>
     (!myRole || !HIDDEN_FOR[item.url]?.includes(myRole))
     && (!planModules || !isGatableModule(item.url) || planModules.includes(item.url))
-    && hasModulePermission(item.url);
+    && hasModulePermission(item.url)
+    && (!isFneUrl(item.url) || currentOrganization?.country === "Côte d'Ivoire");
 
   // Ferme automatiquement la sidebar sur mobile après un clic.
   const handleNavClick = () => {
