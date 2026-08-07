@@ -561,6 +561,54 @@ export function useHotelReservations(rangeStart: string, rangeEnd: string) {
     },
   });
 }
+// Recherche rapide (mission "mise à jour ZegHotel", Phase 1) — cherche
+// par client (nom/téléphone) OU par numéro de chambre, sur TOUTES les
+// réservations de l'organisation (pas seulement la fenêtre de 14 jours
+// affichée par le calendrier) : deux requêtes ciblées (hotel_guests,
+// hotel_rooms) puis un filtre in() sur hotel_reservations — plus simple
+// et plus sûr qu'un ilike multi-tables imbriqué côté PostgREST.
+export function useSearchHotelReservations(query: string) {
+  const organizationId = useOrganizationId();
+  const q = query.trim();
+  return useQuery({
+    queryKey: ["hotel_reservations_search", organizationId, q],
+    enabled: !!organizationId && q.length >= 2,
+    queryFn: async (): Promise<HotelReservationRow[]> => {
+      const [{ data: guests, error: guestsErr }, { data: rooms, error: roomsErr }] = await Promise.all([
+        supabase.from("hotel_guests").select("id").eq("organization_id", organizationId!)
+          .or(`full_name.ilike.%${q}%,phone.ilike.%${q}%`),
+        supabase.from("hotel_rooms").select("id").eq("organization_id", organizationId!).ilike("number", `%${q}%`),
+      ]);
+      if (guestsErr) throw guestsErr;
+      if (roomsErr) throw roomsErr;
+      const guestIds = (guests ?? []).map((g: any) => g.id);
+      const roomIds = (rooms ?? []).map((r: any) => r.id);
+
+      let reservationIdsFromRooms: string[] = [];
+      if (roomIds.length) {
+        const { data: rr, error: rrErr } = await supabase.from("hotel_reservation_rooms")
+          .select("reservation_id").in("room_id", roomIds);
+        if (rrErr) throw rrErr;
+        reservationIdsFromRooms = [...new Set((rr ?? []).map((x: any) => x.reservation_id))];
+      }
+
+      if (!guestIds.length && !reservationIdsFromRooms.length) return [];
+
+      const filters: string[] = [];
+      if (guestIds.length) filters.push(`guest_id.in.(${guestIds.join(",")})`);
+      if (reservationIdsFromRooms.length) filters.push(`id.in.(${reservationIdsFromRooms.join(",")})`);
+
+      const { data, error } = await supabase.from("hotel_reservations")
+        .select("*, guest:hotel_guests(*), reservation_rooms:hotel_reservation_rooms(*, room:hotel_rooms(*, room_type:hotel_room_types(*)))")
+        .eq("organization_id", organizationId!)
+        .or(filters.join(","))
+        .order("check_in", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return data as any;
+    },
+  });
+}
 export function useHotelReservation(id: string | null) {
   return useQuery({
     queryKey: ["hotel_reservation", id],

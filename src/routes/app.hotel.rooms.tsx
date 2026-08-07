@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Plus, X, Loader2, Pencil, Trash2, BedDouble, DoorClosed } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, X, Loader2, Pencil, Trash2, BedDouble, DoorClosed, Search } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useMyRole } from "@/lib/data/hooks";
 import { useFormatMoney } from "@/lib/data/hooks";
@@ -37,6 +37,14 @@ function RoomsPage() {
   const [editingRoom, setEditingRoom] = useState<HotelRoom | "new" | null>(null);
   const deleteType = useDeleteHotelRoomType();
   const deleteRoom = useDeleteHotelRoom();
+
+  const [roomQuery, setRoomQuery] = useState("");
+  const filteredRooms = useMemo(() => {
+    const q = roomQuery.trim().toLowerCase();
+    if (!q) return rooms;
+    return rooms.filter((r) =>
+      r.number.toLowerCase().includes(q) || (r.floor ?? "").toLowerCase().includes(q) || (r.room_type?.name ?? "").toLowerCase().includes(q));
+  }, [rooms, roomQuery]);
 
   const counts = {
     clean: rooms.filter((r) => r.housekeeping_status === "clean").length,
@@ -100,12 +108,23 @@ function RoomsPage() {
         </div>
 
         <div>
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Chambres</h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-muted-foreground">Chambres</h2>
+            <div className="relative w-full max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input value={roomQuery} onChange={(e) => setRoomQuery(e.target.value)} placeholder="Numéro, étage, type…"
+                className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary" />
+            </div>
+          </div>
           {loadingRooms ? (
             <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
           ) : rooms.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
               Aucune chambre. {canEdit && "Ajoutez-en une pour commencer."}
+            </div>
+          ) : filteredRooms.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+              Aucune chambre ne correspond à « {roomQuery} ».
             </div>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -118,7 +137,7 @@ function RoomsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rooms.map((r) => (
+                  {filteredRooms.map((r) => (
                     <tr key={r.id} className="border-t border-border/60 hover:bg-muted/40">
                       <td className="px-4 py-3 font-semibold">{r.number}</td>
                       <td className="px-4 py-3 text-muted-foreground">{r.room_type?.name ?? "—"}</td>

@@ -34,6 +34,7 @@ import { Route as AppNovaRouteImport } from './routes/app.nova'
 import { Route as AppNotificationsRouteImport } from './routes/app.notifications'
 import { Route as AppHotelRouteImport } from './routes/app.hotel'
 import { Route as AppFournisseursRouteImport } from './routes/app.fournisseurs'
+import { Route as AppFneRouteImport } from './routes/app.fne'
 import { Route as AppErpRouteImport } from './routes/app.erp'
 import { Route as AppEquipeRouteImport } from './routes/app.equipe'
 import { Route as AppDevisRouteImport } from './routes/app.devis'
@@ -63,6 +64,7 @@ import { Route as AppRestoReservationsRouteImport } from './routes/app.resto.res
 import { Route as AppRestoRapportsRouteImport } from './routes/app.resto.rapports'
 import { Route as AppRestoParametresRouteImport } from './routes/app.resto.parametres'
 import { Route as AppRestoMenuRouteImport } from './routes/app.resto.menu'
+import { Route as AppRestoFneRouteImport } from './routes/app.resto.fne'
 import { Route as AppRestoEquipeRouteImport } from './routes/app.resto.equipe'
 import { Route as AppRestoCuisineRouteImport } from './routes/app.resto.cuisine'
 import { Route as AppRestoCommandesRouteImport } from './routes/app.resto.commandes'
@@ -74,8 +76,10 @@ import { Route as AppHotelRapportsRouteImport } from './routes/app.hotel.rapport
 import { Route as AppHotelProduitsRouteImport } from './routes/app.hotel.produits'
 import { Route as AppHotelPosInterneRouteImport } from './routes/app.hotel.pos-interne'
 import { Route as AppHotelParametresRouteImport } from './routes/app.hotel.parametres'
+import { Route as AppHotelPaiementsRouteImport } from './routes/app.hotel.paiements'
 import { Route as AppHotelMaintenanceRouteImport } from './routes/app.hotel.maintenance'
 import { Route as AppHotelHousekeepingRouteImport } from './routes/app.hotel.housekeeping'
+import { Route as AppHotelFneRouteImport } from './routes/app.hotel.fne'
 import { Route as AppHotelEquipeRouteImport } from './routes/app.hotel.equipe'
 import { Route as AppHotelCorporateRouteImport } from './routes/app.hotel.corporate'
 import { Route as AppHotelClientsRouteImport } from './routes/app.hotel.clients'
@@ -86,6 +90,7 @@ import { Route as AppErpRapportsRouteImport } from './routes/app.erp.rapports'
 import { Route as AppErpProduitsRouteImport } from './routes/app.erp.produits'
 import { Route as AppErpPosRouteImport } from './routes/app.erp.pos'
 import { Route as AppErpParametresRouteImport } from './routes/app.erp.parametres'
+import { Route as AppErpFneRouteImport } from './routes/app.erp.fne'
 import { Route as AppErpFinanceRouteImport } from './routes/app.erp.finance'
 import { Route as AppErpEquipeRouteImport } from './routes/app.erp.equipe'
 import { Route as AppErpDocumentsRouteImport } from './routes/app.erp.documents'
@@ -219,6 +224,11 @@ const AppHotelRoute = AppHotelRouteImport.update({
 const AppFournisseursRoute = AppFournisseursRouteImport.update({
   id: '/fournisseurs',
   path: '/fournisseurs',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFneRoute = AppFneRouteImport.update({
+  id: '/fne',
+  path: '/fne',
   getParentRoute: () => AppRoute,
 } as any)
 const AppErpRoute = AppErpRouteImport.update({
@@ -366,6 +376,11 @@ const AppRestoMenuRoute = AppRestoMenuRouteImport.update({
   path: '/menu',
   getParentRoute: () => AppRestoRoute,
 } as any)
+const AppRestoFneRoute = AppRestoFneRouteImport.update({
+  id: '/fne',
+  path: '/fne',
+  getParentRoute: () => AppRestoRoute,
+} as any)
 const AppRestoEquipeRoute = AppRestoEquipeRouteImport.update({
   id: '/equipe',
   path: '/equipe',
@@ -421,6 +436,11 @@ const AppHotelParametresRoute = AppHotelParametresRouteImport.update({
   path: '/parametres',
   getParentRoute: () => AppHotelRoute,
 } as any)
+const AppHotelPaiementsRoute = AppHotelPaiementsRouteImport.update({
+  id: '/paiements',
+  path: '/paiements',
+  getParentRoute: () => AppHotelRoute,
+} as any)
 const AppHotelMaintenanceRoute = AppHotelMaintenanceRouteImport.update({
   id: '/maintenance',
   path: '/maintenance',
@@ -429,6 +449,11 @@ const AppHotelMaintenanceRoute = AppHotelMaintenanceRouteImport.update({
 const AppHotelHousekeepingRoute = AppHotelHousekeepingRouteImport.update({
   id: '/housekeeping',
   path: '/housekeeping',
+  getParentRoute: () => AppHotelRoute,
+} as any)
+const AppHotelFneRoute = AppHotelFneRouteImport.update({
+  id: '/fne',
+  path: '/fne',
   getParentRoute: () => AppHotelRoute,
 } as any)
 const AppHotelEquipeRoute = AppHotelEquipeRouteImport.update({
@@ -479,6 +504,11 @@ const AppErpPosRoute = AppErpPosRouteImport.update({
 const AppErpParametresRoute = AppErpParametresRouteImport.update({
   id: '/parametres',
   path: '/parametres',
+  getParentRoute: () => AppErpRoute,
+} as any)
+const AppErpFneRoute = AppErpFneRouteImport.update({
+  id: '/fne',
+  path: '/fne',
   getParentRoute: () => AppErpRoute,
 } as any)
 const AppErpFinanceRoute = AppErpFinanceRouteImport.update({
@@ -549,6 +579,7 @@ export interface FileRoutesByFullPath {
   '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
   '/app/erp': typeof AppErpRouteWithChildren
+  '/app/fne': typeof AppFneRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/hotel': typeof AppHotelRouteWithChildren
   '/app/notifications': typeof AppNotificationsRoute
@@ -571,6 +602,7 @@ export interface FileRoutesByFullPath {
   '/app/erp/documents': typeof AppErpDocumentsRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
+  '/app/erp/fne': typeof AppErpFneRoute
   '/app/erp/parametres': typeof AppErpParametresRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
@@ -581,8 +613,10 @@ export interface FileRoutesByFullPath {
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
+  '/app/hotel/fne': typeof AppHotelFneRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
+  '/app/hotel/paiements': typeof AppHotelPaiementsRoute
   '/app/hotel/parametres': typeof AppHotelParametresRoute
   '/app/hotel/pos-interne': typeof AppHotelPosInterneRoute
   '/app/hotel/produits': typeof AppHotelProduitsRouteWithChildren
@@ -594,6 +628,7 @@ export interface FileRoutesByFullPath {
   '/app/resto/commandes': typeof AppRestoCommandesRoute
   '/app/resto/cuisine': typeof AppRestoCuisineRoute
   '/app/resto/equipe': typeof AppRestoEquipeRoute
+  '/app/resto/fne': typeof AppRestoFneRoute
   '/app/resto/menu': typeof AppRestoMenuRoute
   '/app/resto/parametres': typeof AppRestoParametresRoute
   '/app/resto/rapports': typeof AppRestoRapportsRoute
@@ -632,6 +667,7 @@ export interface FileRoutesByTo {
   '/app/depenses': typeof AppDepensesRoute
   '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
+  '/app/fne': typeof AppFneRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/nova': typeof AppNovaRoute
@@ -650,6 +686,7 @@ export interface FileRoutesByTo {
   '/app/erp/documents': typeof AppErpDocumentsRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
+  '/app/erp/fne': typeof AppErpFneRoute
   '/app/erp/parametres': typeof AppErpParametresRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
@@ -660,8 +697,10 @@ export interface FileRoutesByTo {
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
+  '/app/hotel/fne': typeof AppHotelFneRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
+  '/app/hotel/paiements': typeof AppHotelPaiementsRoute
   '/app/hotel/parametres': typeof AppHotelParametresRoute
   '/app/hotel/pos-interne': typeof AppHotelPosInterneRoute
   '/app/hotel/rapports': typeof AppHotelRapportsRoute
@@ -672,6 +711,7 @@ export interface FileRoutesByTo {
   '/app/resto/commandes': typeof AppRestoCommandesRoute
   '/app/resto/cuisine': typeof AppRestoCuisineRoute
   '/app/resto/equipe': typeof AppRestoEquipeRoute
+  '/app/resto/fne': typeof AppRestoFneRoute
   '/app/resto/menu': typeof AppRestoMenuRoute
   '/app/resto/parametres': typeof AppRestoParametresRoute
   '/app/resto/rapports': typeof AppRestoRapportsRoute
@@ -715,6 +755,7 @@ export interface FileRoutesById {
   '/app/devis': typeof AppDevisRoute
   '/app/equipe': typeof AppEquipeRoute
   '/app/erp': typeof AppErpRouteWithChildren
+  '/app/fne': typeof AppFneRoute
   '/app/fournisseurs': typeof AppFournisseursRoute
   '/app/hotel': typeof AppHotelRouteWithChildren
   '/app/notifications': typeof AppNotificationsRoute
@@ -737,6 +778,7 @@ export interface FileRoutesById {
   '/app/erp/documents': typeof AppErpDocumentsRoute
   '/app/erp/equipe': typeof AppErpEquipeRoute
   '/app/erp/finance': typeof AppErpFinanceRoute
+  '/app/erp/fne': typeof AppErpFneRoute
   '/app/erp/parametres': typeof AppErpParametresRoute
   '/app/erp/pos': typeof AppErpPosRoute
   '/app/erp/produits': typeof AppErpProduitsRoute
@@ -747,8 +789,10 @@ export interface FileRoutesById {
   '/app/hotel/clients': typeof AppHotelClientsRoute
   '/app/hotel/corporate': typeof AppHotelCorporateRoute
   '/app/hotel/equipe': typeof AppHotelEquipeRoute
+  '/app/hotel/fne': typeof AppHotelFneRoute
   '/app/hotel/housekeeping': typeof AppHotelHousekeepingRoute
   '/app/hotel/maintenance': typeof AppHotelMaintenanceRoute
+  '/app/hotel/paiements': typeof AppHotelPaiementsRoute
   '/app/hotel/parametres': typeof AppHotelParametresRoute
   '/app/hotel/pos-interne': typeof AppHotelPosInterneRoute
   '/app/hotel/produits': typeof AppHotelProduitsRouteWithChildren
@@ -760,6 +804,7 @@ export interface FileRoutesById {
   '/app/resto/commandes': typeof AppRestoCommandesRoute
   '/app/resto/cuisine': typeof AppRestoCuisineRoute
   '/app/resto/equipe': typeof AppRestoEquipeRoute
+  '/app/resto/fne': typeof AppRestoFneRoute
   '/app/resto/menu': typeof AppRestoMenuRoute
   '/app/resto/parametres': typeof AppRestoParametresRoute
   '/app/resto/rapports': typeof AppRestoRapportsRoute
@@ -804,6 +849,7 @@ export interface FileRouteTypes {
     | '/app/devis'
     | '/app/equipe'
     | '/app/erp'
+    | '/app/fne'
     | '/app/fournisseurs'
     | '/app/hotel'
     | '/app/notifications'
@@ -826,6 +872,7 @@ export interface FileRouteTypes {
     | '/app/erp/documents'
     | '/app/erp/equipe'
     | '/app/erp/finance'
+    | '/app/erp/fne'
     | '/app/erp/parametres'
     | '/app/erp/pos'
     | '/app/erp/produits'
@@ -836,8 +883,10 @@ export interface FileRouteTypes {
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
+    | '/app/hotel/fne'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
+    | '/app/hotel/paiements'
     | '/app/hotel/parametres'
     | '/app/hotel/pos-interne'
     | '/app/hotel/produits'
@@ -849,6 +898,7 @@ export interface FileRouteTypes {
     | '/app/resto/commandes'
     | '/app/resto/cuisine'
     | '/app/resto/equipe'
+    | '/app/resto/fne'
     | '/app/resto/menu'
     | '/app/resto/parametres'
     | '/app/resto/rapports'
@@ -887,6 +937,7 @@ export interface FileRouteTypes {
     | '/app/depenses'
     | '/app/devis'
     | '/app/equipe'
+    | '/app/fne'
     | '/app/fournisseurs'
     | '/app/notifications'
     | '/app/nova'
@@ -905,6 +956,7 @@ export interface FileRouteTypes {
     | '/app/erp/documents'
     | '/app/erp/equipe'
     | '/app/erp/finance'
+    | '/app/erp/fne'
     | '/app/erp/parametres'
     | '/app/erp/pos'
     | '/app/erp/produits'
@@ -915,8 +967,10 @@ export interface FileRouteTypes {
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
+    | '/app/hotel/fne'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
+    | '/app/hotel/paiements'
     | '/app/hotel/parametres'
     | '/app/hotel/pos-interne'
     | '/app/hotel/rapports'
@@ -927,6 +981,7 @@ export interface FileRouteTypes {
     | '/app/resto/commandes'
     | '/app/resto/cuisine'
     | '/app/resto/equipe'
+    | '/app/resto/fne'
     | '/app/resto/menu'
     | '/app/resto/parametres'
     | '/app/resto/rapports'
@@ -969,6 +1024,7 @@ export interface FileRouteTypes {
     | '/app/devis'
     | '/app/equipe'
     | '/app/erp'
+    | '/app/fne'
     | '/app/fournisseurs'
     | '/app/hotel'
     | '/app/notifications'
@@ -991,6 +1047,7 @@ export interface FileRouteTypes {
     | '/app/erp/documents'
     | '/app/erp/equipe'
     | '/app/erp/finance'
+    | '/app/erp/fne'
     | '/app/erp/parametres'
     | '/app/erp/pos'
     | '/app/erp/produits'
@@ -1001,8 +1058,10 @@ export interface FileRouteTypes {
     | '/app/hotel/clients'
     | '/app/hotel/corporate'
     | '/app/hotel/equipe'
+    | '/app/hotel/fne'
     | '/app/hotel/housekeeping'
     | '/app/hotel/maintenance'
+    | '/app/hotel/paiements'
     | '/app/hotel/parametres'
     | '/app/hotel/pos-interne'
     | '/app/hotel/produits'
@@ -1014,6 +1073,7 @@ export interface FileRouteTypes {
     | '/app/resto/commandes'
     | '/app/resto/cuisine'
     | '/app/resto/equipe'
+    | '/app/resto/fne'
     | '/app/resto/menu'
     | '/app/resto/parametres'
     | '/app/resto/rapports'
@@ -1220,6 +1280,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppFournisseursRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/fne': {
+      id: '/app/fne'
+      path: '/fne'
+      fullPath: '/app/fne'
+      preLoaderRoute: typeof AppFneRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/erp': {
       id: '/app/erp'
       path: '/erp'
@@ -1423,6 +1490,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRestoMenuRouteImport
       parentRoute: typeof AppRestoRoute
     }
+    '/app/resto/fne': {
+      id: '/app/resto/fne'
+      path: '/fne'
+      fullPath: '/app/resto/fne'
+      preLoaderRoute: typeof AppRestoFneRouteImport
+      parentRoute: typeof AppRestoRoute
+    }
     '/app/resto/equipe': {
       id: '/app/resto/equipe'
       path: '/equipe'
@@ -1500,6 +1574,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHotelParametresRouteImport
       parentRoute: typeof AppHotelRoute
     }
+    '/app/hotel/paiements': {
+      id: '/app/hotel/paiements'
+      path: '/paiements'
+      fullPath: '/app/hotel/paiements'
+      preLoaderRoute: typeof AppHotelPaiementsRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
     '/app/hotel/maintenance': {
       id: '/app/hotel/maintenance'
       path: '/maintenance'
@@ -1512,6 +1593,13 @@ declare module '@tanstack/react-router' {
       path: '/housekeeping'
       fullPath: '/app/hotel/housekeeping'
       preLoaderRoute: typeof AppHotelHousekeepingRouteImport
+      parentRoute: typeof AppHotelRoute
+    }
+    '/app/hotel/fne': {
+      id: '/app/hotel/fne'
+      path: '/fne'
+      fullPath: '/app/hotel/fne'
+      preLoaderRoute: typeof AppHotelFneRouteImport
       parentRoute: typeof AppHotelRoute
     }
     '/app/hotel/equipe': {
@@ -1582,6 +1670,13 @@ declare module '@tanstack/react-router' {
       path: '/parametres'
       fullPath: '/app/erp/parametres'
       preLoaderRoute: typeof AppErpParametresRouteImport
+      parentRoute: typeof AppErpRoute
+    }
+    '/app/erp/fne': {
+      id: '/app/erp/fne'
+      path: '/fne'
+      fullPath: '/app/erp/fne'
+      preLoaderRoute: typeof AppErpFneRouteImport
       parentRoute: typeof AppErpRoute
     }
     '/app/erp/finance': {
@@ -1679,6 +1774,7 @@ interface AppErpRouteChildren {
   AppErpDocumentsRoute: typeof AppErpDocumentsRoute
   AppErpEquipeRoute: typeof AppErpEquipeRoute
   AppErpFinanceRoute: typeof AppErpFinanceRoute
+  AppErpFneRoute: typeof AppErpFneRoute
   AppErpParametresRoute: typeof AppErpParametresRoute
   AppErpPosRoute: typeof AppErpPosRoute
   AppErpProduitsRoute: typeof AppErpProduitsRoute
@@ -1695,6 +1791,7 @@ const AppErpRouteChildren: AppErpRouteChildren = {
   AppErpDocumentsRoute: AppErpDocumentsRoute,
   AppErpEquipeRoute: AppErpEquipeRoute,
   AppErpFinanceRoute: AppErpFinanceRoute,
+  AppErpFneRoute: AppErpFneRoute,
   AppErpParametresRoute: AppErpParametresRoute,
   AppErpPosRoute: AppErpPosRoute,
   AppErpProduitsRoute: AppErpProduitsRoute,
@@ -1727,8 +1824,10 @@ interface AppHotelRouteChildren {
   AppHotelClientsRoute: typeof AppHotelClientsRoute
   AppHotelCorporateRoute: typeof AppHotelCorporateRoute
   AppHotelEquipeRoute: typeof AppHotelEquipeRoute
+  AppHotelFneRoute: typeof AppHotelFneRoute
   AppHotelHousekeepingRoute: typeof AppHotelHousekeepingRoute
   AppHotelMaintenanceRoute: typeof AppHotelMaintenanceRoute
+  AppHotelPaiementsRoute: typeof AppHotelPaiementsRoute
   AppHotelParametresRoute: typeof AppHotelParametresRoute
   AppHotelPosInterneRoute: typeof AppHotelPosInterneRoute
   AppHotelProduitsRoute: typeof AppHotelProduitsRouteWithChildren
@@ -1742,8 +1841,10 @@ const AppHotelRouteChildren: AppHotelRouteChildren = {
   AppHotelClientsRoute: AppHotelClientsRoute,
   AppHotelCorporateRoute: AppHotelCorporateRoute,
   AppHotelEquipeRoute: AppHotelEquipeRoute,
+  AppHotelFneRoute: AppHotelFneRoute,
   AppHotelHousekeepingRoute: AppHotelHousekeepingRoute,
   AppHotelMaintenanceRoute: AppHotelMaintenanceRoute,
+  AppHotelPaiementsRoute: AppHotelPaiementsRoute,
   AppHotelParametresRoute: AppHotelParametresRoute,
   AppHotelPosInterneRoute: AppHotelPosInterneRoute,
   AppHotelProduitsRoute: AppHotelProduitsRouteWithChildren,
@@ -1777,6 +1878,7 @@ interface AppRestoRouteChildren {
   AppRestoCommandesRoute: typeof AppRestoCommandesRoute
   AppRestoCuisineRoute: typeof AppRestoCuisineRoute
   AppRestoEquipeRoute: typeof AppRestoEquipeRoute
+  AppRestoFneRoute: typeof AppRestoFneRoute
   AppRestoMenuRoute: typeof AppRestoMenuRoute
   AppRestoParametresRoute: typeof AppRestoParametresRoute
   AppRestoRapportsRoute: typeof AppRestoRapportsRoute
@@ -1789,6 +1891,7 @@ const AppRestoRouteChildren: AppRestoRouteChildren = {
   AppRestoCommandesRoute: AppRestoCommandesRoute,
   AppRestoCuisineRoute: AppRestoCuisineRoute,
   AppRestoEquipeRoute: AppRestoEquipeRoute,
+  AppRestoFneRoute: AppRestoFneRoute,
   AppRestoMenuRoute: AppRestoMenuRoute,
   AppRestoParametresRoute: AppRestoParametresRoute,
   AppRestoRapportsRoute: AppRestoRapportsRoute,
@@ -1823,6 +1926,7 @@ interface AppRouteChildren {
   AppDevisRoute: typeof AppDevisRoute
   AppEquipeRoute: typeof AppEquipeRoute
   AppErpRoute: typeof AppErpRouteWithChildren
+  AppFneRoute: typeof AppFneRoute
   AppFournisseursRoute: typeof AppFournisseursRoute
   AppHotelRoute: typeof AppHotelRouteWithChildren
   AppNotificationsRoute: typeof AppNotificationsRoute
@@ -1847,6 +1951,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDevisRoute: AppDevisRoute,
   AppEquipeRoute: AppEquipeRoute,
   AppErpRoute: AppErpRouteWithChildren,
+  AppFneRoute: AppFneRoute,
   AppFournisseursRoute: AppFournisseursRoute,
   AppHotelRoute: AppHotelRouteWithChildren,
   AppNotificationsRoute: AppNotificationsRoute,

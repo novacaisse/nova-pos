@@ -66,6 +66,21 @@ function HotelDashboard() {
     <div>
       <PageHeader title="ZegHotel" subtitle="Tableau de bord" />
       <div className="space-y-5 p-5 sm:p-8">
+        {/* Raccourcis en haut (mission "mise à jour ZegHotel", Phase 1) —
+            accès direct aux 3 écrans les plus utilisés avant même les
+            statistiques, pour ne pas avoir à défiler. */}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Link to="/app/hotel/reservations" className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40">
+            <CalendarRange className="h-5 w-5 text-primary" /> <span className="text-sm font-semibold">Planning des réservations</span>
+          </Link>
+          <Link to="/app/hotel/rooms" className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40">
+            <DoorClosed className="h-5 w-5 text-primary" /> <span className="text-sm font-semibold">Chambres & types</span>
+          </Link>
+          <Link to="/app/hotel/housekeeping" className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40">
+            <Sparkle className="h-5 w-5 text-primary" /> <span className="text-sm font-semibold">Housekeeping</span>
+          </Link>
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Taux d'occupation" value={`${stats?.occupancyPct ?? 0}%`}
             hint={`${stats?.occupied ?? 0} / ${stats?.totalRooms ?? 0} chambres`}
@@ -123,18 +138,6 @@ function HotelDashboard() {
               </ul>
             )}
           </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Link to="/app/hotel/reservations" className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40">
-            <CalendarRange className="h-5 w-5 text-primary" /> <span className="text-sm font-semibold">Planning des réservations</span>
-          </Link>
-          <Link to="/app/hotel/rooms" className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40">
-            <DoorClosed className="h-5 w-5 text-primary" /> <span className="text-sm font-semibold">Chambres & types</span>
-          </Link>
-          <Link to="/app/hotel/housekeeping" className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40">
-            <Sparkle className="h-5 w-5 text-primary" /> <span className="text-sm font-semibold">Housekeeping</span>
-          </Link>
         </div>
       </div>
     </div>
