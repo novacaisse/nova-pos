@@ -3,8 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronLeft, ChevronRight, Plus, X, Loader2, User, LogIn, LogOut, Ban, CheckCircle2, Banknote, Printer, RotateCcw,
+  Search, CalendarDays,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
+import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover";
 import { useMyRole, useFormatMoney, useShopSettings } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
 import { useReadOnlyMode } from "@/lib/auth/useReadOnlyMode";
@@ -14,6 +16,7 @@ import {
   useCreateHotelReservation, useHotelReservation, useCheckInReservation, useCheckOutReservation,
   useCancelReservation, useUpdateHotelReservation, useHotelFolio, useAddFolioCharge, useAddFolioPayment,
   useCloseFolio, folioBalance, useHotelCorporateAccounts, useHotelRatePlans, useHotelSeasonalRates,
+  useSearchHotelReservations,
   type HotelReservationRow, type ReservationStatus, type HotelRoom, type FolioChargeKind, type HotelPaymentMethod,
   type HotelFolioDetail, type HotelRoomType, type HotelSeasonalRate, type HotelRatePlan,
 } from "@/lib/data/hotelHooks";
@@ -65,13 +68,21 @@ const STATUS_LABEL: Record<ReservationStatus, string> = {
   pending: "En attente", confirmed: "Confirmée", checked_in: "En séjour",
   checked_out: "Terminée", cancelled: "Annulée", no_show: "No-show",
 };
+// Palette élargie (mission "mise à jour ZegHotel", Phase 1, "plus de
+// couleurs sur le calendrier afin de mieux se retrouver") — cancelled et
+// no_show partageaient la même couleur jusqu'ici, impossible à distinguer
+// d'un coup d'œil sur le planning ; cancelled devient neutre/barré (rien
+// à faire, la case est libre) tandis que no_show reste un vrai signal
+// d'alerte (client attendu qui n'est jamais venu, chambre bloquée pour
+// rien) — accent distinct (accent/warning) pour ne jamais confondre les 6
+// statuts entre eux.
 const STATUS_COLOR: Record<ReservationStatus, string> = {
   pending: "bg-warning/20 text-warning-foreground border-warning/40",
   confirmed: "bg-primary/20 text-primary border-primary/40",
   checked_in: "bg-success/20 text-success border-success/40",
   checked_out: "bg-muted text-muted-foreground border-border",
-  cancelled: "bg-destructive/10 text-destructive border-destructive/30",
-  no_show: "bg-destructive/10 text-destructive border-destructive/30",
+  cancelled: "bg-muted/60 text-muted-foreground border-border line-through",
+  no_show: "bg-destructive/20 text-destructive border-destructive/50",
 };
 
 function toISO(d: Date) { return d.toISOString().slice(0, 10); }
@@ -94,6 +105,14 @@ function ReservationsPage() {
 
   const [creating, setCreating] = useState<{ roomId?: string; date?: string } | null>(null);
   const [openReservationId, setOpenReservationId] = useState<string | null>(null);
+  const [showTodayList, setShowTodayList] = useState(false);
+
+  // Recherche rapide (Phase 1) : ouvre directement la fiche réservation
+  // trouvée, indépendamment de la fenêtre de 14 jours affichée par le
+  // calendrier — voir useSearchHotelReservations.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const { data: searchResults = [] } = useSearchHotelReservations(searchQuery);
 
   useEffect(() => {
     if (openCreate && canWrite) setCreating({});
@@ -126,24 +145,78 @@ function ReservationsPage() {
   return (
     <div>
       <PageHeader title="Réservations" subtitle="Planning des chambres"
-        actions={canWrite && (
-          <button onClick={() => setCreating({})}
-            className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
-            <Plus className="h-4 w-4" /> Nouvelle réservation
-          </button>
-        )}
+        actions={
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowTodayList(true)}
+              className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">
+              <CalendarDays className="h-4 w-4" /> Réservations du jour
+            </button>
+            {canWrite && (
+              <button onClick={() => setCreating({})}
+                className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
+                <Plus className="h-4 w-4" /> Nouvelle réservation
+              </button>
+            )}
+          </div>
+        }
       />
       <div className="space-y-4 p-5 sm:p-8">
-        <div className="flex items-center justify-between gap-3">
-          <button onClick={() => setRangeStart(addDays(rangeStart, -7))}
-            className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card hover:bg-muted"><ChevronLeft className="h-4 w-4" /></button>
-          <div className="text-sm font-semibold">
-            {new Date(rangeStart + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-            {" → "}
-            {new Date(addDays(rangeStart, DAYS_WINDOW - 1) + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setRangeStart(addDays(rangeStart, -7))}
+              className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card hover:bg-muted"><ChevronLeft className="h-4 w-4" /></button>
+            <div className="min-w-[180px] text-center text-sm font-semibold">
+              {new Date(rangeStart + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+              {" → "}
+              {new Date(addDays(rangeStart, DAYS_WINDOW - 1) + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
+            </div>
+            <button onClick={() => setRangeStart(addDays(rangeStart, 7))}
+              className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card hover:bg-muted"><ChevronRight className="h-4 w-4" /></button>
           </div>
-          <button onClick={() => setRangeStart(addDays(rangeStart, 7))}
-            className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card hover:bg-muted"><ChevronRight className="h-4 w-4" /></button>
+
+          <Popover open={searchOpen && searchQuery.trim().length >= 2}>
+            <PopoverAnchor asChild>
+              <div className="relative w-full sm:w-72">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+                  onFocus={() => setSearchOpen(true)}
+                  onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setSearchQuery(""); setSearchOpen(false); } }}
+                  placeholder="Rechercher client, téléphone, chambre…"
+                  className="w-full rounded-xl border border-border bg-card py-2 pl-9 pr-3 text-sm outline-none focus:border-primary" />
+              </div>
+            </PopoverAnchor>
+            <PopoverContent align="end" sideOffset={6} onOpenAutoFocus={(e) => e.preventDefault()}
+              className="max-h-80 w-[min(360px,90vw)] overflow-y-auto p-1.5">
+              {searchResults.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">Aucune réservation pour « {searchQuery} »</div>
+              ) : (
+                searchResults.map((r) => (
+                  <button key={r.id} type="button"
+                    onMouseDown={() => { setOpenReservationId(r.id); setSearchQuery(""); setSearchOpen(false); }}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-muted">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{r.guest?.full_name ?? "—"}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {r.reservation_rooms.map((rr) => rr.room?.number).filter(Boolean).join(", ") || "—"} · {new Date(r.check_in).toLocaleDateString("fr-FR")}
+                      </div>
+                    </div>
+                    <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase", STATUS_COLOR[r.status])}>{STATUS_LABEL[r.status]}</span>
+                  </button>
+                ))
+              )}
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+          {(Object.keys(STATUS_LABEL) as ReservationStatus[]).map((s) => (
+            <span key={s} className="flex items-center gap-1.5">
+              <span className={cn("h-2.5 w-2.5 rounded-full border", STATUS_COLOR[s])} />
+              {STATUS_LABEL[s]}
+            </span>
+          ))}
         </div>
 
         {rooms.length === 0 ? (
@@ -185,7 +258,97 @@ function ReservationsPage() {
       {openReservationId && (
         <ReservationDrawer reservationId={openReservationId} canWrite={canWrite} onClose={() => setOpenReservationId(null)} />
       )}
+      {showTodayList && (
+        <TodayReservationsDialog onClose={() => setShowTodayList(false)} onOpenReservation={(id) => { setShowTodayList(false); setOpenReservationId(id); }} />
+      )}
     </div>
+  );
+}
+
+// Liste imprimable des réservations du jour (mission "mise à jour
+// ZegHotel", Phase 1) — arrivées, départs et séjours en cours pour
+// aujourd'hui, réutilise useHotelReservations (rangeStart=rangeEnd=
+// aujourd'hui couvre déjà les trois cas grâce au filtre existant) et le
+// même gabarit A4 que printHotelInvoice/printReservationConfirmation.
+function TodayReservationsDialog({ onClose, onOpenReservation }: { onClose: () => void; onOpenReservation: (id: string) => void }) {
+  const today = toISO(new Date());
+  const { data: reservations = [], isLoading } = useHotelReservations(today, addDays(today, 1));
+  const { currentOrganization } = useOrganization();
+  const { data: settings } = useShopSettings();
+
+  const printList = () => {
+    const rows = reservations.map((r) => {
+      const roomLabel = r.reservation_rooms.map((rr) => rr.room?.number).filter(Boolean).join(", ") || "—";
+      return `<tr>
+        <td>${r.guest?.full_name ?? "—"}</td>
+        <td>${roomLabel}</td>
+        <td>${new Date(r.check_in).toLocaleDateString("fr-FR")}</td>
+        <td>${new Date(r.check_out).toLocaleDateString("fr-FR")}</td>
+        <td>${STATUS_LABEL[r.status]}</td>
+      </tr>`;
+    }).join("");
+    const bodyHtml = `
+      <table class="doc-table">
+        <thead><tr><th>Client</th><th>Chambre(s)</th><th>Arrivée</th><th>Départ</th><th>Statut</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5">Aucune réservation aujourd'hui.</td></tr>`}</tbody>
+      </table>`;
+    const html = renderA4Document({
+      docTitle: "Réservations du jour",
+      docDate: new Date(today + "T00:00:00").toLocaleDateString("fr-FR"),
+      shop: {
+        shopName: currentOrganization?.name ?? "Organisation",
+        logoUrl: currentOrganization?.logo_url,
+        address: settings?.data.address, phone: settings?.data.phone, ifu: settings?.data.ifu,
+      },
+      bodyHtml,
+      footerHtml: "Généré par ZegHotel.",
+    });
+    openPrintWindow(html, { width: 900, height: 700 });
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()} className="w-full max-w-xl overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <div className="font-display text-lg font-bold">Réservations du jour</div>
+            <div className="text-xs text-muted-foreground">{new Date(today + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={printList} disabled={isLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-50">
+              <Printer className="h-3.5 w-3.5" /> PDF / Imprimer
+            </button>
+            <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+          </div>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto p-5">
+          {isLoading ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</div>
+          ) : reservations.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Aucune réservation aujourd'hui.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {reservations.map((r) => (
+                <button key={r.id} onClick={() => onOpenReservation(r.id)}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-border p-3 text-left text-sm hover:bg-muted">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{r.guest?.full_name ?? "—"}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {r.reservation_rooms.map((rr) => rr.room?.number).filter(Boolean).join(", ") || "—"}
+                      {" · "}{new Date(r.check_in).toLocaleDateString("fr-FR")} → {new Date(r.check_out).toLocaleDateString("fr-FR")}
+                    </div>
+                  </div>
+                  <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase", STATUS_COLOR[r.status])}>{STATUS_LABEL[r.status]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
