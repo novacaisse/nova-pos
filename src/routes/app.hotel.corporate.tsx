@@ -5,9 +5,11 @@
 // mensuel par compte.
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Building2, Plus, X, Trash2, Save, Receipt, CheckCircle2, Clock, Loader2, Search } from "lucide-react";
+import { Building2, Plus, X, Trash2, Save, Receipt, CheckCircle2, Clock, Loader2, Search, Printer } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
-import { useFormatMoney } from "@/lib/data/hooks";
+import { useFormatMoney, useShopSettings } from "@/lib/data/hooks";
+import { useOrganization } from "@/lib/auth/OrganizationProvider";
+import { renderA4Document, openPrintWindow } from "@/lib/printDoc";
 import {
   useHotelCorporateAccounts, useUpsertHotelCorporateAccount, useDeleteHotelCorporateAccount,
   useHotelCorporateInvoices, useMarkCorporateInvoicePaid,
@@ -183,9 +185,65 @@ function InvoiceRow({ invoice, accountName, onMarkPaid, busy, formatMoney }: {
   );
 }
 
+// Relevé/facture imprimable (mission "mise à jour ZegHotel", Phase 2, point
+// 5 — "télécharger et imprimer la facture de chaque entreprise" + "imprimer
+// le relevé de chaque entreprise") : un seul document couvre les deux
+// besoins — le relevé mensuel EST la facture consolidée de l'entreprise
+// (pas de document "facture" distinct côté hotel_corporate_accounts, la
+// facturation se fait par folio individuel déjà couvert par
+// printHotelInvoice dans app.hotel.reservations.tsx).
+function printCorporateStatement(
+  account: HotelCorporateAccount, byMonth: [string, HotelCorporateInvoice[]][],
+  org: { name: string; logo_url: string | null } | null,
+  settings: { data: { address?: string; phone?: string; ifu?: string } } | null | undefined,
+  formatMoney: (n: number) => string,
+) {
+  const total = byMonth.reduce((s, [, invs]) => s + invs.reduce((s2, i) => s2 + i.total, 0), 0);
+  const totalPending = byMonth.reduce((s, [, invs]) => s + invs.filter((i) => !i.corporate_paid_at).reduce((s2, i) => s2 + i.total, 0), 0);
+  const monthBlocks = byMonth.map(([key, invs]) => {
+    const monthTotal = invs.reduce((s, i) => s + i.total, 0);
+    const rows = invs.map((inv) => `<tr><td>${inv.guest_name} — départ ${new Date(inv.check_out).toLocaleDateString("fr-FR")}</td><td class="num">${formatMoney(inv.total)}</td><td class="num">${inv.corporate_paid_at ? "Réglé" : "Dû"}</td></tr>`).join("");
+    return `<h3 style="margin-top:16px;text-transform:capitalize">${monthLabel(key)} — ${formatMoney(monthTotal)}</h3>
+      <table class="doc-table"><thead><tr><th>Séjour</th><th class="num">Montant</th><th class="num">Statut</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }).join("");
+
+  const bodyHtml = `
+    <div class="doc-parties">
+      <div class="block">
+        <h2>Entreprise</h2>
+        <div class="name">${account.name}</div>
+        ${account.contact_name ? `<div>${account.contact_name}</div>` : ""}
+        ${account.contact_email ? `<div>${account.contact_email}</div>` : ""}
+      </div>
+    </div>
+    ${monthBlocks || "<p>Aucun séjour facturé pour ce compte.</p>"}
+    <div class="doc-totals">
+      <div class="row total"><span>Total facturé</span><span>${formatMoney(total)}</span></div>
+      ${totalPending > 0 ? `<div class="row"><span>Dont restant dû</span><span>${formatMoney(totalPending)}</span></div>` : ""}
+    </div>`;
+
+  const html = renderA4Document({
+    docTitle: "Relevé entreprise",
+    docNumber: account.id.slice(0, 8).toUpperCase(),
+    docDate: new Date().toLocaleDateString("fr-FR"),
+    shop: {
+      shopName: org?.name ?? "Organisation",
+      logoUrl: org?.logo_url,
+      address: settings?.data.address,
+      phone: settings?.data.phone,
+      ifu: settings?.data.ifu,
+    },
+    bodyHtml,
+    footerHtml: "Relevé généré par ZegHotel.",
+  });
+  openPrintWindow(html, { width: 900, height: 700 });
+}
+
 function StatementModal({ account, invoices, onClose, formatMoney }: {
   account: HotelCorporateAccount; invoices: HotelCorporateInvoice[]; onClose: () => void; formatMoney: (n: number) => string;
 }) {
+  const { currentOrganization } = useOrganization();
+  const { data: settings } = useShopSettings();
   const byMonth = useMemo(() => {
     const map = new Map<string, HotelCorporateInvoice[]>();
     for (const inv of invoices) {
@@ -199,7 +257,13 @@ function StatementModal({ account, invoices, onClose, formatMoney }: {
     <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-card shadow-elegant">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <div className="font-display text-lg font-bold">Relevé — {account.name}</div>
+          <div>
+            <div className="font-display text-lg font-bold">Relevé — {account.name}</div>
+            <button onClick={() => printCorporateStatement(account, byMonth, currentOrganization, settings, formatMoney)}
+              className="mt-1 flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-foreground hover:bg-muted">
+              <Printer className="h-3 w-3" /> Imprimer/Télécharger
+            </button>
+          </div>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
         <div className="max-h-[70vh] space-y-4 overflow-y-auto p-5">

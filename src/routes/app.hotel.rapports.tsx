@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
   BarChart3, TrendingUp, Percent, Coins, Moon, Loader2, FileDown, ArrowUp, ArrowDown, Minus,
-  BedDouble, Wallet, Ban, UserX,
+  BedDouble, Wallet, Ban, UserX, CalendarDays, Trophy,
 } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
@@ -156,6 +156,32 @@ function HotelReportsPage() {
   }, [extras]);
   const extrasTotal = extrasByKind.reduce((s, e) => s + e.amount, 0);
 
+  // Durée moyenne de séjour + top clients (mission "mise à jour ZegHotel",
+  // Phase 2, point 7 — "rapports plus détaillés") : calculés côté client à
+  // partir de `reservations`, déjà chargé pour byRoomType/byChannel
+  // ci-dessus — pas de requête supplémentaire.
+  const { alos, topGuests } = useMemo(() => {
+    const arrivedStays = (reservations ?? []).filter((r) => r.status === "checked_in" || r.status === "checked_out");
+    const totalStayNights = arrivedStays.reduce((s, r) =>
+      s + Math.max(1, Math.round((new Date(r.check_out).getTime() - new Date(r.check_in).getTime()) / 86400000)), 0);
+    const guestMap = new Map<string, { name: string; revenue: number; stays: number }>();
+    for (const r of reservations ?? []) {
+      if (r.status === "cancelled" || r.status === "no_show") continue;
+      const guestId = r.guest_id;
+      const entry = guestMap.get(guestId) ?? { name: r.guest?.full_name ?? "—", revenue: 0, stays: 0 };
+      entry.stays += 1;
+      for (const rr of r.reservation_rooms) {
+        if (rr.status === "cancelled" || rr.status === "no_show") continue;
+        entry.revenue += rr.rate_amount;
+      }
+      guestMap.set(guestId, entry);
+    }
+    return {
+      alos: arrivedStays.length ? totalStayNights / arrivedStays.length : 0,
+      topGuests: [...guestMap.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 5),
+    };
+  }, [reservations]);
+
   const isLoading = loadingReservations || loadingPayments || loadingExtras;
 
   const exportPdf = () => {
@@ -173,9 +199,16 @@ function HotelReportsPage() {
           <tr><td>RevPAR</td><td class="num">${escapeHtml(formatMoney(revpar))}</td></tr>
           <tr><td>Revenu hébergement</td><td class="num">${escapeHtml(formatMoney(revenue))}</td></tr>
           <tr><td>Revenu extras (hors chambre)</td><td class="num">${escapeHtml(formatMoney(extrasTotal))}</td></tr>
+          <tr><td>Durée moyenne de séjour</td><td class="num">${alos.toFixed(1)} nuit${alos >= 2 ? "s" : ""}</td></tr>
           <tr><td>Annulations</td><td class="num">${cancelledCount}</td></tr>
           <tr><td>No-show</td><td class="num">${noShowCount}</td></tr>
         </tbody>
+      </table>
+
+      <h3 style="margin-top:24px;font-size:13px;">Top clients (revenu)</h3>
+      <table class="doc-table">
+        <thead><tr><th>Client</th><th class="num">Séjours</th><th class="num">Revenu</th></tr></thead>
+        <tbody>${topGuests.map((g) => `<tr><td>${escapeHtml(g.name)}</td><td class="num">${g.stays}</td><td class="num">${escapeHtml(formatMoney(g.revenue))}</td></tr>`).join("") || `<tr><td colspan="3">Aucune donnée</td></tr>`}</tbody>
       </table>
 
       <h3 style="margin-top:24px;font-size:13px;">Revenu par type de chambre</h3>
@@ -243,7 +276,8 @@ function HotelReportsPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Durée moyenne de séjour" value={`${alos.toFixed(1)} nuit${alos >= 2 ? "s" : ""}`} icon={<CalendarDays className="h-5 w-5" />} accent="primary" />
           <StatCard label="Revenu extras (hors chambre)" value={formatMoney(extrasTotal)} icon={<Wallet className="h-5 w-5" />} />
           <StatCard label="Annulations" value={String(cancelledCount)} icon={<Ban className="h-5 w-5" />} />
           <StatCard label="No-show" value={String(noShowCount)} icon={<UserX className="h-5 w-5" />} />
@@ -295,6 +329,21 @@ function HotelReportsPage() {
                 <div className="mt-1 flex items-center justify-between border-t border-border pt-2 text-sm font-bold">
                   <span>Total</span><span className="tabular">{formatMoney(totalCollected)}</span>
                 </div>
+              </div>
+            )}
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><Trophy className="h-4 w-4 text-primary" /> Top clients (revenu)</div>
+            {topGuests.length === 0 ? (
+              <div className="text-sm text-muted-foreground">Aucune donnée sur la période.</div>
+            ) : (
+              <div className="space-y-2">
+                {topGuests.map((g, i) => (
+                  <div key={g.name + i} className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">{i + 1}. {g.name} <span className="text-xs">({g.stays} séjour{g.stays > 1 ? "s" : ""})</span></span>
+                    <span className="tabular font-semibold">{formatMoney(g.revenue)}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>

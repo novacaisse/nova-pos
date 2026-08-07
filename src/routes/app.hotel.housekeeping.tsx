@@ -2,7 +2,7 @@
 // cet écran ne gère plus que les tâches de ménage du jour.
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Sparkle, Loader2, CheckCircle2, UserCircle2, ChevronLeft, ChevronRight, History } from "lucide-react";
+import { Sparkle, Loader2, CheckCircle2, UserCircle2, ChevronLeft, ChevronRight, History, Check, X } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { useMyRole, useShopMembers } from "@/lib/data/hooks";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -10,8 +10,9 @@ import { playKdsSound } from "@/lib/kdsSound";
 import { cn } from "@/lib/utils";
 import {
   useHotelHousekeepingTasks, useGenerateHousekeepingTasks, useUpdateHousekeepingTaskStatus,
-  useAssignHousekeepingTask, type HousekeepingTaskStatus,
+  useAssignHousekeepingTask, type HousekeepingTaskStatus, type HotelHousekeepingTask,
 } from "@/lib/data/hotelHooks";
+import type { ShopMember } from "@/lib/data/hooks";
 
 export const Route = createFileRoute("/app/hotel/housekeeping")({
   component: HousekeepingPage,
@@ -49,6 +50,9 @@ function HousekeepingPage() {
   // sélection tant qu'il n'a jamais été assigné.
   const housekeepers = useMemo(() => members.filter((m) => m.role === "housekeeping"), [members]);
   const memberName = (userId: string | null) => userId ? (members.find((m) => m.user_id === userId)?.profile?.full_name ?? "Membre") : null;
+  // assigned_to_name (mission "mise à jour ZegHotel", migration 086) :
+  // affichage identique qu'il s'agisse d'un membre enregistré ou non.
+  const assigneeLabel = (t: HotelHousekeepingTask) => memberName(t.assigned_to) ?? t.assigned_to_name ?? null;
 
   const [onlyMine, setOnlyMine] = useState(false);
   const visibleTasks = onlyMine ? tasks.filter((t) => t.assigned_to === user?.id) : tasks;
@@ -116,23 +120,15 @@ function HousekeepingPage() {
                   <div className="text-xs text-muted-foreground">{t.kind === "cleaning" ? "Nettoyage" : t.kind === "turnover" ? "Recouche" : "Inspection"}</div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <div className={cn("flex items-center gap-1.5 rounded-lg border border-border px-2 py-1.5 text-xs", !isToday && "opacity-70")}>
-                    <UserCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    {isToday ? (
-                      <select value={t.assigned_to ?? ""} onChange={(e) => assignTask.mutate({ id: t.id, assigned_to: e.target.value || null })}
-                        className="max-w-[9rem] truncate bg-transparent outline-none">
-                        <option value="">Non assigné</option>
-                        {t.assigned_to && !housekeepers.some((m) => m.user_id === t.assigned_to) && (
-                          <option value={t.assigned_to}>{memberName(t.assigned_to)}</option>
-                        )}
-                        {housekeepers.map((m) => (
-                          <option key={m.user_id} value={m.user_id}>{m.profile?.full_name || "—"}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="max-w-[9rem] truncate">{memberName(t.assigned_to) ?? "Non assigné"}</span>
-                    )}
-                  </div>
+                  {isToday ? (
+                    <AssignControl task={t} housekeepers={housekeepers} memberName={memberName}
+                      onAssign={(assigned_to, assigned_to_name) => assignTask.mutate({ id: t.id, assigned_to, assigned_to_name })} />
+                  ) : (
+                    <div className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1.5 text-xs opacity-70">
+                      <UserCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="max-w-[9rem] truncate">{assigneeLabel(t) ?? "Non assigné"}</span>
+                    </div>
+                  )}
                   {t.status === "done" ? (
                     <span className="flex items-center gap-1 rounded-full bg-success/10 px-3 py-1.5 text-xs font-semibold text-success"><CheckCircle2 className="h-3.5 w-3.5" /> Terminé</span>
                   ) : !isToday ? (
@@ -153,6 +149,58 @@ function HousekeepingPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Assignation à un membre enregistré (rôle housekeeping) OU à un nom libre
+// (mission "mise à jour ZegHotel", item 4 — "membre enregistré dans le
+// logiciel ou non enregistré"). "__custom__" est un sentinel de <select>,
+// jamais persisté : il ne fait que révéler le champ texte.
+const CUSTOM_ASSIGNEE = "__custom__";
+function AssignControl({ task, housekeepers, memberName, onAssign }: {
+  task: HotelHousekeepingTask; housekeepers: ShopMember[]; memberName: (userId: string | null) => string | null;
+  onAssign: (assigned_to: string | null, assigned_to_name: string | null) => void;
+}) {
+  const [editingCustom, setEditingCustom] = useState(false);
+  const [customName, setCustomName] = useState(task.assigned_to_name ?? "");
+
+  if (editingCustom) {
+    return (
+      <div className="flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/5 px-2 py-1">
+        <input autoFocus value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Nom de la personne"
+          onKeyDown={(e) => { if (e.key === "Enter" && customName.trim()) { onAssign(null, customName.trim()); setEditingCustom(false); } }}
+          className="w-28 bg-transparent text-xs outline-none" />
+        <button onClick={() => { if (customName.trim()) { onAssign(null, customName.trim()); setEditingCustom(false); } }}
+          className="grid h-5 w-5 place-items-center rounded text-success hover:bg-success/10"><Check className="h-3.5 w-3.5" /></button>
+        <button onClick={() => setEditingCustom(false)} className="grid h-5 w-5 place-items-center rounded text-muted-foreground hover:bg-muted"><X className="h-3.5 w-3.5" /></button>
+      </div>
+    );
+  }
+
+  const currentValue = task.assigned_to ?? (task.assigned_to_name ? CUSTOM_ASSIGNEE : "");
+  return (
+    <div className="flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs">
+      <UserCircle2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <select value={currentValue}
+        onChange={(e) => {
+          if (e.target.value === CUSTOM_ASSIGNEE) { setCustomName(task.assigned_to_name ?? ""); setEditingCustom(true); return; }
+          onAssign(e.target.value || null, null);
+        }}
+        className="max-w-[8rem] truncate bg-transparent outline-none">
+        <option value="">Non assigné</option>
+        {task.assigned_to && !housekeepers.some((m) => m.user_id === task.assigned_to) && (
+          <option value={task.assigned_to}>{memberName(task.assigned_to)}</option>
+        )}
+        {housekeepers.map((m) => (
+          <option key={m.user_id} value={m.user_id}>{m.profile?.full_name || "—"}</option>
+        ))}
+        <option value={CUSTOM_ASSIGNEE}>{task.assigned_to_name || "+ Personne non enregistrée…"}</option>
+      </select>
+      {task.assigned_to_name && (
+        <button onClick={() => { setCustomName(task.assigned_to_name ?? ""); setEditingCustom(true); }}
+          className="shrink-0 text-muted-foreground hover:text-primary" title="Modifier le nom">✎</button>
+      )}
     </div>
   );
 }

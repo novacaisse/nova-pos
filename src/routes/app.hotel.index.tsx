@@ -1,10 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { BedDouble, CalendarRange, DoorClosed, LogIn, LogOut, Sparkle, Users, TrendingUp, Percent, Coins } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  BedDouble, CalendarRange, DoorClosed, LogIn, LogOut, Sparkle, Users, TrendingUp, Percent, Coins,
+  ClipboardList, ReceiptText, CalendarClock, AlertCircle,
+} from "lucide-react";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
 import { useFormatMoney } from "@/lib/data/hooks";
-import { useHotelDashboardStats, useHotelRooms, useHotelReservations, nightsInRange } from "@/lib/data/hotelHooks";
+import { useHotelDashboardStats, useHotelRooms, useHotelReservations, useHotelDiagnostics, nightsInRange } from "@/lib/data/hotelHooks";
 
 export const Route = createFileRoute("/app/hotel/")({
   component: HotelDashboard,
@@ -19,6 +23,7 @@ function HotelDashboard() {
   const today = todayISO();
   const { data: stats, isLoading } = useHotelDashboardStats(today);
   const { data: rooms = [] } = useHotelRooms();
+  const { data: diagnostics } = useHotelDiagnostics(today);
   const formatMoney = useFormatMoney();
 
   // Sélecteur de période universel (ZegHotel Phase 6) — les cartes
@@ -81,17 +86,55 @@ function HotelDashboard() {
           </Link>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Taux d'occupation" value={`${stats?.occupancyPct ?? 0}%`}
-            hint={`${stats?.occupied ?? 0} / ${stats?.totalRooms ?? 0} chambres`}
-            icon={<BedDouble className="h-5 w-5" />} accent="primary" />
-          <StatCard label="Arrivées aujourd'hui" value={String(stats?.arrivals.length ?? 0)}
-            icon={<LogIn className="h-5 w-5" />} accent="accent" />
-          <StatCard label="Départs aujourd'hui" value={String(stats?.departures.length ?? 0)}
-            icon={<LogOut className="h-5 w-5" />} accent="success" />
-          <StatCard label="Chambres" value={String(stats?.totalRooms ?? 0)}
-            icon={<DoorClosed className="h-5 w-5" />} />
-        </div>
+        <motion.div initial="hidden" animate="show"
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
+          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            <StatCard key="occ" label="Taux d'occupation" value={`${stats?.occupancyPct ?? 0}%`}
+              hint={`${stats?.occupied ?? 0} / ${stats?.totalRooms ?? 0} chambres`}
+              icon={<BedDouble className="h-5 w-5" />} accent="primary" />,
+            <StatCard key="arr" label="Arrivées aujourd'hui" value={String(stats?.arrivals.length ?? 0)}
+              icon={<LogIn className="h-5 w-5" />} accent="accent" />,
+            <StatCard key="dep" label="Départs aujourd'hui" value={String(stats?.departures.length ?? 0)}
+              icon={<LogOut className="h-5 w-5" />} accent="success" />,
+            <StatCard key="rooms" label="Chambres" value={String(stats?.totalRooms ?? 0)}
+              icon={<DoorClosed className="h-5 w-5" />} />,
+          ].map((card, i) => (
+            <motion.div key={i} variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}>{card}</motion.div>
+          ))}
+        </motion.div>
+
+        {/* Diagnostics opérationnels (mission "mise à jour ZegHotel", Phase
+            2, point 1) — signaux qui demandent une action aujourd'hui,
+            distincts des indicateurs financiers de /app/hotel/rapports. */}
+        {diagnostics && (diagnostics.pendingHousekeeping > 0 || diagnostics.openFoliosPastCheckout > 0 || diagnostics.pendingReservations > 0) && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+            className="rounded-2xl border border-accent/30 bg-accent/5 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-accent-foreground">
+              <AlertCircle className="h-4 w-4" /> Diagnostics — à traiter aujourd'hui
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {diagnostics.pendingHousekeeping > 0 && (
+                <Link to="/app/hotel/housekeeping" className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 hover:border-primary/40">
+                  <ClipboardList className="h-5 w-5 shrink-0 text-warning" />
+                  <div><div className="font-bold">{diagnostics.pendingHousekeeping}</div><div className="text-xs text-muted-foreground">Tâches ménage en attente</div></div>
+                </Link>
+              )}
+              {diagnostics.openFoliosPastCheckout > 0 && (
+                <Link to="/app/hotel/reservations" className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 hover:border-primary/40">
+                  <ReceiptText className="h-5 w-5 shrink-0 text-destructive" />
+                  <div><div className="font-bold">{diagnostics.openFoliosPastCheckout}</div><div className="text-xs text-muted-foreground">Notes à clôturer (départ effectué)</div></div>
+                </Link>
+              )}
+              {diagnostics.pendingReservations > 0 && (
+                <Link to="/app/hotel/reservations" className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 hover:border-primary/40">
+                  <CalendarClock className="h-5 w-5 shrink-0 text-primary" />
+                  <div><div className="font-bold">{diagnostics.pendingReservations}</div><div className="text-xs text-muted-foreground">Réservations à confirmer</div></div>
+                </Link>
+              )}
+            </div>
+          </motion.div>
+        )}
 
         <div>
           <div className="mb-2 flex items-center justify-between">

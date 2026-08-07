@@ -12,10 +12,16 @@ function useOrganizationId() {
 }
 
 // ============ TYPES ============
+// Tarif horaire personnalisé (mission "mise à jour ZegHotel", migration
+// 087) — ex. {"label":"2h","hours":2,"price":5000}. Référence affichée sur
+// la fiche du type de chambre, pas encore branché sur le calcul automatique
+// à la réservation (voir commentaire de la migration).
+export type CustomHourlyRate = { label: string; hours: number; price: number };
 export type HotelRoomType = {
   id: string; organization_id: string; name: string; description: string | null;
   capacity_adults: number; capacity_children: number; amenities: string[];
   base_price: number; image_url: string | null; created_at: string;
+  hourly_rate: number | null; custom_hourly_rates: CustomHourlyRate[];
 };
 export type HousekeepingStatus = "clean" | "dirty" | "inspected" | "out_of_service";
 export type HotelRoom = {
@@ -124,7 +130,11 @@ export type HousekeepingTaskStatus = "pending" | "in_progress" | "done";
 export type HotelHousekeepingTask = {
   id: string; organization_id: string; room_id: string; task_date: string;
   kind: HousekeepingTaskKind; status: HousekeepingTaskStatus;
-  assigned_to: string | null; notes: string | null; created_at: string; completed_at: string | null;
+  assigned_to: string | null;
+  // Assignation à un membre non enregistré (mission "mise à jour
+  // ZegHotel", migration 086) — mutuellement exclusif avec assigned_to.
+  assigned_to_name: string | null;
+  notes: string | null; created_at: string; completed_at: string | null;
 };
 export type MaintenancePriority = "low" | "normal" | "high" | "urgent";
 export type MaintenanceStatus = "open" | "in_progress" | "resolved";
@@ -619,6 +629,34 @@ export function useHotelReservation(id: string | null) {
         .eq("id", id!).single();
       if (error) throw error;
       return data as any;
+    },
+  });
+}
+
+// Historique des réservations d'une chambre (mission "mise à jour
+// ZegHotel", Phase 2, point 3 — clic sur une chambre → historique) : part
+// de hotel_reservation_rooms (pas hotel_reservations directement) car c'est
+// la seule table qui porte room_id — une réservation multi-chambres n'y
+// apparaît qu'une fois par chambre effectivement réservée.
+export type RoomReservationHistoryRow = {
+  id: string; rate_amount: number; status: string;
+  reservation: {
+    id: string; check_in: string; check_out: string; status: ReservationStatus;
+    guest: { full_name: string } | null;
+  };
+};
+export function useRoomReservationHistory(roomId: string | null) {
+  return useQuery({
+    queryKey: ["hotel_room_reservation_history", roomId],
+    enabled: !!roomId,
+    queryFn: async (): Promise<RoomReservationHistoryRow[]> => {
+      const { data, error } = await supabase.from("hotel_reservation_rooms")
+        .select("id, rate_amount, status, reservation:hotel_reservations(id, check_in, check_out, status, guest:hotel_guests(full_name))")
+        .eq("room_id", roomId!)
+        .order("check_in", { foreignTable: "hotel_reservations", ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return (data as any[]).filter((r) => r.reservation) as RoomReservationHistoryRow[];
     },
   });
 }
@@ -1258,11 +1296,15 @@ export function useGenerateHousekeepingTasks() {
 // frontend. Même policy UPDATE que le changement de statut
 // (hotel_housekeeping_update, niveau 'manage') — assigner une tâche n'est
 // qu'une écriture de plus sur la même ligne, aucune RLS à toucher.
+// assigned_to_name (migration 086) : assignation à un membre non enregistré
+// dans le logiciel — le frontend garantit l'exclusion mutuelle avec
+// assigned_to (jamais les deux non-null en même temps), voir HousekeepingPage.
 export function useAssignHousekeepingTask() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, assigned_to }: { id: string; assigned_to: string | null }) => {
-      const { error } = await supabase.from("hotel_housekeeping_tasks").update({ assigned_to }).eq("id", id);
+    mutationFn: async ({ id, assigned_to, assigned_to_name }: { id: string; assigned_to: string | null; assigned_to_name?: string | null }) => {
+      const { error } = await supabase.from("hotel_housekeeping_tasks")
+        .update({ assigned_to, assigned_to_name: assigned_to_name ?? null }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_housekeeping_tasks", organizationId] }),
@@ -1328,6 +1370,39 @@ export function useUpdateMaintenanceTicket() {
 
 // ============ DASHBOARD ============
 export type HotelDashboardReservation = HotelReservation & { guest: HotelGuestContact | null };
+
+// Diagnostics opérationnels (mission "mise à jour ZegHotel", Phase 2, point
+// 1) — trois signaux qui demandent une action aujourd'hui (pas des
+// indicateurs financiers, déjà couverts par /app/hotel/rapports) : ménage
+// en retard, notes non clôturées après un départ, réservations pas encore
+// confirmées.
+export type HotelDiagnostics = {
+  pendingHousekeeping: number;
+  openFoliosPastCheckout: number;
+  pendingReservations: number;
+};
+export function useHotelDiagnostics(today: string) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_diagnostics", organizationId, today],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelDiagnostics> => {
+      const [{ count: pendingHousekeeping }, { count: openFoliosPastCheckout }, { count: pendingReservations }] = await Promise.all([
+        supabase.from("hotel_housekeeping_tasks").select("id", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).eq("task_date", today).neq("status", "done"),
+        supabase.from("hotel_folios").select("id, reservation:hotel_reservations!inner(status)", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).eq("status", "open").eq("reservation.status", "checked_out"),
+        supabase.from("hotel_reservations").select("id", { count: "exact", head: true })
+          .eq("organization_id", organizationId!).eq("status", "pending").gte("check_in", today),
+      ]);
+      return {
+        pendingHousekeeping: pendingHousekeeping ?? 0,
+        openFoliosPastCheckout: openFoliosPastCheckout ?? 0,
+        pendingReservations: pendingReservations ?? 0,
+      };
+    },
+  });
+}
 
 export function useHotelDashboardStats(today: string) {
   const organizationId = useOrganizationId();
