@@ -1096,6 +1096,125 @@ export function useRestoReportData(from: Date, to: Date) {
   });
 }
 
+// Compléments "Rapports par onglet" (mission "Round 2", 4 apps) — séparés
+// de useRestoReportData ci-dessus (déjà volumineuse) : revenu par jour
+// (onglet Ventes), clients identifiés via le programme de fidélité
+// (resto_bills.loyalty_account_id, onglet Clients) et consommation
+// d'ingrédients valorisée par fournisseur (products.supplier_id, même
+// mouvements de stock que ingredientConsumption ci-dessus mais regroupés
+// différemment, onglet Fournisseurs).
+export type RestoDailyRevenue = { date: string; ca: number };
+export type RestoClientRow = { name: string; visits: number; ca: number };
+export type RestoSupplierRow = { name: string; qty: number; ca: number };
+
+export function useRestoReportExtras(from: Date, to: Date) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["resto_report_extras", organizationId, from.toISOString(), to.toISOString()],
+    enabled: !!organizationId,
+    queryFn: async () => {
+      const orgId = organizationId!;
+      const [billsRes, movementsRes] = await Promise.all([
+        supabase.from("resto_bills")
+          .select("total, created_at, loyalty_account_id")
+          .eq("organization_id", orgId).eq("statut", "payee")
+          .gte("created_at", from.toISOString()).lte("created_at", to.toISOString()),
+        supabase.from("stock_movements")
+          .select("product_id, quantity")
+          .eq("organization_id", orgId).eq("reason", "Recette ZegResto")
+          .gte("created_at", from.toISOString()).lte("created_at", to.toISOString()),
+      ]);
+      if (billsRes.error) throw billsRes.error;
+      if (movementsRes.error) throw movementsRes.error;
+      const bills = (billsRes.data ?? []) as any[];
+
+      const byDayMap = new Map<string, number>();
+      for (const b of bills) {
+        const day = b.created_at.slice(0, 10);
+        byDayMap.set(day, (byDayMap.get(day) ?? 0) + Number(b.total));
+      }
+      const byDay: RestoDailyRevenue[] = [...byDayMap.entries()].map(([date, ca]) => ({ date, ca })).sort((a, b) => a.date.localeCompare(b.date));
+
+      const accountIds = [...new Set(bills.map((b) => b.loyalty_account_id).filter(Boolean))] as string[];
+      const accountsRes = accountIds.length
+        ? await supabase.from("resto_loyalty_accounts").select("id, nom, telephone").in("id", accountIds)
+        : { data: [], error: null };
+      if (accountsRes.error) throw accountsRes.error;
+      const accountById = new Map((accountsRes.data ?? []).map((a: any) => [a.id, a]));
+      const clientMap = new Map<string, RestoClientRow>();
+      for (const b of bills) {
+        if (!b.loyalty_account_id) continue;
+        const acc = accountById.get(b.loyalty_account_id);
+        const name = acc?.nom || acc?.telephone || "Client";
+        const entry = clientMap.get(b.loyalty_account_id) ?? { name, visits: 0, ca: 0 };
+        entry.visits += 1; entry.ca += Number(b.total);
+        clientMap.set(b.loyalty_account_id, entry);
+      }
+      const byClient = [...clientMap.values()].sort((a, b) => b.ca - a.ca);
+
+      const consumptionByProduct = new Map<string, number>();
+      for (const m of movementsRes.data ?? []) {
+        consumptionByProduct.set(m.product_id, (consumptionByProduct.get(m.product_id) ?? 0) + Number(m.quantity));
+      }
+      const productIds = [...consumptionByProduct.keys()];
+      const productsRes = productIds.length
+        ? await supabase.from("products").select("id, cost, supplier_id").in("id", productIds)
+        : { data: [], error: null };
+      if (productsRes.error) throw productsRes.error;
+      const supplierIdByProduct = new Map((productsRes.data ?? []).map((p: any) => [p.id, p.supplier_id]));
+      const costByProduct = new Map((productsRes.data ?? []).map((p: any) => [p.id, Number(p.cost)]));
+      const supplierIds = [...new Set([...supplierIdByProduct.values()].filter(Boolean))] as string[];
+      const suppliersRes = supplierIds.length
+        ? await supabase.from("suppliers").select("id, name").in("id", supplierIds)
+        : { data: [], error: null };
+      if (suppliersRes.error) throw suppliersRes.error;
+      const supplierNameById = new Map((suppliersRes.data ?? []).map((s: any) => [s.id, s.name]));
+      const supplierMap = new Map<string, RestoSupplierRow>();
+      for (const [productId, qty] of consumptionByProduct.entries()) {
+        const supplierId = supplierIdByProduct.get(productId);
+        if (!supplierId) continue;
+        const name = supplierNameById.get(supplierId) ?? "Fournisseur";
+        const entry = supplierMap.get(supplierId) ?? { name, qty: 0, ca: 0 };
+        entry.qty += qty; entry.ca += qty * (costByProduct.get(productId) ?? 0);
+        supplierMap.set(supplierId, entry);
+      }
+      const bySupplier = [...supplierMap.values()].sort((a, b) => b.ca - a.ca);
+
+      return { byDay, byClient, bySupplier };
+    },
+  });
+}
+
+// Meilleurs mois (12 derniers mois glissants, indépendant du sélecteur de
+// période de la page) — même table resto_bills que useRestoReportData,
+// requête séparée et volontairement large.
+export function useRestoBestMonths() {
+  const organizationId = useOrganizationId();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  return useQuery({
+    queryKey: ["resto_best_months", organizationId],
+    enabled: !!organizationId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("resto_bills")
+        .select("total, created_at")
+        .eq("organization_id", organizationId!).eq("statut", "payee")
+        .gte("created_at", start.toISOString()).lte("created_at", now.toISOString());
+      if (error) throw error;
+      const map = new Map<string, { key: string; label: string; ca: number }>();
+      for (const b of data ?? []) {
+        const d = new Date(b.created_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const label = d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+        const entry = map.get(key) ?? { key, label, ca: 0 };
+        entry.ca += Number(b.total);
+        map.set(key, entry);
+      }
+      return [...map.values()].sort((a, b) => b.key.localeCompare(a.key));
+    },
+  });
+}
+
 // ============ PARAMÈTRES (resto_settings — migrations 044/045) : réglages
 // KDS + fidélité, complétés par le chantier 8 (Ticket & Caisse, Sons &
 // Notifications). Ligne créée à la volée par le premier upsert (comme

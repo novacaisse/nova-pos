@@ -9,15 +9,44 @@
 // (src/lib/printDoc.ts), même format que les autres exports ZegOS
 // (SYSCOHADA).
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Loader2, TrendingUp, Receipt, Timer, Trophy, Users, Utensils, Clock3, Beef, ArrowUp, ArrowDown, Minus, FileDown } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Loader2, TrendingUp, Receipt, Timer, Trophy, Users, Utensils, Clock3, Beef, ArrowUp, ArrowDown, Minus, FileDown,
+  BarChart3, Truck, Banknote, CalendarRange,
+} from "lucide-react";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { PageHeader, StatCard } from "@/components/app/PageHeader";
 import { PeriodSelector, periodRange, type Period } from "@/components/app/PeriodSelector";
-import { useFormatMoney, useShopSettings } from "@/lib/data/hooks";
+import { useFormatMoney, useShopSettings, useExpenses } from "@/lib/data/hooks";
 import { useOrganization } from "@/lib/auth/OrganizationProvider";
-import { useRestoReportData } from "@/lib/data/restoHooks";
+import { useRestoReportData, useRestoReportExtras, useRestoBestMonths } from "@/lib/data/restoHooks";
 import { renderA4Document, openPrintWindow, escapeHtml } from "@/lib/printDoc";
 import { cn } from "@/lib/utils";
+
+// Abrégé pour l'axe du graphique (formatMoney() n'a pas de mode compact) —
+// le montant complet reste affiché dans le tooltip via formatMoney().
+function compactAmount(n: number) {
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(Math.round(n));
+}
+
+// Rapports par onglet (mission "Round 2", 4 apps — même pattern que
+// /app/rapports ZegCaisse et /app/hotel/rapports) : Ventes/Produits/
+// Clients/Fournisseurs/Dépenses/Meilleurs mois s'ajoutent ici aux
+// indicateurs déjà en place (CA/ticket moyen/temps de service/rotation —
+// restent toujours visibles au-dessus, avec Par serveur/Par catégorie/
+// Heures de pointe/Consommation d'ingrédients en panneaux permanents en
+// dessous des onglets, comme pour ZegHotel).
+const REPORTS = [
+  { id: "ventes", label: "Ventes", icon: BarChart3 },
+  { id: "produits", label: "Plats les plus vendus", icon: Trophy },
+  { id: "clients", label: "Clients (fidélité)", icon: Users },
+  { id: "fournisseurs", label: "Fournisseurs", icon: Truck },
+  { id: "depenses", label: "Dépenses", icon: Banknote },
+  { id: "months", label: "Meilleurs mois", icon: CalendarRange },
+] as const;
+type ReportId = (typeof REPORTS)[number]["id"];
 
 export const Route = createFileRoute("/app/resto/rapports")({
   component: RapportsPage,
@@ -50,6 +79,59 @@ function RapportsPage() {
   const [customTo, setCustomTo] = useState("");
   const { from, to } = periodRange(period, customFrom, customTo);
   const { data, isLoading } = useRestoReportData(from, to);
+  const [report, setReport] = useState<ReportId>("ventes");
+  const { data: extras } = useRestoReportExtras(from, to);
+  const { data: bestMonths = [] } = useRestoBestMonths();
+  const { data: allExpenses = [] } = useExpenses();
+  const expensesByCategory = useMemo(() => {
+    const map = new Map<string, { name: string; qty: number; ca: number }>();
+    for (const e of allExpenses) {
+      const paidAt = new Date(e.paid_at);
+      if (paidAt < from || paidAt > to) continue;
+      const key = e.category?.trim() || "Sans catégorie";
+      const entry = map.get(key) ?? { name: key, qty: 0, ca: 0 };
+      entry.qty += 1; entry.ca += Number(e.amount || 0);
+      map.set(key, entry);
+    }
+    return [...map.values()].sort((a, b) => b.ca - a.ca);
+  }, [allExpenses, from, to]);
+
+  const currentRows: { label: string; qty: number; ca: number }[] = useMemo(() => {
+    if (report === "ventes") return (extras?.byDay ?? []).map((d) => ({ label: new Date(d.date).toLocaleDateString("fr-FR"), qty: 0, ca: d.ca }));
+    if (report === "produits") return (data?.topItems ?? []).map((it) => ({ label: it.nom, qty: it.quantite, ca: it.ca }));
+    if (report === "clients") return (extras?.byClient ?? []).map((c) => ({ label: c.name, qty: c.visits, ca: c.ca }));
+    if (report === "fournisseurs") return (extras?.bySupplier ?? []).map((s) => ({ label: s.name, qty: Math.round(s.qty), ca: s.ca }));
+    if (report === "depenses") return expensesByCategory.map((e) => ({ label: e.name, qty: e.qty, ca: e.ca }));
+    if (report === "months") return bestMonths.map((m) => ({ label: m.label, qty: 0, ca: m.ca }));
+    return [];
+  }, [report, extras, data, expensesByCategory, bestMonths]);
+  const chartRows = useMemo(() => (report === "ventes" || report === "months") ? [...currentRows].reverse() : currentRows, [report, currentRows]);
+
+  const exportTabPdf = () => {
+    const reportLabel = REPORTS.find((r) => r.id === report)?.label ?? "";
+    const bodyHtml = `
+      <div class="doc-parties">
+        <div class="block"><h2>Période</h2><div class="name">${report === "months" ? "12 derniers mois" : `${escapeHtml(from.toLocaleDateString("fr-FR"))} — ${escapeHtml(to.toLocaleDateString("fr-FR"))}`}</div></div>
+        <div class="block" style="text-align:right"><h2>Lignes</h2><div class="name">${currentRows.length}</div></div>
+      </div>
+      <table class="doc-table">
+        <thead><tr><th>Libellé</th><th class="num">Qté</th><th class="num">Montant</th></tr></thead>
+        <tbody>${currentRows.map((r) => `<tr><td>${escapeHtml(r.label)}</td><td class="num">${r.qty}</td><td class="num">${escapeHtml(formatMoney(r.ca))}</td></tr>`).join("") || `<tr><td colspan="3">Aucune donnée</td></tr>`}</tbody>
+      </table>`;
+    const html = renderA4Document({
+      docTitle: `Rapport — ${reportLabel}`,
+      docDate: new Date().toLocaleString("fr-FR"),
+      shop: {
+        shopName: currentOrganization?.name ?? "Restaurant",
+        logoUrl: currentOrganization?.logo_url,
+        address: settings?.data.address,
+        phone: settings?.data.phone,
+        ifu: settings?.data.ifu,
+      },
+      bodyHtml,
+    });
+    openPrintWindow(html);
+  };
 
   const exportPdf = () => {
     if (!data) return;
@@ -156,6 +238,69 @@ function RapportsPage() {
                 icon={<Utensils className="h-5 w-5" />} accent="accent" />
               <StatCard label="Ingrédients suivis" value={String(data.ingredientConsumption.length)}
                 hint="Consommés via une recette sur la période" icon={<Beef className="h-5 w-5" />} accent="primary" />
+            </div>
+
+            <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
+              {REPORTS.map((r) => {
+                const Icon = r.icon;
+                return (
+                  <button key={r.id} onClick={() => setReport(r.id)}
+                    className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium", report === r.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+                    <Icon className="h-3.5 w-3.5" /> {r.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {REPORTS.find((r) => r.id === report)?.label} · {report === "months" ? "12 derniers mois" : `${from.toLocaleDateString("fr-FR")} — ${to.toLocaleDateString("fr-FR")}`}
+                </div>
+                <button onClick={exportTabPdf} className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold hover:bg-muted">
+                  <FileDown className="h-3.5 w-3.5" /> PDF
+                </button>
+              </div>
+              {currentRows.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">Aucune donnée sur cette période.</div>
+              ) : (
+                <>
+                  <div className="mb-4 h-56 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartRows} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false}
+                          interval="preserveStartEnd" tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v} />
+                        <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={compactAmount} />
+                        <Tooltip formatter={(value: number) => [formatMoney(value), "Montant"]} contentStyle={{ fontSize: 12, borderRadius: 12 }} />
+                        <Bar dataKey="ca" fill="var(--primary)" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="overflow-hidden rounded-xl border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          <th className="px-3 py-2">
+                            {report === "ventes" ? "Jour" : report === "months" ? "Mois" : report === "clients" ? "Client" : report === "fournisseurs" ? "Fournisseur" : report === "depenses" ? "Catégorie" : "Plat"}
+                          </th>
+                          <th className="px-3 py-2 text-right">{report === "clients" ? "Visites" : "Qté"}</th>
+                          <th className="px-3 py-2 text-right">Montant</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {currentRows.map((r, i) => (
+                          <tr key={i} className="border-t border-border/60">
+                            <td className="px-3 py-2 font-medium">{r.label}</td>
+                            <td className="tabular px-3 py-2 text-right">{r.qty || "—"}</td>
+                            <td className="tabular px-3 py-2 text-right font-semibold">{formatMoney(r.ca)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
