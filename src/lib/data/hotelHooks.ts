@@ -1204,6 +1204,22 @@ export function useGenerateHousekeepingTasks() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_housekeeping_tasks", organizationId] }),
   });
 }
+// Assignation nominative (mission "récupération + correctifs impact
+// élevé", Partie 2) — la colonne assigned_to existe depuis le schéma
+// d'origine (migration 020j) mais n'était jamais lue/écrite côté
+// frontend. Même policy UPDATE que le changement de statut
+// (hotel_housekeeping_update, niveau 'manage') — assigner une tâche n'est
+// qu'une écriture de plus sur la même ligne, aucune RLS à toucher.
+export function useAssignHousekeepingTask() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, assigned_to }: { id: string; assigned_to: string | null }) => {
+      const { error } = await supabase.from("hotel_housekeeping_tasks").update({ assigned_to }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hotel_housekeeping_tasks", organizationId] }),
+  });
+}
 export function useUpdateHousekeepingTaskStatus() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
