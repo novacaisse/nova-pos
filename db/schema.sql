@@ -6,6 +6,22 @@
 
 create extension if not exists "pgcrypto";
 
+-- Cause racine identifiée par AUDIT_ANON_RPC_2026-08.md, corrigée par la
+-- migration 095 : Supabase pose par défaut, à la création du projet,
+-- `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO
+-- anon, authenticated, service_role` — ce qui rend TOUTE nouvelle fonction
+-- exécutable par `anon` par défaut, indépendamment du `revoke all ... from
+-- public` que chaque migration de ce dépôt applique (celui-ci ne retire
+-- que le privilège hérité du pseudo-rôle PUBLIC, jamais celui accordé
+-- nommément à anon). La ligne suivante réinitialise ce défaut pour qu'une
+-- installation fraîche démarre "authenticated only" dès la première
+-- fonction créée. Toute fonction volontairement publique (ex.
+-- resto_public_organization_info/resto_public_create_reservation,
+-- widget ZegResto sans session) doit donc ajouter explicitement
+-- `grant execute on function ... to anon;` après sa création — voir ces
+-- deux fonctions plus bas pour l'exemple.
+alter default privileges in schema public revoke execute on functions from anon;
+
 -- =============== ENUMS ===============
 -- front_desk/housekeeping (migration 020f, ZegHotel) — owner/manager/accountant
 -- sont partagés entre ZegCaisse et ZegHotel, cashier/stock restent spécifiques
@@ -177,9 +193,26 @@ $$;
 -- Recherche d'utilisateur par email pour le flux d'invitation Équipe — ne
 -- renvoie que l'UUID, rien d'autre de auth.users. Voir
 -- db/migrations/004_find_user_by_email.sql pour le détail et les limites.
+-- Mise à jour par la migration 093 (défense en profondeur, suite à
+-- AUDIT_ANON_RPC_2026-08.md) : passage de `language sql` à `language
+-- plpgsql` pour porter un contrôle interne (`raise exception` n'existe
+-- qu'en PL/pgSQL) en plus du revoke ci-dessous — un oubli de GRANT futur
+-- ou une régression du default ACL du projet ne suffirait alors plus à
+-- réexposer l'énumération d'emails. auth.role() = 'service_role' est
+-- explicitement excepté : seul appelant légitime, create-team-member
+-- (Bloc 14, Edge Function), invoque cette RPC avec la clé service_role
+-- sans en-tête Authorization utilisateur (donc auth.uid() y est NULL
+-- aussi, comme pour anon — auth.role() est le seul signal qui distingue
+-- les deux cas).
 create or replace function public.find_user_id_by_email(_email text)
-returns uuid language sql stable security definer set search_path = public as $$
-  select id from auth.users where lower(email) = lower(_email) limit 1;
+returns uuid
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Non authentifié.';
+  end if;
+  return (select id from auth.users where lower(email) = lower(_email) limit 1);
+end;
 $$;
 revoke all on function public.find_user_id_by_email(text) from public;
 grant execute on function public.find_user_id_by_email(text) to authenticated;
@@ -831,10 +864,13 @@ grant execute on function public.provision_organization(text, text, text, text, 
 -- (sale.paid + amount) qui perdait un paiement sur deux lorsque deux
 -- règlements complémentaires arrivaient à quelques instants d'écart sur la
 -- même vente à crédit. Security invoker (pas definer) : les policies RLS
--- existantes sur sales/payments s'appliquent normalement.
+-- existantes sur sales/payments s'appliquent normalement. search_path figé
+-- par la migration 094 (Function Search Path Mutable, Security Advisor +
+-- AUDIT_ANON_RPC_2026-08.md action #3) — risque bas en INVOKER mais
+-- alignement avec le reste du code (add_reservation_payment, migration 079).
 create or replace function public.add_sale_payment(p_sale_id uuid, p_amount numeric, p_method public.payment_method)
 returns public.sales
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 declare
   v_organization_id uuid;
   v_sale public.sales;
@@ -2048,7 +2084,9 @@ revoke all on function public.apply_stock_movement() from public, anon, authenti
 -- apply_stock_movement() lève (garde-fou ci-dessus), tout est annulé.
 -- Security invoker (pas definer), comme add_sale_payment : les policies
 -- RLS sales_insert/sale_items_insert/payments_insert/stock_movements_insert_*
--- s'appliquent normalement avec la session de l'appelant.
+-- s'appliquent normalement avec la session de l'appelant. search_path figé
+-- par la migration 094 (Function Search Path Mutable, Security Advisor +
+-- AUDIT_ANON_RPC_2026-08.md action #3).
 create or replace function public.create_sale(
   p_organization_id uuid,
   p_reference text,
@@ -2060,7 +2098,7 @@ create or replace function public.create_sale(
   p_notes text default null,
   p_status public.sale_status default 'completed'
 ) returns public.sales
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 declare
   v_item jsonb;
   v_item_discount numeric(14,2);
@@ -3080,7 +3118,9 @@ grant execute on function public.hotel_check_rate_restrictions(uuid, uuid, date,
 -- choisie, ne sert plus qu'à fournir un hourly_rate de repli) ; le
 -- hourly_rate figé par chambre (dépassement facturé au check-out) tombe
 -- en repli sur le tarif horaire du type de chambre quand la formule
--- tarifaire n'en fournit pas.
+-- tarifaire n'en fournit pas. search_path figé par la migration 094
+-- (Function Search Path Mutable, Security Advisor + AUDIT_ANON_RPC_2026-08.md
+-- action #3).
 create or replace function public.create_hotel_reservation(
   p_organization_id uuid,
   p_guest_id uuid,
@@ -3096,7 +3136,7 @@ create or replace function public.create_hotel_reservation(
   p_check_in_at timestamptz default null,
   p_check_out_at timestamptz default null
 ) returns public.hotel_reservations
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 declare
   v_reservation public.hotel_reservations;
   v_room jsonb;
