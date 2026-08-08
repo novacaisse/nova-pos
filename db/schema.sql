@@ -3814,6 +3814,8 @@ create table if not exists public.resto_menu_items (
   -- autres tableaux non contraints du projet).
   favori_creneaux text[] not null default '{}' check (favori_creneaux <@ array['matin','midi','soir']::text[]),
   suggestion_ids uuid[] not null default '{}',
+  -- Round 3 Phase B (migration 097) : allergènes affichés en alerte au KDS.
+  allergenes text[] not null default '{}',
   created_at timestamptz not null default now()
 );
 create index if not exists idx_resto_menu_items_org on public.resto_menu_items(organization_id);
@@ -3982,6 +3984,11 @@ create table if not exists public.resto_order_items (
   -- ligne (traçabilité, futur rapport de gaspillage) — contraint dans
   -- mark_resto_order_item_statut(), pas seulement côté frontend.
   annulation_motif text,
+  -- Round 3 Phase B (migration 097) : note libre transmise à la cuisine
+  -- (ex. "sans oignon") — écrite en direct par server/owner/manager
+  -- (resto_order_items_update, déjà ouvert à resto_commandes.manage),
+  -- aucune RPC dédiée nécessaire.
+  notes text,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_resto_order_items_org on public.resto_order_items(organization_id);
@@ -4018,7 +4025,11 @@ create table if not exists public.resto_kitchen_tickets (
   course_id uuid references public.resto_order_courses(id) on delete cascade,
   statut text not null default 'en_attente' check (statut in ('en_attente', 'en_preparation', 'pret')),
   created_at timestamptz not null default now(),
-  ready_at timestamptz
+  ready_at timestamptz,
+  -- Round 3 Phase B (migration 097) : priorisation manuelle — écrite en
+  -- direct par qui a déjà 'manage' sur resto_cuisine (cook/owner/manager,
+  -- même policy update que le statut), aucune RPC dédiée nécessaire.
+  priorite boolean not null default false
 );
 create index if not exists idx_resto_kitchen_tickets_org on public.resto_kitchen_tickets(organization_id);
 create unique index if not exists idx_resto_kitchen_tickets_course_unique on public.resto_kitchen_tickets(course_id) where course_id is not null;

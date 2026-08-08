@@ -120,6 +120,9 @@ function ArticlesTab({ canManage }: { canManage: boolean }) {
               {i.temps_preparation_min != null && (
                 <div className="mt-2 text-[11px] text-muted-foreground">≈ {i.temps_preparation_min} min de préparation</div>
               )}
+              {i.allergenes.length > 0 && (
+                <div className="mt-1 text-[11px] text-warning-foreground">⚠ {i.allergenes.join(", ")}</div>
+              )}
               {canManage && (
                 <div className="mt-3 flex gap-2 border-t border-border pt-2">
                   <button onClick={() => setEdit(i)} className="flex-1 rounded-lg border border-border py-1.5 text-xs font-semibold hover:bg-muted">Modifier</button>
@@ -245,6 +248,11 @@ function ItemDialog({ initial, categories, allItems, onClose, onSave }: {
             </div>
           )}
 
+          {/* #21 allergènes — alerte visible côté cuisine (KDS) et côté
+             prise de commande, saisie libre (les allergènes varient trop
+             pour un enum fermé). */}
+          <AllergeneField value={form.allergenes ?? []} onChange={(v) => setForm({ ...form, allergenes: v })} />
+
           {modifiers.length > 0 && (
             <div>
               <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Modificateurs proposés</div>
@@ -269,6 +277,34 @@ function ItemDialog({ initial, categories, allItems, onClose, onSave }: {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AllergeneField({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const v = draft.trim();
+    if (v && !value.includes(v)) onChange([...value, v]);
+    setDraft("");
+  };
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Allergènes</div>
+      <div className="flex flex-wrap gap-1.5">
+        {value.map((a) => (
+          <span key={a} className="flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning-foreground">
+            {a}
+            <button type="button" onClick={() => onChange(value.filter((x) => x !== a))} className="hover:opacity-70"><X className="h-3 w-3" /></button>
+          </span>
+        ))}
+      </div>
+      <div className="mt-1.5 flex gap-1.5">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          placeholder="Ex. gluten, arachides… (Entrée pour ajouter)"
+          className="h-9 flex-1 rounded-lg border border-border bg-background px-2.5 text-xs outline-none focus:border-primary" />
+        <button type="button" onClick={add} disabled={!draft.trim()} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Plus className="h-3.5 w-3.5" /></button>
       </div>
     </div>
   );
