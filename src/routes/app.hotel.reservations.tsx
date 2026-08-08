@@ -417,12 +417,19 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
   const { data: seasonalRates = [] } = useHotelSeasonalRates();
   const [ratePlanId, setRatePlanId] = useState("");
 
-  // Nuitée ET horaire (ZegHotel Phase 1) : billing_unit porté par la
-  // formule tarifaire choisie — "Standard" (aucune formule) reste toujours
-  // nuitée. Un seul jour calendaire pour une réservation horaire ;
-  // checkOut n'est alors plus piloté par l'utilisateur (forcé = checkIn).
+  // Nuitée ET horaire (ZegHotel Phase 1, décorrélé de la formule tarifaire
+  // par la migration 092 — bug remonté : un hôtel qui ne configure que le
+  // tarif horaire du TYPE de chambre, sans jamais créer de formule "Horaire"
+  // dédiée dans Paramètres > Tarification, n'avait alors aucun moyen
+  // d'accéder au mode horaire). billingMode est désormais un toggle
+  // indépendant, toujours visible — la sélection d'une formule tarifaire
+  // horaire bascule automatiquement dessus (voir le <select> Tarif
+  // ci-dessous) mais ne le conditionne plus. Un seul jour calendaire pour
+  // une réservation horaire ; checkOut n'est alors plus piloté par
+  // l'utilisateur (forcé = checkIn).
+  const [billingMode, setBillingMode] = useState<"night" | "hour">("night");
   const selectedRatePlan = ratePlans.find((p) => p.id === ratePlanId);
-  const isHourly = selectedRatePlan?.billing_unit === "hour";
+  const isHourly = billingMode === "hour";
   const [checkInTime, setCheckInTime] = useState("14:00");
   const [checkOutTime, setCheckOutTime] = useState("16:00");
   useEffect(() => { if (isHourly && checkOut !== checkIn) setCheckOut(checkIn); }, [isHourly, checkIn, checkOut]);
@@ -600,6 +607,18 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
         <div className="max-h-[75vh] space-y-4 overflow-y-auto p-5">
+          <div className="flex gap-1.5 rounded-xl border border-border bg-muted/30 p-1">
+            <button type="button" onClick={() => setBillingMode("night")}
+              className={cn("flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors",
+                billingMode === "night" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              Nuitée
+            </button>
+            <button type="button" onClick={() => setBillingMode("hour")}
+              className={cn("flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors",
+                billingMode === "hour" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              À l'heure
+            </button>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Arrivée *</span>
               <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className={inp} /></label>
@@ -735,7 +754,12 @@ function CreateReservationModal({ defaultRoomId, defaultDate, onClose, onCreated
           </div>
           {ratePlans.length > 0 && (
             <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tarif</span>
-              <select value={ratePlanId} onChange={(e) => setRatePlanId(e.target.value)} className={inp}>
+              <select value={ratePlanId} onChange={(e) => {
+                const id = e.target.value;
+                setRatePlanId(id);
+                const plan = ratePlans.find((p) => p.id === id);
+                if (plan?.billing_unit === "hour") setBillingMode("hour");
+              }} className={inp}>
                 <option value="">Standard (nuitée)</option>
                 {ratePlans.map((p) => (
                   <option key={p.id} value={p.id}>{p.name} — {p.billing_unit === "hour" ? "à l'heure" : "à la nuit"}</option>
