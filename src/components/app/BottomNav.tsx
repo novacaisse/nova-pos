@@ -28,6 +28,8 @@ import {
   Calculator,
   Briefcase,
   FolderOpen,
+  Wallet2,
+  Landmark,
   X,
 } from "lucide-react";
 import { getModulesForApp } from "@/lib/data/adminHooks";
@@ -67,12 +69,23 @@ const HOTEL_PRIMARY: Item[] = [
   { label: "Chambres", to: "/app/hotel/rooms", icon: DoorClosed },
   { label: "Ménage", to: "/app/hotel/housekeeping", icon: Sparkle },
 ];
+// Complété (bug remonté : "tout les modules ne s'affiche pas sur le
+// mobile") — Paiements/Dépenses/Fournisseurs/Finance/Paie existaient déjà
+// côté desktop (AppSidebar.tsx, NAV.hotelPilotage/hotelCatalogue) mais
+// n'avaient jamais été ajoutés ici : ce tableau n'est mis à jour par
+// aucun mécanisme automatique, chaque nouveau module ZegHotel doit y être
+// répliqué à la main.
 const HOTEL_MORE: Item[] = [
   { label: "Maintenance", to: "/app/hotel/maintenance", icon: Wrench },
   { label: "Clients", to: "/app/hotel/clients", icon: Users },
   { label: "Entreprises", to: "/app/hotel/corporate", icon: Building2 },
   { label: "POS", to: "/app/hotel/pos-interne", icon: Coffee },
   { label: "Produits", to: "/app/hotel/produits", icon: Package },
+  { label: "Fournisseurs", to: "/app/hotel/fournisseurs", icon: Truck },
+  { label: "Paiements", to: "/app/hotel/paiements", icon: Wallet2 },
+  { label: "Dépenses", to: "/app/hotel/depenses", icon: Wallet },
+  { label: "Finance", to: "/app/hotel/finance", icon: Landmark },
+  { label: "Paie", to: "/app/hotel/paie", icon: Briefcase },
   { label: "Rapports", to: "/app/hotel/rapports", icon: BarChart3 },
   { label: "Équipe", to: "/app/hotel/equipe", icon: UsersRound },
   { label: "Paramètres", to: "/app/hotel/parametres", icon: Settings },
@@ -154,6 +167,14 @@ const HOTEL_MODULE_FOR_URL: Record<string, string> = {
   "/app/hotel/produits": "produits",
   "/app/hotel/rapports": "hotel_rapports",
   "/app/hotel/parametres": "hotel_parametres",
+  // Finance/Paie (Round 2, migrations 090/091) — clés correctement seedées
+  // pour app_module='hotel' dès leur création (cf. AppSidebar.tsx) : à la
+  // différence de fournisseurs/paiements/depenses ci-dessous, elles peuvent
+  // être branchées ici, hasModulePermission() les filtrera correctement
+  // par rôle (owner/manager toujours, accountant Finance seulement, jamais
+  // front_desk/housekeeping).
+  "/app/hotel/finance": "hotel_finance",
+  "/app/hotel/paie": "hotel_payroll",
 };
 // Idem ZegResto (Équipe Phase D-2, migrations 068/069).
 const RESTO_MODULE_FOR_URL: Record<string, string> = {
@@ -237,12 +258,16 @@ export function BottomNav() {
     ? ERP_MORE.filter(included)
     : useHotelNav
     ? (myRole === "housekeeping"
-        ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne"].includes(m.to))
+        // Même périmètre que HIDDEN_FOR côté AppSidebar.tsx : housekeeping
+        // n'a RLS-wise aucun accès aux données financières/clients/
+        // opérationnelles hors ménage/maintenance.
+        ? HOTEL_MORE.filter((m) => !["/app/hotel/rapports", "/app/hotel/clients", "/app/hotel/corporate", "/app/hotel/pos-interne", "/app/hotel/produits", "/app/hotel/fournisseurs", "/app/hotel/paiements", "/app/hotel/depenses", "/app/hotel/finance", "/app/hotel/paie"].includes(m.to))
         // Clients (ZegHotel Phase 1, migration 028) : accountant retiré de
         // hotel_guests_select (données d'identité restreintes à
         // owner/manager/front_desk). POS interne (Phase 7, migration 033) :
         // post_hotel_pos_charge() n'accorde la vente qu'à owner/manager/
-        // front_desk. Masqués ici aussi.
+        // front_desk. Paie (migration 091) : accountant n'a pas la
+        // permission hotel_payroll, déjà filtré par included() ci-dessous.
         : myRole === "accountant"
           ? HOTEL_MORE.filter(included).filter((m) => !["/app/hotel/clients", "/app/hotel/pos-interne"].includes(m.to))
           : HOTEL_MORE.filter(included))
