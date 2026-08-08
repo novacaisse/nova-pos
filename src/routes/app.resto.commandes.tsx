@@ -37,6 +37,7 @@ import {
   useSetRestoBillSplitItems, useAddRestoBillPayment,
   useRestoOrderCourses, useCreateRestoOrderCourse, useSendRestoCourse, useMarkRestoCourseServed,
   useRestoSettings, RESTO_SETTINGS_DEFAULTS, useRestoLoyaltyAccountByPhone, useApplyRestoBillLoyalty,
+  useRestoStockAlerts, useUpdateRestoOrderItemNotes,
   type RestoOrder, type OrderType, type ChosenModifier, type KitchenTicketStatut, type SplitMode, type PaymentMethode,
   type RestoOrderItem, type RestoOrderCourse, type RestoKitchenTicket, type RestoMenuItem, type RestoBill, type MenuCreneau,
 } from "@/lib/data/restoHooks";
@@ -607,23 +608,40 @@ function MenuItemCard({ item, disabled, onAddSimple, onNeedsModifiers }: {
 }) {
   const formatMoney = useFormatMoney();
   const { data: assigned = [] } = useRestoMenuItemModifiers(item.id);
+  const { data: stockAlerts } = useRestoStockAlerts();
   const hasModifiers = assigned.length > 0;
+  // #20 alerte rupture d'ingrédient — signal seulement, l'ajout reste
+  // possible (apply_stock_movement() bloquera si vraiment insuffisant au
+  // moment du clic, cf. add_resto_order_item()).
+  const lowStock = stockAlerts?.has(item.id) ?? false;
 
   return (
     <button disabled={disabled} onClick={() => (hasModifiers ? onNeedsModifiers() : onAddSimple())}
-      className="overflow-hidden rounded-xl border border-border bg-background text-left hover:border-primary/40 disabled:opacity-50">
-      <div className="grid aspect-square w-full place-items-center overflow-hidden bg-muted">
+      className={cn("overflow-hidden rounded-xl border bg-background text-left hover:border-primary/40 disabled:opacity-50",
+        lowStock ? "border-destructive/50" : "border-border")}>
+      <div className="relative grid aspect-square w-full place-items-center overflow-hidden bg-muted">
         {item.photo_url ? (
           <img src={item.photo_url} alt="" className="h-full w-full object-cover" />
         ) : (
           <ImageIcon className="h-6 w-6 text-muted-foreground/50" />
         )}
+        {lowStock && (
+          <span title="Ingrédient en rupture ou insuffisant" className="absolute right-1 top-1 rounded-full bg-destructive px-1.5 py-0.5 text-[9px] font-bold text-destructive-foreground">
+            Rupture
+          </span>
+        )}
       </div>
       <div className="p-2">
         <div className="truncate text-xs font-semibold">{item.nom}</div>
+        {item.allergenes.length > 0 && (
+          <div className="mt-0.5 truncate text-[10px] text-warning-foreground">⚠ {item.allergenes.join(", ")}</div>
+        )}
         <div className="mt-0.5 flex items-center justify-between">
           <span className="text-xs font-bold text-primary">{formatMoney(item.prix)}</span>
-          {hasModifiers && <span className="text-[10px] text-muted-foreground">options</span>}
+          <span className="flex items-center gap-1">
+            {item.temps_preparation_min != null && <span className="text-[10px] text-muted-foreground">≈{item.temps_preparation_min}min</span>}
+            {hasModifiers && <span className="text-[10px] text-muted-foreground">options</span>}
+          </span>
         </div>
       </div>
     </button>
@@ -720,6 +738,40 @@ function CancelLineModal({ item, onClose, onConfirm, busy }: {
   );
 }
 
+// #22 note libre transmise à la cuisine — repliée derrière un simple lien
+// tant qu'aucune note n'existe, pour ne pas alourdir la ligne par défaut.
+function OrderItemNote({ item }: { item: RestoOrderItem }) {
+  const updateNotes = useUpdateRestoOrderItemNotes();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(item.notes ?? "");
+
+  const save = () => {
+    setEditing(false);
+    if (value.trim() !== (item.notes ?? "")) updateNotes.mutate({ id: item.id, orderId: item.order_id, notes: value });
+  };
+
+  if (editing) {
+    return (
+      <input autoFocus value={value} onChange={(e) => setValue(e.target.value)}
+        onBlur={save} onKeyDown={(e) => e.key === "Enter" && save()}
+        placeholder="Note pour la cuisine…"
+        className="mt-0.5 h-6 w-full rounded-md border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary" />
+    );
+  }
+  if (item.notes) {
+    return (
+      <button onClick={() => setEditing(true)} className="mt-0.5 flex items-center gap-1 truncate text-xs italic text-accent-foreground hover:underline">
+        <Sparkles className="h-3 w-3 shrink-0" /> {item.notes}
+      </button>
+    );
+  }
+  return (
+    <button onClick={() => setEditing(true)} className="mt-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:underline">
+      + Note pour la cuisine
+    </button>
+  );
+}
+
 function CourseGroup({ course, items, ticket, closed, formatMoney, onSend, sending, onMarkServed, markingServed, onMarkLineServed, markingLine, onCancelLine }: {
   course: RestoOrderCourse | null; items: RestoOrderItem[]; ticket: RestoKitchenTicket | null; closed: boolean;
   formatMoney: (n: number) => string; onSend: () => void; sending: boolean;
@@ -750,6 +802,7 @@ function CourseGroup({ course, items, ticket, closed, formatMoney, onSend, sendi
               {it.modifiers_choisis.length > 0 && (
                 <div className="truncate text-xs text-muted-foreground">{it.modifiers_choisis.map((m) => m.nom).join(", ")}</div>
               )}
+              {!closed && it.statut_ligne !== "annulee" && <OrderItemNote item={it} />}
               {it.statut_ligne === "pret" && !closed && (
                 <button onClick={() => onMarkLineServed(it)} disabled={markingLine}
                   className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-success hover:underline disabled:opacity-50">

@@ -32,7 +32,7 @@ export type RestoMenuItem = {
   id: string; organization_id: string; category_id: string | null;
   nom: string; description: string | null; prix: number; photo_url: string | null;
   disponible: boolean; temps_preparation_min: number | null; station: string | null;
-  favori_creneaux: MenuCreneau[]; suggestion_ids: string[];
+  favori_creneaux: MenuCreneau[]; suggestion_ids: string[]; allergenes: string[];
   created_at: string;
 };
 export type RestoModifier = {
@@ -323,12 +323,12 @@ export type RestoOrderCourse = {
 export type RestoOrderItem = {
   id: string; organization_id: string; order_id: string; course_id: string | null; menu_item_id: string | null;
   quantite: number; modifiers_choisis: ChosenModifier[]; statut_ligne: OrderLineStatut;
-  prix_unitaire: number; annulation_motif: string | null; created_at: string;
+  prix_unitaire: number; annulation_motif: string | null; notes: string | null; created_at: string;
   menu_item?: RestoMenuItem | null;
 };
 export type RestoKitchenTicket = {
   id: string; organization_id: string; order_id: string; course_id: string | null; statut: KitchenTicketStatut;
-  created_at: string; ready_at: string | null;
+  created_at: string; ready_at: string | null; priorite: boolean;
   order?: RestoOrder | null;
   course?: RestoOrderCourse | null;
 };
@@ -418,6 +418,23 @@ export function useRestoOrderItems(orderId: string | null) {
     },
   });
 }
+// #18 (Round 3 Phase B) — routage KDS multi-poste : une requête groupée par
+// commande plutôt qu'un aller-retour par ticket, pour déterminer quels
+// postes (station) sont concernés par chaque ticket sans exploser le
+// nombre de requêtes sur un service chargé.
+export function useRestoOrderItemsByOrderIds(orderIds: string[]) {
+  const ids = [...orderIds].sort().join(",");
+  return useQuery({
+    queryKey: ["resto_order_items_by_orders", ids],
+    enabled: orderIds.length > 0,
+    queryFn: async (): Promise<RestoOrderItem[]> => {
+      const { data, error } = await supabase.from("resto_order_items")
+        .select("*, menu_item:resto_menu_items(*)").in("order_id", orderIds).neq("statut_ligne", "annulee");
+      if (error) throw error;
+      return data as RestoOrderItem[];
+    },
+  });
+}
 export function useAddRestoOrderItem() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
@@ -442,6 +459,21 @@ export function useAddRestoOrderItem() {
 // 043) — pas d'UPDATE direct : c'est ce qui permet au cook de marquer 'pret'
 // sans lui accorder de policy UPDATE large sur resto_order_items (RLS ne
 // masque que des lignes, jamais des colonnes ; cf. hotel_guest_contact()).
+// #22 (Round 3 Phase B) : note libre transmise à la cuisine — écriture
+// directe (resto_order_items_update, déjà ouvert à resto_commandes.manage
+// pour owner/manager/server), aucune RPC dédiée nécessaire (pas de colonne
+// sensible en jeu, contrairement à statut_ligne dont l'écriture directe
+// exposerait aussi prix_unitaire à cook).
+export function useUpdateRestoOrderItemNotes() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, notes }: { id: string; orderId: string; notes: string }) => {
+      const { error } = await supabase.from("resto_order_items").update({ notes: notes.trim() || null }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] }),
+  });
+}
 export function useUpdateRestoOrderItemStatut() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
@@ -580,6 +612,18 @@ export function useUpdateKitchenTicketStatut() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] }),
   });
 }
+// #23 (Round 3 Phase B) : priorisation manuelle d'un ticket — même policy
+// RLS que le statut (resto_cuisine.manage), écriture directe suffisante.
+export function useToggleKitchenTicketPriorite() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, priorite }: { id: string; priorite: boolean }) => {
+      const { error } = await supabase.from("resto_kitchen_tickets").update({ priorite }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_kitchen_tickets", organizationId] }),
+  });
+}
 
 // ============ RÉSERVATIONS (Phase 3 — staff ; le formulaire public
 // /resto/reserver/$slug est hors contexte organisation, il n'utilise pas
@@ -707,6 +751,47 @@ export function useRestoRecipe(menuItemId: string | null) {
         .select("*, product:products(id, name)").eq("recipe_id", (recipe as any).id).order("created_at");
       if (ingErr) throw ingErr;
       return { recipe: recipe as RestoRecipe, ingredients: (ingredients ?? []) as RestoRecipeIngredient[] };
+    },
+  });
+}
+
+// #20 (Round 3 Phase B) — alerte rupture d'ingrédient en temps réel :
+// signal proactif côté client avant que le serveur ne clique "ajouter" (le
+// vrai garde-fou reste apply_stock_movement(), déclenché par
+// add_resto_order_item(), qui bloque déjà l'ajout si le stock est
+// insuffisant — cette alerte évite juste de le découvrir après coup).
+// Une seule requête groupée par organisation plutôt qu'un aller-retour par
+// article affiché sur la grille.
+export function useRestoStockAlerts() {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["resto_stock_alerts", organizationId],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<Set<string>> => {
+      const { data: recipes, error: recErr } = await supabase.from("resto_recipes")
+        .select("id, menu_item_id").eq("organization_id", organizationId!);
+      if (recErr) throw recErr;
+      if (!recipes || recipes.length === 0) return new Set();
+      const recipeIds = recipes.map((r: any) => r.id);
+      const { data: ingredients, error: ingErr } = await supabase.from("resto_recipe_ingredients")
+        .select("recipe_id, ingredient_ref, quantite").in("recipe_id", recipeIds);
+      if (ingErr) throw ingErr;
+      const productIds = [...new Set((ingredients ?? []).map((i: any) => i.ingredient_ref as string))];
+      if (productIds.length === 0) return new Set();
+      const { data: stock, error: stockErr } = await supabase.from("stock_levels")
+        .select("product_id, quantity").eq("organization_id", organizationId!).in("product_id", productIds);
+      if (stockErr) throw stockErr;
+      const stockByProduct = new Map((stock ?? []).map((s: any) => [s.product_id as string, s.quantity as number]));
+      const menuItemByRecipe = new Map(recipes.map((r: any) => [r.id as string, r.menu_item_id as string]));
+      const alerts = new Set<string>();
+      for (const ing of ingredients ?? []) {
+        const available = stockByProduct.get((ing as any).ingredient_ref) ?? 0;
+        if (available < (ing as any).quantite) {
+          const menuItemId = menuItemByRecipe.get((ing as any).recipe_id);
+          if (menuItemId) alerts.add(menuItemId);
+        }
+      }
+      return alerts;
     },
   });
 }
