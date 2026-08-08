@@ -3807,6 +3807,13 @@ create table if not exists public.resto_menu_items (
   disponible boolean not null default true,
   temps_preparation_min integer,
   station text,
+  -- Round 3 Phase A (migration 096) : favori_creneaux pour l'épinglage
+  -- rapide par créneau (matin/midi/déjeuner/soir — filtre "Favoris" à la
+  -- prise de commande), suggestion_ids pour les suggestions automatiques
+  -- d'accompagnement (auto-référence non contrainte par FK, comme les
+  -- autres tableaux non contraints du projet).
+  favori_creneaux text[] not null default '{}' check (favori_creneaux <@ array['matin','midi','soir']::text[]),
+  suggestion_ids uuid[] not null default '{}',
   created_at timestamptz not null default now()
 );
 create index if not exists idx_resto_menu_items_org on public.resto_menu_items(organization_id);
@@ -3971,6 +3978,10 @@ create table if not exists public.resto_order_items (
   modifiers_choisis jsonb not null default '[]'::jsonb,
   statut_ligne text not null default 'en_attente' check (statut_ligne in ('en_attente', 'pret', 'servie', 'annulee')),
   prix_unitaire numeric(14,2) not null,
+  -- Round 3 Phase A (migration 096) : motif obligatoire pour annuler une
+  -- ligne (traçabilité, futur rapport de gaspillage) — contraint dans
+  -- mark_resto_order_item_statut(), pas seulement côté frontend.
+  annulation_motif text,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_resto_order_items_org on public.resto_order_items(organization_id);
@@ -4196,25 +4207,35 @@ grant execute on function public.send_resto_course(uuid, uuid) to authenticated;
 -- update large l'exposerait à modifier n'importe quelle autre colonne de
 -- la ligne, ex. prix_unitaire/quantite — RLS ne restreint que les lignes,
 -- jamais les colonnes, cf. pattern hotel_guest_contact()). p_statut =
--- 'pret' pour cook comme pour le personnel de salle ; 'servie' reste
--- réservé à owner/manager/server (le cuisinier ne "sert" jamais un plat).
+-- 'pret' pour cook comme pour le personnel de salle ; 'servie'/'annulee'
+-- restent réservés à owner/manager/server (le cuisinier ne "sert" ni
+-- n'annule jamais un plat lui-même). Mise à jour par la migration 096
+-- (Round 3 Phase A) : ajout de 'annulee' + p_motif obligatoire pour ce
+-- statut (traçabilité, futur rapport de gaspillage) — avant cette
+-- migration, aucun chemin n'existait pour annuler une ligne malgré le
+-- statut déjà présent dans le check constraint.
 create or replace function public.mark_resto_order_item_statut(
   p_organization_id uuid,
   p_item_id uuid,
-  p_statut text
+  p_statut text,
+  p_motif text default null
 ) returns public.resto_order_items
 language plpgsql security definer set search_path = public as $$
 declare
   v_allowed boolean;
   v_item public.resto_order_items;
 begin
-  if p_statut not in ('pret', 'servie') then
+  if p_statut not in ('pret', 'servie', 'annulee') then
     raise exception 'Statut invalide.';
   end if;
+  if p_statut = 'annulee' and (p_motif is null or btrim(p_motif) = '') then
+    raise exception 'Un motif est obligatoire pour annuler une ligne.';
+  end if;
+
   -- 'pret' : accessible à qui a 'manage' sur resto_cuisine (cook) OU sur
   -- resto_commandes (server) — reproduit l'union owner/manager/server/cook
-  -- d'origine (migration 069). 'servie' : seulement resto_commandes.manage
-  -- (owner/manager/server) — cook en est exclu, comme avant.
+  -- d'origine (migration 069). 'servie'/'annulee' : seulement
+  -- resto_commandes.manage (owner/manager/server) — cook en est exclu.
   if p_statut = 'pret' then
     v_allowed := public.has_module_permission(p_organization_id, 'resto_cuisine', 'manage')
       or public.has_module_permission(p_organization_id, 'resto_commandes', 'manage');
@@ -4225,7 +4246,9 @@ begin
     raise exception 'Accès refusé.';
   end if;
 
-  update public.resto_order_items set statut_ligne = p_statut
+  update public.resto_order_items
+    set statut_ligne = p_statut,
+        annulation_motif = case when p_statut = 'annulee' then p_motif else annulation_motif end
     where id = p_item_id and organization_id = p_organization_id and statut_ligne <> 'annulee'
     returning * into v_item;
   if not found then raise exception 'Article de commande introuvable.'; end if;
@@ -4233,8 +4256,8 @@ begin
   return v_item;
 end;
 $$;
-revoke all on function public.mark_resto_order_item_statut(uuid, uuid, text) from public;
-grant execute on function public.mark_resto_order_item_statut(uuid, uuid, text) to authenticated;
+revoke all on function public.mark_resto_order_item_statut(uuid, uuid, text, text) from public;
+grant execute on function public.mark_resto_order_item_statut(uuid, uuid, text, text) to authenticated;
 
 -- Migration 039 — ZegResto, étape 5/7 : Réservations (staff + formulaire
 -- public /resto/reserver/$slug). Le formulaire public n'écrit jamais

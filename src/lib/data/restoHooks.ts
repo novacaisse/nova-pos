@@ -27,10 +27,12 @@ export type RestoTable = {
 export type RestoMenuCategory = {
   id: string; organization_id: string; nom: string; ordre: number; created_at: string;
 };
+export type MenuCreneau = "matin" | "midi" | "soir";
 export type RestoMenuItem = {
   id: string; organization_id: string; category_id: string | null;
   nom: string; description: string | null; prix: number; photo_url: string | null;
   disponible: boolean; temps_preparation_min: number | null; station: string | null;
+  favori_creneaux: MenuCreneau[]; suggestion_ids: string[];
   created_at: string;
 };
 export type RestoModifier = {
@@ -321,7 +323,7 @@ export type RestoOrderCourse = {
 export type RestoOrderItem = {
   id: string; organization_id: string; order_id: string; course_id: string | null; menu_item_id: string | null;
   quantite: number; modifiers_choisis: ChosenModifier[]; statut_ligne: OrderLineStatut;
-  prix_unitaire: number; created_at: string;
+  prix_unitaire: number; annulation_motif: string | null; created_at: string;
   menu_item?: RestoMenuItem | null;
 };
 export type RestoKitchenTicket = {
@@ -443,10 +445,10 @@ export function useAddRestoOrderItem() {
 export function useUpdateRestoOrderItemStatut() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, statut_ligne }: { id: string; orderId: string; statut_ligne: "pret" | "servie" }) => {
+    mutationFn: async ({ id, statut_ligne, motif }: { id: string; orderId: string; statut_ligne: "pret" | "servie" | "annulee"; motif?: string }) => {
       if (!organizationId) throw new Error("Aucune organisation sélectionnée");
       const { data, error } = await supabase.rpc("mark_resto_order_item_statut", {
-        p_organization_id: organizationId, p_item_id: id, p_statut: statut_ligne,
+        p_organization_id: organizationId, p_item_id: id, p_statut: statut_ligne, p_motif: motif ?? null,
       });
       if (error) throw error;
       return data as RestoOrderItem;

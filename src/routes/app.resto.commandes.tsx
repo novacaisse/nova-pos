@@ -20,10 +20,10 @@
 // enregistrement des paiements (add_resto_bill_payment) jusqu'à couvrir le
 // total — la note passe alors "payee" et la commande "fermee".
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, X, Loader2, Receipt, CheckCircle2, Ban, Utensils, CreditCard, Smartphone, Wallet, Users,
-  Search, Send, ChefHat, Image as ImageIcon, Circle, Gift,
+  Search, Send, ChefHat, Image as ImageIcon, Circle, Gift, Star, Mic, Copy, Zap, Sparkles,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
@@ -38,9 +38,21 @@ import {
   useRestoOrderCourses, useCreateRestoOrderCourse, useSendRestoCourse, useMarkRestoCourseServed,
   useRestoSettings, RESTO_SETTINGS_DEFAULTS, useRestoLoyaltyAccountByPhone, useApplyRestoBillLoyalty,
   type RestoOrder, type OrderType, type ChosenModifier, type KitchenTicketStatut, type SplitMode, type PaymentMethode,
-  type RestoOrderItem, type RestoOrderCourse, type RestoKitchenTicket, type RestoMenuItem, type RestoBill,
+  type RestoOrderItem, type RestoOrderCourse, type RestoKitchenTicket, type RestoMenuItem, type RestoBill, type MenuCreneau,
 } from "@/lib/data/restoHooks";
 import { cn } from "@/lib/utils";
+
+// #2 (mission "47 fonctionnalités ZegResto", Phase A) : créneau courant
+// déduit de l'heure locale — pas de configuration par organisation pour
+// rester simple (bornes larges, ajustables si besoin plus tard). Sert de
+// filtre rapide "Favoris" sur la grille du menu.
+function currentCreneau(): MenuCreneau {
+  const h = new Date().getHours();
+  if (h < 11) return "matin";
+  if (h < 15) return "midi";
+  return "soir";
+}
+const CRENEAU_LABEL: Record<MenuCreneau, string> = { matin: "Matin", midi: "Midi", soir: "Soir" };
 
 export const Route = createFileRoute("/app/resto/commandes")({
   component: CommandesPage,
@@ -58,6 +70,7 @@ function CommandesPage() {
   const { data: orders = [], isLoading } = useRestoOrders(false);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const upsert = useUpsertRestoOrder();
 
   // Sélectionne automatiquement une commande (la plus récente) si aucune
   // n'est choisie, et retombe sur "aucune" si celle affichée vient de
@@ -68,15 +81,52 @@ function CommandesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders]);
 
+  // #5 raccourci clavier poste fixe : "n" ouvre "Nouvelle commande" — seule
+  // action sûre à mapper globalement (pas de risque de conflit avec un
+  // champ texte, les inputs de saisie ne remontent pas jusqu'ici pour les
+  // lettres via ce handler car on ignore les événements originant d'un
+  // champ de formulaire).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (e.key === "n" && !creating) { e.preventDefault(); setCreating(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [creating]);
+
   const activeOrder = orders.find((o) => o.id === activeOrderId) ?? null;
+
+  // #4 mode "commande express" : crée directement une commande à emporter
+  // sans passer par la modale (zéro friction pour un client de passage) —
+  // même mutation que NewOrderModal, juste sans étape intermédiaire.
+  const [expressing, setExpressing] = useState(false);
+  const startExpress = async () => {
+    setExpressing(true);
+    try {
+      const order = await upsert.mutateAsync({ type: "emporter", table_id: null, statut: "ouverte" });
+      setActiveOrderId(order.id);
+    } finally {
+      setExpressing(false);
+    }
+  };
 
   return (
     <div>
       <PageHeader title="Commandes" subtitle={`${orders.length} commande${orders.length > 1 ? "s" : ""} en cours`}
         actions={
-          <button onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
-            <Plus className="h-4 w-4" /> Nouvelle commande
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={startExpress} disabled={expressing}
+              title="Nouvelle commande à emporter, sans étape supplémentaire"
+              className="flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-40">
+              {expressing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />} Express
+            </button>
+            <button onClick={() => setCreating(true)} title="Raccourci clavier : n"
+              className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:opacity-90">
+              <Plus className="h-4 w-4" /> Nouvelle commande
+            </button>
+          </div>
         }
       />
       <div className="p-3 sm:p-6">
@@ -147,17 +197,27 @@ function NewOrderModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [type, setType] = useState<OrderType>("salle");
   const [tableId, setTableId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // #3 duplication rapide d'une commande précédente : deuxième onglet dans
+  // la même modale plutôt qu'un écran séparé — le choix table/type reste
+  // pertinent pour la nouvelle commande même en dupliquant le panier.
+  const [mode, setMode] = useState<"nouvelle" | "dupliquer">("nouvelle");
+  const [sourceOrderId, setSourceOrderId] = useState("");
+
+  const create = async () => {
+    if (type === "salle" && !tableId) { setError("Sélectionnez une table."); return null; }
+    const order = await upsert.mutateAsync({ type, table_id: type === "salle" ? tableId : null, statut: "ouverte" });
+    // Convenance UI uniquement (pas de trigger DB) : une commande sur
+    // place occupe la table si elle était libre/réservée.
+    const table = tables.find((t) => t.id === tableId);
+    if (type === "salle" && table && table.statut !== "occupee") updateTableStatut.mutate({ id: tableId, statut: "occupee" });
+    return order;
+  };
 
   const submit = async () => {
     setError(null);
-    if (type === "salle" && !tableId) { setError("Sélectionnez une table."); return; }
     try {
-      const order = await upsert.mutateAsync({ type, table_id: type === "salle" ? tableId : null, statut: "ouverte" });
-      // Convenance UI uniquement (pas de trigger DB) : une commande sur
-      // place occupe la table si elle était libre/réservée.
-      const table = tables.find((t) => t.id === tableId);
-      if (type === "salle" && table && table.statut !== "occupee") updateTableStatut.mutate({ id: tableId, statut: "occupee" });
-      onCreated(order);
+      const order = await create();
+      if (order) onCreated(order);
     } catch (e: any) {
       setError(e?.message ?? "Erreur inconnue");
     }
@@ -171,6 +231,14 @@ function NewOrderModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
         <div className="space-y-3 p-5">
+          <div className="flex gap-2">
+            {([["nouvelle", "Nouvelle"], ["dupliquer", "Dupliquer une commande"]] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setMode(k)}
+                className={cn("flex-1 rounded-xl border px-2 py-2 text-xs font-semibold", mode === k ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted")}>
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {(["salle", "emporter", "livraison"] as const).map((t) => (
               <button key={t} onClick={() => setType(t)}
@@ -187,12 +255,84 @@ function NewOrderModal({ onClose, onCreated }: { onClose: () => void; onCreated:
             </select>
           )}
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive">{error}</div>}
-          <button onClick={submit} disabled={upsert.isPending}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
-            {upsert.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer la commande
-          </button>
+          {mode === "nouvelle" ? (
+            <button onClick={submit} disabled={upsert.isPending}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+              {upsert.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer la commande
+            </button>
+          ) : (
+            <DuplicateOrderPicker sourceOrderId={sourceOrderId} onPick={setSourceOrderId}
+              onDuplicate={async () => {
+                setError(null);
+                try {
+                  const order = await create();
+                  if (order) return order;
+                } catch (e: any) { setError(e?.message ?? "Erreur inconnue"); }
+                return null;
+              }}
+              onDone={onCreated} onError={setError} creating={upsert.isPending} />
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// #3 duplication rapide : liste les 15 dernières commandes fermées (le cas
+// d'usage — "même commande que d'habitude" — concerne des commandes déjà
+// facturées, pas des commandes en cours qu'on peut simplement rouvrir),
+// puis rejoue chaque article via add_resto_order_item() (même RPC que
+// l'ajout manuel — aucun raccourci d'écriture directe, la RPC recalcule le
+// prix et décrémente le stock normalement).
+function DuplicateOrderPicker({ sourceOrderId, onPick, onDuplicate, onDone, onError, creating }: {
+  sourceOrderId: string; onPick: (id: string) => void; onDuplicate: () => Promise<RestoOrder | null>;
+  onDone: (o: RestoOrder) => void; onError: (e: string | null) => void; creating: boolean;
+}) {
+  const { data: allOrders = [] } = useRestoOrders(true);
+  const pastOrders = allOrders.filter((o) => o.statut === "fermee").slice(0, 15);
+  const { data: sourceItems = [] } = useRestoOrderItems(sourceOrderId || null);
+  const addItem = useAddRestoOrderItem();
+  const [duplicating, setDuplicating] = useState(false);
+
+  const run = async () => {
+    if (!sourceOrderId) { onError("Choisissez une commande à dupliquer."); return; }
+    setDuplicating(true);
+    onError(null);
+    try {
+      const order = await onDuplicate();
+      if (!order) return;
+      const activeItems = sourceItems.filter((i) => i.statut_ligne !== "annulee");
+      for (const it of activeItems) {
+        if (!it.menu_item_id) continue;
+        await addItem.mutateAsync({ orderId: order.id, menuItemId: it.menu_item_id, quantite: it.quantite, modifiers: it.modifiers_choisis, courseId: null });
+      }
+      onDone(order);
+    } catch (e: any) {
+      onError(e?.message ?? "Erreur inconnue");
+    } finally {
+      setDuplicating(false);
+    }
+  };
+
+  if (pastOrders.length === 0) {
+    return <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">Aucune commande facturée pour l'instant.</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      <select value={sourceOrderId} onChange={(e) => onPick(e.target.value)}
+        className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary">
+        <option value="">Choisir une commande passée…</option>
+        {pastOrders.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.type === "salle" ? `Table ${o.table?.numero ?? "?"}` : TYPE_LABEL[o.type]} — {new Date(o.created_at).toLocaleDateString("fr-FR")}
+          </option>
+        ))}
+      </select>
+      <button onClick={run} disabled={!sourceOrderId || duplicating || creating}
+        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+        {duplicating || creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />} Dupliquer cette commande
+      </button>
     </div>
   );
 }
@@ -228,6 +368,23 @@ function OrderWorkspace({ order }: { order: RestoOrder }) {
     if (!confirm("Annuler cette commande ?")) return;
     await cancelOrder.mutateAsync({ id: order.id, type: order.type, statut: "annulee" });
   };
+
+  // #5 raccourcis clavier poste fixe : "/" focus la recherche du menu,
+  // Escape ferme la fenêtre de modificateurs ouverte.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inField = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (e.key === "/" && !inField) {
+        e.preventDefault();
+        document.getElementById("resto-menu-search")?.focus();
+      } else if (e.key === "Escape" && pickingModifiers) {
+        setPickingModifiers(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickingModifiers]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -306,17 +463,30 @@ function MenuBrowser({ disabled, courses, activeCourseId, onSelectCourse, orderI
   const createCourse = useCreateRestoOrderCourse();
   const [categoryId, setCategoryId] = useState("");
   const [search, setSearch] = useState("");
+  const [favorisOnly, setFavorisOnly] = useState(false);
+  // #7 suggestions d'accompagnement : dernier article ajouté avec des
+  // suggestions non vides — affiché juste au-dessus de la grille tant que
+  // l'utilisateur n'a pas ajouté autre chose ou fermé la suggestion.
+  const [justAdded, setJustAdded] = useState<RestoMenuItem | null>(null);
+  const creneau = useMemo(currentCreneau, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return items.filter((i) => i.disponible && (!categoryId || i.category_id === categoryId) && (!q || i.nom.toLowerCase().includes(q)));
-  }, [items, categoryId, search]);
+    return items.filter((i) => i.disponible
+      && (!categoryId || i.category_id === categoryId)
+      && (!q || i.nom.toLowerCase().includes(q))
+      && (!favorisOnly || i.favori_creneaux.includes(creneau)));
+  }, [items, categoryId, search, favorisOnly, creneau]);
 
   const addSimple = async (item: RestoMenuItem) => {
     onError(null);
-    try { await addItem.mutateAsync({ orderId, menuItemId: item.id, quantite: 1, courseId: activeCourseId }); }
+    try {
+      await addItem.mutateAsync({ orderId, menuItemId: item.id, quantite: 1, courseId: activeCourseId });
+      setJustAdded(item.suggestion_ids.length > 0 ? item : null);
+    }
     catch (e: any) { onError(e?.message ?? "Erreur inconnue"); }
   };
+  const suggestions = justAdded ? items.filter((i) => justAdded.suggestion_ids.includes(i.id) && i.disponible) : [];
 
   const addNewCourse = async () => {
     try {
@@ -347,10 +517,15 @@ function MenuBrowser({ disabled, courses, activeCourseId, onSelectCourse, orderI
       <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un article…"
-            className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:border-primary" />
+          <input id="resto-menu-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un article…"
+            className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-9 text-sm outline-none focus:border-primary" />
+          <VoiceSearchButton onResult={setSearch} />
         </div>
         <div className="flex gap-1.5 overflow-x-auto">
+          <button onClick={() => setFavorisOnly((v) => !v)} title={`Favoris — ${CRENEAU_LABEL[creneau]}`}
+            className={cn("flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold", favorisOnly ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted")}>
+            <Star className={cn("h-3.5 w-3.5", favorisOnly && "fill-primary")} /> Favoris
+          </button>
           <button onClick={() => setCategoryId("")}
             className={cn("shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold", !categoryId ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted")}>
             Toutes
@@ -363,6 +538,19 @@ function MenuBrowser({ disabled, courses, activeCourseId, onSelectCourse, orderI
           ))}
         </div>
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 p-2.5">
+          <span className="flex items-center gap-1 text-xs font-semibold text-accent-foreground"><Sparkles className="h-3.5 w-3.5" /> Avec ça ?</span>
+          {suggestions.map((s) => (
+            <button key={s.id} onClick={() => addSimple(s)} disabled={disabled || addItem.isPending}
+              className="rounded-full border border-accent/40 bg-card px-2.5 py-1 text-xs font-semibold text-accent-foreground hover:bg-accent/20 disabled:opacity-40">
+              + {s.nom}
+            </button>
+          ))}
+          <button onClick={() => setJustAdded(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">
@@ -377,6 +565,40 @@ function MenuBrowser({ disabled, courses, activeCourseId, onSelectCourse, orderI
         </div>
       )}
     </div>
+  );
+}
+
+// #6 saisie vocale : Web Speech API navigateur (pas de backend) — support
+// fiable seulement sur Chrome/Edge (webkitSpeechRecognition), absent sur
+// Firefox/Safari desktop à ce jour ; le bouton se masque tout seul si
+// l'API n'existe pas plutôt que d'afficher un contrôle qui ne marche pas.
+function VoiceSearchButton({ onResult }: { onResult: (text: string) => void }) {
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const SpeechRecognition = typeof window !== "undefined" ? ((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition) : null;
+
+  if (!SpeechRecognition) return null;
+
+  const toggle = () => {
+    if (listening) { recognitionRef.current?.stop(); return; }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "fr-FR";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (e: any) => onResult(e.results[0][0].transcript);
+    recognition.onend = () => setListening(false);
+    recognition.onerror = () => setListening(false);
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+  };
+
+  return (
+    <button type="button" onClick={toggle} title="Recherche vocale"
+      className={cn("absolute right-2.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full",
+        listening ? "bg-destructive text-destructive-foreground animate-pulse" : "text-muted-foreground hover:text-foreground")}>
+      <Mic className="h-3.5 w-3.5" />
+    </button>
   );
 }
 
@@ -432,6 +654,17 @@ function CartPanel({ order, items, courses, closed, formatMoney, onError }: {
     catch (e: any) { onError(e?.message ?? "Erreur inconnue"); }
   };
   const markLineServed = (item: RestoOrderItem) => setLineStatut.mutate({ id: item.id, orderId: order.id, statut_ligne: "servie" });
+  // #8 annulation de ligne avec motif obligatoire — le serveur saisit le
+  // motif dans CancelLineModal, la validation "non vide" est de toute
+  // façon refaite côté serveur (mark_resto_order_item_statut(), migration
+  // 096), celle-ci n'est qu'un confort UI.
+  const [cancelling, setCancelling] = useState<RestoOrderItem | null>(null);
+  const confirmCancelLine = async (motif: string) => {
+    onError(null);
+    if (!cancelling) return;
+    try { await setLineStatut.mutateAsync({ id: cancelling.id, orderId: order.id, statut_ligne: "annulee", motif }); setCancelling(null); }
+    catch (e: any) { onError(e?.message ?? "Erreur inconnue"); }
+  };
 
   if (items.length === 0) {
     return (
@@ -447,21 +680,51 @@ function CartPanel({ order, items, courses, closed, formatMoney, onError }: {
         <CourseGroup key={c.id} course={c} items={itemsByCourse.get(c.id) ?? []} ticket={ticketByCourse.get(c.id) ?? null}
           closed={closed} formatMoney={formatMoney} onSend={() => send(c.id)} sending={sendCourse.isPending}
           onMarkServed={() => markServed.mutate({ courseId: c.id, orderId: order.id })} markingServed={markServed.isPending}
-          onMarkLineServed={markLineServed} markingLine={setLineStatut.isPending} />
+          onMarkLineServed={markLineServed} markingLine={setLineStatut.isPending} onCancelLine={setCancelling} />
       ))}
       {orphanItems.length > 0 && (
         <CourseGroup course={null} items={orphanItems} ticket={null} closed={closed} formatMoney={formatMoney}
           onSend={() => {}} sending={false} onMarkServed={() => {}} markingServed={false}
-          onMarkLineServed={markLineServed} markingLine={setLineStatut.isPending} />
+          onMarkLineServed={markLineServed} markingLine={setLineStatut.isPending} onCancelLine={setCancelling} />
+      )}
+      {cancelling && (
+        <CancelLineModal item={cancelling} onClose={() => setCancelling(null)} onConfirm={confirmCancelLine} busy={setLineStatut.isPending} />
       )}
     </div>
   );
 }
 
-function CourseGroup({ course, items, ticket, closed, formatMoney, onSend, sending, onMarkServed, markingServed, onMarkLineServed, markingLine }: {
+function CancelLineModal({ item, onClose, onConfirm, busy }: {
+  item: RestoOrderItem; onClose: () => void; onConfirm: (motif: string) => void; busy: boolean;
+}) {
+  const [motif, setMotif] = useState("");
+  return (
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-foreground/60 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="font-display text-base font-bold">Annuler {item.quantite}× {item.menu_item?.nom ?? "cet article"}</div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-3 p-5">
+          <label><div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Motif (obligatoire) *</div>
+            <textarea rows={2} value={motif} onChange={(e) => setMotif(e.target.value)} autoFocus
+              placeholder="Ex. erreur de saisie, client a changé d'avis, rupture ingrédient…"
+              className="w-full rounded-xl border border-border bg-background p-3 text-sm outline-none focus:border-primary" /></label>
+          <button onClick={() => onConfirm(motif)} disabled={!motif.trim() || busy}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-destructive text-sm font-bold text-destructive-foreground disabled:opacity-40">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Confirmer l'annulation
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CourseGroup({ course, items, ticket, closed, formatMoney, onSend, sending, onMarkServed, markingServed, onMarkLineServed, markingLine, onCancelLine }: {
   course: RestoOrderCourse | null; items: RestoOrderItem[]; ticket: RestoKitchenTicket | null; closed: boolean;
   formatMoney: (n: number) => string; onSend: () => void; sending: boolean;
   onMarkServed: () => void; markingServed: boolean; onMarkLineServed: (item: RestoOrderItem) => void; markingLine: boolean;
+  onCancelLine: (item: RestoOrderItem) => void;
 }) {
   const activeItems = items.filter((i) => i.statut_ligne !== "annulee");
   const served = course?.statut === "servie";
@@ -495,6 +758,18 @@ function CourseGroup({ course, items, ticket, closed, formatMoney, onSend, sendi
               )}
               {it.statut_ligne === "servie" && (
                 <span className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-success"><CheckCircle2 className="h-3 w-3" /> Servi</span>
+              )}
+              {/* #8 annulation de ligne — possible tant que le plat n'a pas
+                 encore été servi (une fois servi, c'est un remboursement
+                 côté note, pas une annulation de ligne, cf. Phase D). */}
+              {(it.statut_ligne === "en_attente" || it.statut_ligne === "pret") && !closed && (
+                <button onClick={() => onCancelLine(it)}
+                  className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-destructive hover:underline">
+                  <Ban className="h-3 w-3" /> Annuler
+                </button>
+              )}
+              {it.statut_ligne === "annulee" && it.annulation_motif && (
+                <div className="truncate text-xs italic text-muted-foreground">Motif : {it.annulation_motif}</div>
               )}
             </div>
             <span className="shrink-0 font-semibold">{formatMoney(it.prix_unitaire * it.quantite)}</span>

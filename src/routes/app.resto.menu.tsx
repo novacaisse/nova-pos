@@ -10,7 +10,7 @@
 // pour ajouter la photo.
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Plus, X, Save, Trash2, Loader2, UtensilsCrossed, Tag, SlidersHorizontal, EyeOff, Boxes } from "lucide-react";
+import { Plus, X, Save, Trash2, Loader2, UtensilsCrossed, Tag, SlidersHorizontal, EyeOff, Boxes, Star } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { ImageUploadField } from "@/components/app/ImageUploadField";
 import { useFormatMoney, useMyRole, useProducts } from "@/lib/data/hooks";
@@ -22,9 +22,13 @@ import {
   useRestoModifierOptions, useUpsertRestoModifierOption, useDeleteRestoModifierOption,
   useRestoMenuItemModifiers, useSetRestoMenuItemModifiers,
   useRestoRecipe, useAddRecipeIngredient, useDeleteRecipeIngredient,
-  type RestoMenuItem, type RestoModifier,
+  type RestoMenuItem, type RestoModifier, type MenuCreneau,
 } from "@/lib/data/restoHooks";
 import { cn, selectOnFocus } from "@/lib/utils";
+
+const CRENEAU_OPTIONS: { k: MenuCreneau; label: string }[] = [
+  { k: "matin", label: "Matin" }, { k: "midi", label: "Midi" }, { k: "soir", label: "Soir" },
+];
 
 export const Route = createFileRoute("/app/resto/menu")({
   component: MenuPage,
@@ -128,15 +132,15 @@ function ArticlesTab({ canManage }: { canManage: boolean }) {
       )}
 
       {edit && (
-        <ItemDialog initial={edit} categories={categories} onClose={() => setEdit(null)}
+        <ItemDialog initial={edit} categories={categories} allItems={items} onClose={() => setEdit(null)}
           onSave={(i) => upsert.mutateAsync(i)} />
       )}
     </div>
   );
 }
 
-function ItemDialog({ initial, categories, onClose, onSave }: {
-  initial: Partial<RestoMenuItem>; categories: { id: string; nom: string }[]; onClose: () => void;
+function ItemDialog({ initial, categories, allItems, onClose, onSave }: {
+  initial: Partial<RestoMenuItem>; categories: { id: string; nom: string }[]; allItems: RestoMenuItem[]; onClose: () => void;
   onSave: (i: Partial<RestoMenuItem> & { nom: string; prix: number }) => Promise<RestoMenuItem>;
 }) {
   const { currentOrganization } = useOrganization();
@@ -201,6 +205,45 @@ function ItemDialog({ initial, categories, onClose, onSave }: {
             <input type="checkbox" checked={form.disponible ?? true} onChange={(e) => setForm({ ...form, disponible: e.target.checked })} className="h-4 w-4 rounded border-border" />
             <span className="text-xs font-semibold uppercase text-muted-foreground">Disponible à la vente</span>
           </label>
+
+          {/* #2 favoris par créneau (mission "47 fonctionnalités ZegResto",
+             Phase A) : épingle l'article dans le filtre rapide "Favoris" de
+             la prise de commande, pour un ou plusieurs créneaux. */}
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground"><Star className="h-3.5 w-3.5" /> Favori sur ces créneaux</div>
+            <div className="flex flex-wrap gap-1.5">
+              {CRENEAU_OPTIONS.map((c) => {
+                const active = (form.favori_creneaux ?? []).includes(c.k);
+                return (
+                  <button key={c.k} type="button"
+                    onClick={() => setForm({ ...form, favori_creneaux: active ? (form.favori_creneaux ?? []).filter((x) => x !== c.k) : [...(form.favori_creneaux ?? []), c.k] })}
+                    className={cn("rounded-full border px-2.5 py-1 text-xs font-medium", active ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground")}>
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* #7 suggestions automatiques d'accompagnement : proposées à la
+             prise de commande juste après l'ajout de cet article. */}
+          {allItems.length > 1 && (
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Suggestions d'accompagnement</div>
+              <div className="flex flex-wrap gap-1.5">
+                {allItems.filter((i) => i.id !== initial.id).map((i) => {
+                  const active = (form.suggestion_ids ?? []).includes(i.id);
+                  return (
+                    <button key={i.id} type="button"
+                      onClick={() => setForm({ ...form, suggestion_ids: active ? (form.suggestion_ids ?? []).filter((x) => x !== i.id) : [...(form.suggestion_ids ?? []), i.id] })}
+                      className={cn("rounded-full border px-2.5 py-1 text-xs font-medium", active ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground")}>
+                      {i.nom}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {modifiers.length > 0 && (
             <div>
