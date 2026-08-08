@@ -17,11 +17,11 @@ function useOrganizationId() {
 export type RestoZone = {
   id: string; organization_id: string; nom: string; ordre: number; created_at: string;
 };
-export type TableStatut = "libre" | "occupee" | "reservee" | "nettoyage";
+export type TableStatut = "libre" | "occupee" | "reservee" | "nettoyage" | "arrivee" | "en_cours" | "addition_demandee";
 export type RestoTable = {
   id: string; organization_id: string; zone_id: string | null; numero: string;
   capacite: number; statut: TableStatut; position_x: number; position_y: number;
-  created_at: string;
+  created_at: string; statut_changed_at: string;
   zone?: RestoZone | null;
 };
 export type RestoMenuCategory = {
@@ -110,7 +110,9 @@ export function useUpdateRestoTableStatut() {
   const organizationId = useOrganizationId(); const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, statut }: { id: string; statut: TableStatut }) => {
-      const { error } = await supabase.from("resto_tables").update({ statut }).eq("id", id);
+      // #12 (Round 3 Phase C) : statut_changed_at réinitialisé à chaque
+      // changement, base de la minuterie visuelle sur le plan de salle.
+      const { error } = await supabase.from("resto_tables").update({ statut, statut_changed_at: new Date().toISOString() }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["resto_tables", organizationId] }),
@@ -313,6 +315,7 @@ export type CourseStatut = "brouillon" | "envoyee" | "en_preparation" | "pret" |
 export type RestoOrder = {
   id: string; organization_id: string; table_id: string | null; type: OrderType;
   statut: OrderStatut; server_id: string | null; created_at: string; closed_at: string | null;
+  table_ids_extra: string[];
   table?: RestoTable | null;
 };
 export type ChosenModifier = { option_id: string; nom: string; impact_prix: number };
@@ -472,6 +475,26 @@ export function useUpdateRestoOrderItemNotes() {
       if (error) throw error;
     },
     onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["resto_order_items", vars.orderId] }),
+  });
+}
+// #11 (Round 3 Phase C) : transfert d'articles entre tables — RPC dédiée
+// (migration 098), invalide les deux commandes (source et cible) puisque
+// leurs listes d'articles changent toutes les deux.
+export function useTransferRestoOrderItems() {
+  const organizationId = useOrganizationId(); const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ itemIds, targetOrderId }: { itemIds: string[]; targetOrderId: string; sourceOrderId: string }) => {
+      if (!organizationId) throw new Error("Aucune organisation sélectionnée");
+      const { error } = await supabase.rpc("transfer_resto_order_items", {
+        p_organization_id: organizationId, p_item_ids: itemIds, p_target_order_id: targetOrderId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["resto_order_items", vars.sourceOrderId] });
+      qc.invalidateQueries({ queryKey: ["resto_order_items", vars.targetOrderId] });
+      qc.invalidateQueries({ queryKey: ["resto_orders", organizationId] });
+    },
   });
 }
 export function useUpdateRestoOrderItemStatut() {

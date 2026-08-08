@@ -3748,10 +3748,15 @@ create table if not exists public.resto_tables (
   zone_id uuid references public.resto_zones(id) on delete set null,
   numero text not null,
   capacite integer not null default 2 check (capacite > 0),
-  statut text not null default 'libre' check (statut in ('libre', 'occupee', 'reservee', 'nettoyage')),
+  -- Round 3 Phase C (migration 098) : 3 statuts ajoutés (arrivee/en_cours/
+  -- addition_demandee), les 4 d'origine restent inchangés.
+  statut text not null default 'libre' check (statut in ('libre', 'occupee', 'reservee', 'nettoyage', 'arrivee', 'en_cours', 'addition_demandee')),
   position_x numeric(6,2) not null default 0,
   position_y numeric(6,2) not null default 0,
   created_at timestamptz not null default now(),
+  -- Round 3 Phase C (migration 098) : minuterie visuelle — horodatage du
+  -- dernier changement de statut.
+  statut_changed_at timestamptz not null default now(),
   unique (organization_id, numero)
 );
 create index if not exists idx_resto_tables_org on public.resto_tables(organization_id);
@@ -3915,7 +3920,12 @@ create table if not exists public.resto_orders (
   statut text not null default 'ouverte' check (statut in ('ouverte', 'envoyee', 'servie', 'fermee', 'annulee')),
   server_id uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
-  closed_at timestamptz
+  closed_at timestamptz,
+  -- Round 3 Phase C (migration 098) : fusion de tables — table_id reste la
+  -- table principale, table_ids_extra porte les tables fusionnées en plus
+  -- (affichage + statut occupée répercuté), aucune contrainte FK sur
+  -- tableau en Postgres, intégrité assurée côté frontend.
+  table_ids_extra uuid[] not null default '{}'
 );
 create index if not exists idx_resto_orders_org on public.resto_orders(organization_id);
 create index if not exists idx_resto_orders_table on public.resto_orders(table_id);
@@ -4167,6 +4177,56 @@ end;
 $$;
 revoke all on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb, uuid) from public;
 grant execute on function public.add_resto_order_item(uuid, uuid, uuid, numeric, jsonb, uuid) to authenticated;
+
+-- transfer_resto_order_items() (Round 3 Phase C, migration 098) : RPC
+-- dédiée plutôt qu'un UPDATE direct — déplacer un article implique de
+-- (re)créer une étape par défaut dans la commande cible si besoin (même
+-- logique que add_resto_order_item() ci-dessus), et de vérifier que les
+-- deux commandes sont bien ouvertes et de la même organisation.
+create or replace function public.transfer_resto_order_items(
+  p_organization_id uuid,
+  p_item_ids uuid[],
+  p_target_order_id uuid
+) returns setof public.resto_order_items
+language plpgsql security definer set search_path = public as $$
+declare
+  v_target public.resto_orders;
+  v_course public.resto_order_courses;
+  v_item_id uuid;
+begin
+  if not public.has_module_permission(p_organization_id, 'resto_commandes', 'manage') then
+    raise exception 'Accès refusé.';
+  end if;
+  if p_item_ids is null or array_length(p_item_ids, 1) is null then
+    raise exception 'Aucun article sélectionné.';
+  end if;
+
+  select * into v_target from public.resto_orders where id = p_target_order_id and organization_id = p_organization_id;
+  if not found then raise exception 'Commande de destination introuvable.'; end if;
+  if v_target.statut in ('fermee', 'annulee') then
+    raise exception 'Impossible de transférer vers une commande fermée ou annulée.';
+  end if;
+
+  select * into v_course from public.resto_order_courses
+    where order_id = p_target_order_id and ordre = 1 order by created_at limit 1;
+  if not found then
+    insert into public.resto_order_courses (organization_id, order_id, ordre, statut)
+    values (p_organization_id, p_target_order_id, 1, 'brouillon')
+    returning * into v_course;
+  end if;
+
+  foreach v_item_id in array p_item_ids loop
+    update public.resto_order_items
+      set order_id = p_target_order_id, course_id = v_course.id
+      where id = v_item_id and organization_id = p_organization_id and statut_ligne <> 'annulee'
+        and order_id in (select id from public.resto_orders where organization_id = p_organization_id and statut not in ('fermee', 'annulee'));
+  end loop;
+
+  return query select * from public.resto_order_items where id = any(p_item_ids) and order_id = p_target_order_id;
+end;
+$$;
+revoke all on function public.transfer_resto_order_items(uuid, uuid[], uuid) from public;
+grant execute on function public.transfer_resto_order_items(uuid, uuid[], uuid) to authenticated;
 
 -- send_resto_course() (migration 043) : déclenchement explicite d'un envoi
 -- en cuisine par le serveur — security definer (écrit
