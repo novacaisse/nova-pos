@@ -1,0 +1,47 @@
+-- Migration 095 — Cause racine, niveau projet : retire le privilège EXECUTE
+-- par défaut accordé à `anon` sur toute future fonction de `public`.
+-- AUDIT_ANON_RPC_2026-08.md, action #4.
+--
+-- Constat de l'audit (pg_default_acl) : ce projet Supabase a, depuis sa
+-- création (configuration plateforme, pas une migration de ce dépôt) :
+--   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS
+--   TO anon, authenticated, service_role;
+-- Conséquence : le pattern `revoke all on function ... from public; grant
+-- execute ... to authenticated;`, utilisé dans TOUTES les migrations de ce
+-- dépôt depuis le début, n'a jamais suffi à exclure `anon` — ce revoke ne
+-- retire que le privilège hérité du pseudo-rôle PUBLIC, jamais celui
+-- qu'`anon` reçoit nommément par ce default ACL. Chaque nouvelle fonction
+-- SECURITY DEFINER créée depuis a donc été EXECUTE-able par anon par
+-- défaut, sauf discipline manuelle d'un `revoke ... from anon` explicite
+-- (fait au cas par cas depuis, jamais garanti par défaut).
+--
+-- Ce que fait cette migration : change uniquement le DEFAULT appliqué aux
+-- fonctions créées APRÈS son exécution — comportement documenté de
+-- `ALTER DEFAULT PRIVILEGES` (voir doc Postgres : « no effect on already-
+-- existing objects »). Aucune fonction existante n'est modifiée par cette
+-- migration ; les GRANT/REVOKE déjà en place sur chaque fonction (dont ceux
+-- des migrations 080/081/093/094 ci-dessus) restent inchangés, qu'elle
+-- soit exécutée avant ou après.
+--
+-- Vérification faite avant d'écrire cette migration (demandée
+-- explicitement, cf. AUDIT_ANON_RPC_2026-08.md action #4) : les 2 seules
+-- fonctions du projet volontairement appelables par anon,
+-- resto_public_organization_info(text) et resto_public_create_reservation
+-- (text, text, text, timestamptz, integer, text) — widget de réservation
+-- ZegResto public, sans session — ont chacune un GRANT EXECUTE ... TO anon
+-- explicite et nommé sur la fonction elle-même (db/schema.sql, pas hérité
+-- du default ACL). Un changement du DEFAULT ne touche jamais un GRANT déjà
+-- posé explicitement sur un objet existant : ces deux fonctions continuent
+-- de fonctionner sans aucune modification, avant et après cette migration.
+--
+-- Implication pour tout code futur : toute NOUVELLE fonction security
+-- definer qui doit rester accessible sans session (cas ZegResto public, ou
+-- futur besoin similaire) devra désormais ajouter explicitement
+-- `grant execute on function ... to anon;` après sa création — ce n'est
+-- plus donné par défaut. C'est précisément l'effet recherché : le défaut
+-- devient "authenticated only", l'exception publique doit être un choix
+-- actif et visible dans la migration qui la crée, pas un oubli silencieux.
+--
+-- Présentée pour relecture — NE PAS exécuter automatiquement.
+
+alter default privileges in schema public revoke execute on functions from anon;

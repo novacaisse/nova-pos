@@ -6,6 +6,22 @@
 
 create extension if not exists "pgcrypto";
 
+-- Cause racine identifiée par AUDIT_ANON_RPC_2026-08.md, corrigée par la
+-- migration 095 : Supabase pose par défaut, à la création du projet,
+-- `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO
+-- anon, authenticated, service_role` — ce qui rend TOUTE nouvelle fonction
+-- exécutable par `anon` par défaut, indépendamment du `revoke all ... from
+-- public` que chaque migration de ce dépôt applique (celui-ci ne retire
+-- que le privilège hérité du pseudo-rôle PUBLIC, jamais celui accordé
+-- nommément à anon). La ligne suivante réinitialise ce défaut pour qu'une
+-- installation fraîche démarre "authenticated only" dès la première
+-- fonction créée. Toute fonction volontairement publique (ex.
+-- resto_public_organization_info/resto_public_create_reservation,
+-- widget ZegResto sans session) doit donc ajouter explicitement
+-- `grant execute on function ... to anon;` après sa création — voir ces
+-- deux fonctions plus bas pour l'exemple.
+alter default privileges in schema public revoke execute on functions from anon;
+
 -- =============== ENUMS ===============
 -- front_desk/housekeeping (migration 020f, ZegHotel) — owner/manager/accountant
 -- sont partagés entre ZegCaisse et ZegHotel, cashier/stock restent spécifiques
@@ -177,9 +193,26 @@ $$;
 -- Recherche d'utilisateur par email pour le flux d'invitation Équipe — ne
 -- renvoie que l'UUID, rien d'autre de auth.users. Voir
 -- db/migrations/004_find_user_by_email.sql pour le détail et les limites.
+-- Mise à jour par la migration 093 (défense en profondeur, suite à
+-- AUDIT_ANON_RPC_2026-08.md) : passage de `language sql` à `language
+-- plpgsql` pour porter un contrôle interne (`raise exception` n'existe
+-- qu'en PL/pgSQL) en plus du revoke ci-dessous — un oubli de GRANT futur
+-- ou une régression du default ACL du projet ne suffirait alors plus à
+-- réexposer l'énumération d'emails. auth.role() = 'service_role' est
+-- explicitement excepté : seul appelant légitime, create-team-member
+-- (Bloc 14, Edge Function), invoque cette RPC avec la clé service_role
+-- sans en-tête Authorization utilisateur (donc auth.uid() y est NULL
+-- aussi, comme pour anon — auth.role() est le seul signal qui distingue
+-- les deux cas).
 create or replace function public.find_user_id_by_email(_email text)
-returns uuid language sql stable security definer set search_path = public as $$
-  select id from auth.users where lower(email) = lower(_email) limit 1;
+returns uuid
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Non authentifié.';
+  end if;
+  return (select id from auth.users where lower(email) = lower(_email) limit 1);
+end;
 $$;
 revoke all on function public.find_user_id_by_email(text) from public;
 grant execute on function public.find_user_id_by_email(text) to authenticated;
