@@ -23,7 +23,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, X, Loader2, Receipt, CheckCircle2, Ban, Utensils, CreditCard, Smartphone, Wallet, Users,
-  Search, Send, ChefHat, Image as ImageIcon, Circle, Gift, Star, Mic, Copy, Zap, Sparkles,
+  Search, Send, ChefHat, Image as ImageIcon, Circle, Gift, Star, Mic, Copy, Zap, Sparkles, ArrowLeftRight,
 } from "lucide-react";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useFormatMoney, useMyRole } from "@/lib/data/hooks";
@@ -37,9 +37,9 @@ import {
   useSetRestoBillSplitItems, useAddRestoBillPayment,
   useRestoOrderCourses, useCreateRestoOrderCourse, useSendRestoCourse, useMarkRestoCourseServed,
   useRestoSettings, RESTO_SETTINGS_DEFAULTS, useRestoLoyaltyAccountByPhone, useApplyRestoBillLoyalty,
-  useRestoStockAlerts, useUpdateRestoOrderItemNotes,
+  useRestoStockAlerts, useUpdateRestoOrderItemNotes, useTransferRestoOrderItems,
   type RestoOrder, type OrderType, type ChosenModifier, type KitchenTicketStatut, type SplitMode, type PaymentMethode,
-  type RestoOrderItem, type RestoOrderCourse, type RestoKitchenTicket, type RestoMenuItem, type RestoBill, type MenuCreneau,
+  type RestoOrderItem, type RestoOrderCourse, type RestoKitchenTicket, type RestoMenuItem, type RestoBill, type MenuCreneau, type RestoTable,
 } from "@/lib/data/restoHooks";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +60,13 @@ export const Route = createFileRoute("/app/resto/commandes")({
 });
 
 const TYPE_LABEL: Record<OrderType, string> = { salle: "Sur place", emporter: "À emporter", livraison: "Livraison" };
+// #9 fusion de tables : "Table 4+5" si des tables supplémentaires sont
+// fusionnées, sinon comportement inchangé.
+function tableLabel(order: RestoOrder, tables: RestoTable[]) {
+  if (order.type !== "salle") return TYPE_LABEL[order.type];
+  const numeros = [order.table?.numero, ...order.table_ids_extra.map((id) => tables.find((t) => t.id === id)?.numero)].filter(Boolean);
+  return numeros.length > 0 ? `Table ${numeros.join("+")}` : "Table ?";
+}
 const TICKET_LABEL: Record<KitchenTicketStatut, string> = { en_attente: "En attente", en_preparation: "En préparation", pret: "Prêt à servir" };
 const TICKET_COLOR: Record<KitchenTicketStatut, string> = {
   en_attente: "bg-muted text-muted-foreground",
@@ -171,6 +178,7 @@ function OrderRailCard({ order, active, onClick }: { order: RestoOrder; active: 
   const formatMoney = useFormatMoney();
   const { data: items = [] } = useRestoOrderItems(order.id);
   const { data: tickets = [] } = useRestoOrderKitchenTickets(order.id);
+  const { data: tables = [] } = useRestoTables();
   const total = items.filter((i) => i.statut_ligne !== "annulee").reduce((s, i) => s + i.prix_unitaire * i.quantite, 0);
   const ready = tickets.some((t) => t.statut === "pret");
   const inKitchen = !ready && tickets.some((t) => t.statut === "en_attente" || t.statut === "en_preparation");
@@ -181,7 +189,7 @@ function OrderRailCard({ order, active, onClick }: { order: RestoOrder; active: 
         active ? "border-primary bg-primary/10" : "border-border bg-card hover:border-primary/40")}>
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">{order.type === "salle" ? `Table ${order.table?.numero ?? "?"}` : TYPE_LABEL[order.type]}</div>
+          <div className="truncate text-sm font-semibold">{tableLabel(order, tables)}</div>
           <div className="text-xs text-muted-foreground">{items.length} art. · {formatMoney(total)}</div>
         </div>
         {ready && <span className="grid h-2.5 w-2.5 shrink-0 place-items-center"><Circle className="h-2.5 w-2.5 fill-success text-success" /></span>}
@@ -191,12 +199,75 @@ function OrderRailCard({ order, active, onClick }: { order: RestoOrder; active: 
   );
 }
 
+// #11 transfert d'articles entre tables — sélection des lignes à déplacer
+// + commande de destination (une autre commande ouverte, salle ou non).
+function TransferItemsModal({ sourceOrder, items, onClose, onError }: {
+  sourceOrder: RestoOrder; items: RestoOrderItem[]; onClose: () => void; onError: (e: string | null) => void;
+}) {
+  const { data: orders = [] } = useRestoOrders(false);
+  const { data: tables = [] } = useRestoTables();
+  const transfer = useTransferRestoOrderItems();
+  const targets = orders.filter((o) => o.id !== sourceOrder.id);
+  const [targetOrderId, setTargetOrderId] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const toggle = (id: string) => setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+
+  const submit = async () => {
+    onError(null);
+    if (!targetOrderId || selected.length === 0) { onError("Choisissez une commande de destination et au moins un article."); return; }
+    try {
+      await transfer.mutateAsync({ itemIds: selected, targetOrderId, sourceOrderId: sourceOrder.id });
+      onClose();
+    } catch (e: any) { onError(e?.message ?? "Erreur inconnue"); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-foreground/60 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-card shadow-elegant">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="font-display text-lg font-bold">Transférer des articles</div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 space-y-3 overflow-y-auto p-5">
+          {targets.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">Aucune autre commande ouverte pour l'instant.</div>
+          ) : (
+            <select value={targetOrderId} onChange={(e) => setTargetOrderId(e.target.value)}
+              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary">
+              <option value="">Commande de destination…</option>
+              {targets.map((o) => <option key={o.id} value={o.id}>{tableLabel(o, tables)}</option>)}
+            </select>
+          )}
+          <div className="space-y-1.5">
+            {items.map((it) => (
+              <label key={it.id} className="flex items-center gap-2 rounded-lg border border-border/60 p-2 text-sm">
+                <input type="checkbox" checked={selected.includes(it.id)} onChange={() => toggle(it.id)} className="h-4 w-4 rounded border-border" />
+                {it.quantite}× {it.menu_item?.nom ?? "Article"}
+              </label>
+            ))}
+          </div>
+          <button onClick={submit} disabled={transfer.isPending || targets.length === 0}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">
+            {transfer.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />} Transférer {selected.length > 0 ? `(${selected.length})` : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NewOrderModal({ onClose, onCreated }: { onClose: () => void; onCreated: (o: RestoOrder) => void }) {
   const { data: tables = [] } = useRestoTables();
   const upsert = useUpsertRestoOrder();
   const updateTableStatut = useUpdateRestoTableStatut();
   const [type, setType] = useState<OrderType>("salle");
   const [tableId, setTableId] = useState("");
+  // #9 fusion de tables : tables supplémentaires fusionnées à la table
+  // principale (grande tablée répartie sur plusieurs tables physiques) —
+  // purement informatif/affichage, table_id reste la table de référence
+  // pour tout le reste du code (RLS, requêtes existantes inchangées).
+  const [extraTableIds, setExtraTableIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   // #3 duplication rapide d'une commande précédente : deuxième onglet dans
   // la même modale plutôt qu'un écran séparé — le choix table/type reste
@@ -206,11 +277,17 @@ function NewOrderModal({ onClose, onCreated }: { onClose: () => void; onCreated:
 
   const create = async () => {
     if (type === "salle" && !tableId) { setError("Sélectionnez une table."); return null; }
-    const order = await upsert.mutateAsync({ type, table_id: type === "salle" ? tableId : null, statut: "ouverte" });
+    const order = await upsert.mutateAsync({
+      type, table_id: type === "salle" ? tableId : null, statut: "ouverte",
+      table_ids_extra: type === "salle" ? extraTableIds : [],
+    });
     // Convenance UI uniquement (pas de trigger DB) : une commande sur
-    // place occupe la table si elle était libre/réservée.
-    const table = tables.find((t) => t.id === tableId);
-    if (type === "salle" && table && table.statut !== "occupee") updateTableStatut.mutate({ id: tableId, statut: "occupee" });
+    // place occupe la table (et les tables fusionnées) si elles n'étaient
+    // pas déjà occupées.
+    for (const id of type === "salle" ? [tableId, ...extraTableIds] : []) {
+      const table = tables.find((t) => t.id === id);
+      if (table && table.statut !== "occupee") updateTableStatut.mutate({ id, statut: "occupee" });
+    }
     return order;
   };
 
@@ -249,11 +326,33 @@ function NewOrderModal({ onClose, onCreated }: { onClose: () => void; onCreated:
             ))}
           </div>
           {type === "salle" && (
-            <select value={tableId} onChange={(e) => setTableId(e.target.value)}
-              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary">
-              <option value="">Sélectionner une table…</option>
-              {tables.map((t) => <option key={t.id} value={t.id}>Table {t.numero} ({t.capacite} couverts) — {t.statut}</option>)}
-            </select>
+            <>
+              <select value={tableId} onChange={(e) => { setTableId(e.target.value); setExtraTableIds([]); }}
+                className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary">
+                <option value="">Sélectionner une table…</option>
+                {tables.map((t) => <option key={t.id} value={t.id}>Table {t.numero} ({t.capacite} couverts) — {t.statut}</option>)}
+              </select>
+              {/* #9 fusion de tables : n'affiche les tables à fusionner
+                 qu'une fois la table principale choisie, pour ne pas
+                 encombrer le cas courant (une seule table). */}
+              {tableId && tables.length > 1 && (
+                <div>
+                  <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Fusionner avec (optionnel)</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {tables.filter((t) => t.id !== tableId).map((t) => {
+                      const active = extraTableIds.includes(t.id);
+                      return (
+                        <button key={t.id} type="button"
+                          onClick={() => setExtraTableIds((ids) => active ? ids.filter((x) => x !== t.id) : [...ids, t.id])}
+                          className={cn("rounded-full border px-2.5 py-1 text-xs font-medium", active ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground")}>
+                          Table {t.numero}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
           )}
           {error && <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive">{error}</div>}
           {mode === "nouvelle" ? (
@@ -346,10 +445,12 @@ function OrderWorkspace({ order }: { order: RestoOrder }) {
   const { data: items = [] } = useRestoOrderItems(order.id);
   const { data: courses = [] } = useRestoOrderCourses(order.id);
   const { data: bill } = useRestoBill(order.id);
+  const { data: tables = [] } = useRestoTables();
   const cancelOrder = useUpsertRestoOrder();
   const [activeCourseId, setActiveCourseId] = useState<string | null>(null);
   const [tab, setTab] = useState<"menu" | "panier">("menu");
   const [billing, setBilling] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const [pickingModifiers, setPickingModifiers] = useState<RestoMenuItem | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -391,11 +492,19 @@ function OrderWorkspace({ order }: { order: RestoOrder }) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4">
         <div>
-          <div className="font-display text-lg font-bold">{order.type === "salle" ? `Table ${order.table?.numero ?? "?"}` : TYPE_LABEL[order.type]}</div>
+          <div className="font-display text-lg font-bold">{tableLabel(order, tables)}</div>
           <div className="text-xs text-muted-foreground">{items.filter((i) => i.statut_ligne !== "annulee").length} article(s) · {formatMoney(total)}</div>
         </div>
         {!closed ? (
           <div className="flex items-center gap-2">
+            {/* #11 transfert d'articles entre tables : seulement si une
+               autre commande en salle est ouverte en parallèle. */}
+            {items.some((i) => i.statut_ligne !== "annulee") && (
+              <button onClick={() => setTransferring(true)}
+                className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:bg-muted">
+                <ArrowLeftRight className="h-4 w-4" /> Transférer
+              </button>
+            )}
             <button onClick={() => setBilling(true)} disabled={items.length === 0}
               className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground disabled:opacity-40">
               <Receipt className="h-4 w-4" /> Facturer
@@ -449,6 +558,10 @@ function OrderWorkspace({ order }: { order: RestoOrder }) {
           onClose={() => setPickingModifiers(null)} onError={setError} />
       )}
       {billing && <BillModal orderId={order.id} items={items} existingBill={bill ?? null} onClose={() => setBilling(false)} />}
+      {transferring && (
+        <TransferItemsModal sourceOrder={order} items={items.filter((i) => i.statut_ligne !== "annulee")}
+          onClose={() => setTransferring(false)} onError={setError} />
+      )}
     </div>
   );
 }
