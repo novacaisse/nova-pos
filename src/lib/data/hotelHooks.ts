@@ -1113,6 +1113,52 @@ export function useHotelPaymentsInRange(rangeStart: string, rangeEnd: string) {
     },
   });
 }
+
+// Répertoire complet des paiements ZegHotel (module Paiements, correctif
+// "les paiements caisse/réception n'apparaissent pas — je ne parle pas de
+// Money Fusion ici") : hotel_payments (acomptes/règlements/remboursements
+// encaissés par la réception sur un séjour) n'a pas de colonne nom client —
+// jointure folio -> réservation -> hotel_guest_contact() (pas un embed
+// direct sur hotel_guests, RLS restreint cette table à front_desk/manager/
+// owner — même contournement que useHotelActiveFolios ci-dessus).
+export type HotelFolioPaymentRow = HotelPayment & { guest_name: string | null };
+export function useHotelFolioPaymentsList(limit = 300) {
+  const organizationId = useOrganizationId();
+  return useQuery({
+    queryKey: ["hotel_folio_payments_list", organizationId, limit],
+    enabled: !!organizationId,
+    queryFn: async (): Promise<HotelFolioPaymentRow[]> => {
+      const { data: payments, error } = await supabase.from("hotel_payments")
+        .select("*").eq("organization_id", organizationId!)
+        .order("created_at", { ascending: false }).limit(limit);
+      if (error) throw error;
+      const rows = (payments ?? []) as HotelPayment[];
+      if (!rows.length) return [];
+
+      const folioIds = [...new Set(rows.map((p) => p.folio_id))];
+      const { data: folios, error: folioErr } = await supabase.from("hotel_folios")
+        .select("id, reservation_id").in("id", folioIds);
+      if (folioErr) throw folioErr;
+      const reservationIdByFolio = new Map((folios ?? []).map((f: any) => [f.id, f.reservation_id as string]));
+      const reservationIds = [...new Set((folios ?? []).map((f: any) => f.reservation_id as string))];
+
+      const [{ data: reservations, error: resErr }, { data: guestContacts, error: guestErr }] = await Promise.all([
+        supabase.from("hotel_reservations").select("id, guest_id").in("id", reservationIds),
+        supabase.rpc("hotel_guest_contact", { _organization_id: organizationId! }),
+      ]);
+      if (resErr) throw resErr;
+      if (guestErr) throw guestErr;
+      const guestIdByReservation = new Map((reservations ?? []).map((r: any) => [r.id as string, r.guest_id as string]));
+      const guestNameById = new Map(((guestContacts ?? []) as HotelGuestContact[]).map((g) => [g.id, g.full_name]));
+
+      return rows.map((p) => {
+        const reservationId = reservationIdByFolio.get(p.folio_id);
+        const guestId = reservationId ? guestIdByReservation.get(reservationId) : undefined;
+        return { ...p, guest_name: guestId ? guestNameById.get(guestId) ?? null : null };
+      });
+    },
+  });
+}
 // Charges "extra" (hors chambre) sur la période — pourboire de room
 // service, minibar, blanchisserie… posées directement sur les folios
 // (post_hotel_pos_charge notamment, migration 033) : jusqu'ici invisibles

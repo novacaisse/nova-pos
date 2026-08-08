@@ -3064,14 +3064,23 @@ grant execute on function public.hotel_check_rate_restrictions(uuid, uuid, date,
 -- RLS hotel_reservations_insert/hotel_resv_rooms_write/hotel_folios_write
 -- s'appliquent normalement.
 --
--- Nuitée ET horaire (ZegHotel Phase 1, migration 028) : billing_unit et
--- hourly_rate sont dérivés de la formule tarifaire choisie (p_rate_plan_id)
--- — p_check_in_at/p_check_out_at (heures prévues) sont alors requis. Pour
--- une réservation horaire, check_out (date) est forcé à check_in (même
--- jour), et le tarif est estimé (arrondi à l'heure supérieure, 1h minimum)
--- pour affichage seulement : le montant réel est recalculé et posté au
+-- Nuitée ET horaire (ZegHotel Phase 1, migration 028) : p_check_in_at/
+-- p_check_out_at (heures prévues) requis pour le mode horaire. Pour une
+-- réservation horaire, check_out (date) est forcé à check_in (même jour),
+-- et le tarif est estimé (arrondi à l'heure supérieure, 1h minimum) pour
+-- affichage seulement : le montant réel est recalculé et posté au
 -- check-out à partir de la durée effective (voir useCheckOutReservation
--- côté client).
+-- côté client). Mise à jour par la migration 092 : le mode horaire n'est
+-- plus conditionné à la seule formule tarifaire choisie (p_rate_plan_id)
+-- — un établissement qui configure uniquement le tarif horaire du TYPE de
+-- chambre (hotel_room_types.hourly_rate/custom_hourly_rates, migration
+-- 087) sans jamais créer de formule tarifaire dédiée n'avait alors aucun
+-- moyen de déclencher le mode horaire. billing_unit devient 'hour' dès que
+-- p_check_in_at ET p_check_out_at sont fournis (la formule tarifaire, si
+-- choisie, ne sert plus qu'à fournir un hourly_rate de repli) ; le
+-- hourly_rate figé par chambre (dépassement facturé au check-out) tombe
+-- en repli sur le tarif horaire du type de chambre quand la formule
+-- tarifaire n'en fournit pas.
 create or replace function public.create_hotel_reservation(
   p_organization_id uuid,
   p_guest_id uuid,
@@ -3096,6 +3105,7 @@ declare
   v_rate numeric(14,2);
   v_billing_unit text := 'night';
   v_hourly_rate numeric(14,2);
+  v_room_hourly_rate numeric(14,2);
   v_billed_hours numeric;
 begin
   if p_rooms is null or jsonb_array_length(p_rooms) = 0 then
@@ -3106,6 +3116,10 @@ begin
     select billing_unit, hourly_rate into v_billing_unit, v_hourly_rate
     from public.hotel_rate_plans where id = p_rate_plan_id;
     v_billing_unit := coalesce(v_billing_unit, 'night');
+  end if;
+
+  if p_check_in_at is not null and p_check_out_at is not null then
+    v_billing_unit := 'hour';
   end if;
 
   if v_billing_unit = 'hour' and (p_check_in_at is null or p_check_out_at is null or p_check_out_at <= p_check_in_at) then
@@ -3137,17 +3151,25 @@ begin
     v_room_id := (v_room->>'room_id')::uuid;
     select room_type_id into v_room_type_id from public.hotel_rooms where id = v_room_id;
 
+    v_room_hourly_rate := null;
+    if v_billing_unit = 'hour' then
+      v_room_hourly_rate := v_hourly_rate;
+      if v_room_hourly_rate is null then
+        select hourly_rate into v_room_hourly_rate from public.hotel_room_types where id = v_room_type_id;
+      end if;
+    end if;
+
     if (v_room ? 'rate_amount') and (v_room->>'rate_amount') is not null then
       v_rate := (v_room->>'rate_amount')::numeric;
     elsif v_billing_unit = 'hour' then
       v_billed_hours := greatest(1, ceil(extract(epoch from (p_check_out_at - p_check_in_at)) / 3600.0));
-      v_rate := round(v_billed_hours * v_hourly_rate, 2);
+      v_rate := round(v_billed_hours * coalesce(v_room_hourly_rate, 0), 2);
     else
       v_rate := public.hotel_compute_room_rate(v_room_type_id, p_check_in, p_check_out, p_rate_plan_id);
     end if;
 
     insert into public.hotel_reservation_rooms (organization_id, reservation_id, room_id, rate_amount, hourly_rate)
-    values (p_organization_id, v_reservation.id, v_room_id, v_rate, case when v_billing_unit = 'hour' then v_hourly_rate else null end);
+    values (p_organization_id, v_reservation.id, v_room_id, v_rate, v_room_hourly_rate);
   end loop;
 
   insert into public.hotel_folios (organization_id, reservation_id) values (p_organization_id, v_reservation.id);
